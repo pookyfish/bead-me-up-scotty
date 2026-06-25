@@ -365,6 +365,43 @@ html[data-theme="rose-pine"] {
 .bd-md th, .bd-md td { border: 1px solid var(--border); padding: 4px 8px; text-align: left; }
 .bd-md hr { margin: 0.9em 0; border: none; border-top: 1px solid var(--border); }
 
+/* Syntax highlighting for fenced code blocks (rehype-highlight / highlight.js),
+   scoped to bead markdown. Token colors are theme-aware: a GitHub-light palette
+   by default, swapped to GitHub-dark whenever the `.dark` class is active (which
+   covers every custom dark theme too). Bead 5ov. */
+.bd-md {
+  --hl-comment: #6a737d;
+  --hl-keyword: #d73a49;
+  --hl-string: #032f62;
+  --hl-title: #6f42c1;
+  --hl-number: #005cc5;
+  --hl-attr: #e36209;
+  --hl-tag: #22863a;
+}
+.dark .bd-md {
+  --hl-comment: #8b949e;
+  --hl-keyword: #ff7b72;
+  --hl-string: #a5d6ff;
+  --hl-title: #d2a8ff;
+  --hl-number: #79c0ff;
+  --hl-attr: #ffa657;
+  --hl-tag: #7ee787;
+}
+.bd-md .hljs-comment, .bd-md .hljs-quote { color: var(--hl-comment); font-style: italic; }
+.bd-md .hljs-keyword, .bd-md .hljs-selector-tag, .bd-md .hljs-built_in,
+.bd-md .hljs-literal, .bd-md .hljs-doctag { color: var(--hl-keyword); }
+.bd-md .hljs-string, .bd-md .hljs-regexp, .bd-md .hljs-meta .hljs-string { color: var(--hl-string); }
+.bd-md .hljs-title, .bd-md .hljs-title.class_, .bd-md .hljs-title.function_,
+.bd-md .hljs-section { color: var(--hl-title); }
+.bd-md .hljs-number, .bd-md .hljs-variable, .bd-md .hljs-template-variable,
+.bd-md .hljs-symbol, .bd-md .hljs-bullet { color: var(--hl-number); }
+.bd-md .hljs-attr, .bd-md .hljs-attribute, .bd-md .hljs-type,
+.bd-md .hljs-params, .bd-md .hljs-meta { color: var(--hl-attr); }
+.bd-md .hljs-tag, .bd-md .hljs-name, .bd-md .hljs-selector-id,
+.bd-md .hljs-selector-class { color: var(--hl-tag); }
+.bd-md .hljs-emphasis { font-style: italic; }
+.bd-md .hljs-strong { font-weight: 600; }
+
 /* Brief highlight when jumping to an epic from a bead's detail drawer (bead 55b). */
 @keyframes epicFlash {
   0% { box-shadow: 0 0 0 3px var(--brand); }

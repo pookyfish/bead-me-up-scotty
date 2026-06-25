@@ -1,6 +1,7 @@
 "use client";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
 import { api } from "@/lib/api-client";
 
 /**
@@ -70,6 +71,9 @@ export function DescriptionContent({
       <div className="bd-md">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
+          // Colorize fenced code blocks; `ignoreMissing` keeps unknown languages
+          // from throwing (they fall back to plain text). Themed via .hljs CSS.
+          rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
           // Local single-user tool with trusted content; pass URLs (incl.
           // attachment://) through untouched so the img override can resolve them.
           urlTransform={(url) => url}
