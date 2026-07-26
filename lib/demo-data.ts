@@ -18,6 +18,7 @@ interface Extra {
   created_at?: string;
   updated_at?: string;
   closed_at?: string;
+  close_reason?: string;
   labels?: string[];
   comments?: Comment[];
   blocks?: string[];
@@ -54,6 +55,7 @@ function D(
     created_at: extra.created_at ?? "2026-06-09T10:00:00Z",
     updated_at: extra.updated_at ?? "2026-06-14T15:00:00Z",
     closed_at: status === "closed" ? extra.closed_at ?? "2026-06-15T11:00:00Z" : null,
+    close_reason: status === "closed" ? extra.close_reason ?? "" : "",
     labels: extra.labels ?? [],
     dependencies,
     comments: extra.comments ?? [],
@@ -108,7 +110,7 @@ export function demoBeads(): Bead[] {
     D("bd-44b1", "Decision: Backlog = deferred status", "decision", "closed", 1, "stevey", "stevey", null, { description: "Map the Backlog column to beads' built-in deferred status rather than inventing new schema.", comments: [cm("dana", "Agreed — zero new persisted state, stays correct with bd.", "2026-06-08T16:00:00Z")] }),
     D("bd-8d3e", "Bug: ready queue shows deferred beads", "bug", "open", 0, "claude-agent", "stevey", null, { description: "bd ready should exclude deferred; some deferred beads leak into Ready in the UI cache.", related: ["bd-3c71.1"], comments: [cm("claude-agent", "Repro: defer a bead, it stays in Ready until refetch.", "2026-06-16T08:00:00Z")] }),
     D("bd-2f9c", "Bug: drag-drop flickers on rollback", "bug", "blocked", 1, "cursor-agent", "cursor-agent", null, { description: "Optimistic move then adapter error causes a visible flicker on rollback.", related: ["bd-b18d.1"] }),
-    D("bd-5a77", "Switch integration to a REST API", "task", "closed", 3, "amp-bot", "amp-bot", null, { description: "Superseded — beads has no HTTP API; we shell out to the CLI.", labels: ["archived"], closed_at: "2026-06-07T10:00:00Z" }),
+    D("bd-5a77", "Switch integration to a REST API", "task", "closed", 3, "amp-bot", "amp-bot", null, { description: "Superseded — beads has no HTTP API; we shell out to the CLI.", labels: ["archived"], closed_at: "2026-06-07T10:00:00Z", close_reason: "Superseded by the CLI adapter approach." }),
 
     // ── Showcase beads for the newer features (Needs-You, checklists, Insights, Achievements) ──
     // Needs-You inbox: agent-escalated decisions (the `human` label, still open).
