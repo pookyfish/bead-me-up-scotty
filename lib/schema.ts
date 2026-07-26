@@ -118,7 +118,7 @@ export const beadSchema = z
     updated_at: z.string().optional(),
     started_at: z.string().optional().nullable(),
     closed_at: z.string().optional().nullable(),
-    close_reason: z.string().optional().default(""),
+    close_reason: z.string().optional().nullable(),
     labels: z.array(z.string()).optional().default([]),
     dependencies: z.array(dependencySchema).optional().default([]),
     comments: z.array(commentSchema).optional().default([]),
