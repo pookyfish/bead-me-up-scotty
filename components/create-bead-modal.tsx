@@ -103,6 +103,23 @@ function CreateForm({
     backlog: false,
   });
 
+  // Display text for the parent picker. Seeded from an incoming preset (e.g.
+  // "Add subtask" / "Add child to this epic") so the field shows what it holds.
+  const parentListId = `parents-${React.useId()}`;
+  const [parentDraft, setParentDraft] = React.useState(() => {
+    if (!parent) return "";
+    const b = beads.find((x) => x.id === parent);
+    return b ? `${b.id} · ${b.title}` : parent;
+  });
+
+  // Resolve type-preset (gh-16) and parent into ONE title rather than nested
+  // ternaries, so the two features compose: "New epic", "New child bug", etc.
+  const dialogTitle = presetType
+    ? `New ${form.parent ? "child " : ""}${typeLabel(presetType).toLowerCase()}`
+    : form.parent
+      ? "New child bead"
+      : "New bead";
+
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) =>
     setForm((f) => ({ ...f, [k]: v }));
 
@@ -129,7 +146,21 @@ function CreateForm({
     onChange: (v) => set("description", v),
   });
 
-  const epics = beads.filter((b) => b.issue_type === "epic");
+  // Any open bead can parent another (bd allows it and createInputSchema/
+  // `bd create --parent` already accept any id) — epics first, since
+  // epic-as-parent stays the common case and must not get harder to reach.
+  const parentOptions = React.useMemo(
+    () =>
+      beads
+        .filter((b) => b.status !== "closed")
+        .sort(
+          (a, b) =>
+            Number(a.issue_type !== "epic") - Number(b.issue_type !== "epic") ||
+            a.priority - b.priority ||
+            a.id.localeCompare(b.id),
+        ),
+    [beads],
+  );
   const assignees = Array.from(
     new Set([actor, ...(beads.map((b) => b.assignee).filter(Boolean) as string[])]),
   );
@@ -193,7 +224,7 @@ function CreateForm({
         </div>
         <div className="flex-1">
           <DialogTitle className="text-[15px] font-[650]">
-            {presetType ? `New ${typeLabel(presetType).toLowerCase()}` : parent ? "New child bead" : "New bead"}
+            {dialogTitle}
           </DialogTitle>
           <DialogDescription className="font-mono text-[11.5px] text-[var(--text-3)]">
             bd create … --json
@@ -335,15 +366,30 @@ function CreateForm({
             </select>
           </label>
           <label className="flex flex-col gap-[6px]">
-            <span className={labelClass}>Parent epic</span>
-            <select className={selectClass} value={form.parent} onChange={(e) => set("parent", e.target.value)}>
-              <option value="">No epic</option>
-              {epics.map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.title}
+            <span className={labelClass}>Parent</span>
+            {/* A datalist-backed input rather than a bare <select>: the option
+                list is now every open bead, which is far too long to scan. The
+                visible text is "<id> · <title> (<type>)" and the id is parsed
+                back out on change, so similar titles stay distinguishable. */}
+            <input
+              list={parentListId}
+              value={parentDraft}
+              onChange={(e) => {
+                const v = e.target.value;
+                setParentDraft(v);
+                const id = v.split(" · ")[0].trim();
+                set("parent", parentOptions.some((b) => b.id === id) ? id : "");
+              }}
+              placeholder="No parent — type to search…"
+              className={`${selectClass} cursor-text`}
+            />
+            <datalist id={parentListId}>
+              {parentOptions.map((b) => (
+                <option key={b.id} value={`${b.id} · ${b.title}`}>
+                  {typeLabel(b.issue_type)}
                 </option>
               ))}
-            </select>
+            </datalist>
           </label>
         </div>
 
