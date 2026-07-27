@@ -32,10 +32,18 @@ import {
   avatarColor,
   initials,
   isBlocked,
+  epicOf,
   relTime,
   fmtDateTime,
 } from "@/lib/beads-view";
 import { type Bead } from "@/lib/schema";
+
+/**
+ * Priority assumed for a bead with no parent epic when breaking ties. Medium, so
+ * an orphan sorts among the children of medium epics rather than being shoved to
+ * either extreme — a judgement call, hence a named constant.
+ */
+const DEFAULT_EPIC_PRIORITY = 2;
 
 function rankOf(order: string[] | undefined, id: string): number {
   if (!order) return Number.POSITIVE_INFINITY;
@@ -44,7 +52,8 @@ function rankOf(order: string[] | undefined, id: string): number {
 }
 
 export function ListView() {
-  const { beads, index, humanAllowlist, openDetail, openCreate, loading, projectId } = useApp();
+  const { beads, index, humanAllowlist, openDetail, openCreate, openEpic, loading, projectId } =
+    useApp();
   const setStatus = useSetStatus();
   const { data: orderData } = useOrder(projectId);
   const setOrder = useSetOrder(projectId);
@@ -86,9 +95,15 @@ export function ListView() {
         const rb = rankOf(order, b.id);
         if (ra !== rb) return ra - rb;
         if (a.priority !== b.priority) return a.priority - b.priority;
+        // Tie-break on the parent epic's priority (gh-18): a medium task under a
+        // high epic outranks a medium task under a low one. Own priority always
+        // wins first, and manual drag rank above still wins over both.
+        const ea = epicOf(a, index)?.priority ?? DEFAULT_EPIC_PRIORITY;
+        const eb = epicOf(b, index)?.priority ?? DEFAULT_EPIC_PRIORITY;
+        if (ea !== eb) return ea - eb;
         return (b.updated_at ?? "").localeCompare(a.updated_at ?? "");
       });
-  }, [beads, filters, showArchived, humanAllowlist, colById, orders]);
+  }, [beads, filters, showArchived, humanAllowlist, colById, orders, index]);
 
   // Per-column counts for the group headers. Derived from `rows` (not `beads`)
   // so the count always matches what is rendered beneath the header once the
@@ -191,6 +206,8 @@ export function ListView() {
                         bead={b}
                         blocked={isBlocked(b, index)}
                         onOpen={() => openDetail(b.id)}
+                        epic={epicOf(b, index)}
+                        onOpenEpic={openEpic}
                         humanAllowlist={humanAllowlist}
                       />
                     </React.Fragment>
@@ -209,11 +226,15 @@ function Row({
   bead,
   blocked,
   onOpen,
+  epic,
+  onOpenEpic,
   humanAllowlist,
 }: {
   bead: Bead;
   blocked: boolean;
   onOpen: () => void;
+  epic: Bead | null;
+  onOpenEpic: (id: string) => void;
   humanAllowlist: string[];
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -271,6 +292,22 @@ function Row({
           {l}
         </span>
       ))}
+      {/* The epic is shown because it now INFLUENCES the sort order (gh-18):
+          a ranking whose reason isn't on screen reads as a bug. */}
+      {epic && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpenEpic(epic.id);
+          }}
+          title={`${epic.title} · P${epic.priority} — jump to this epic`}
+          className="hidden max-w-[150px] flex-shrink-0 items-center gap-[4px] rounded-md border border-border bg-[var(--surface-2)] px-[6px] py-px text-[10.5px] text-[var(--text-3)] hover:border-[var(--brand)] hover:text-[var(--brand)] lg:flex"
+        >
+          <Icon name="target" size={10} className="flex-shrink-0" />
+          <span className="truncate">{epic.title}</span>
+        </button>
+      )}
       <span className="flex-shrink-0">
         <PriorityChip p={bead.priority} />
       </span>
