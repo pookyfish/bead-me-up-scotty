@@ -18,7 +18,17 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
   const { beads, humanAllowlist, openCreate, openDetail } = useApp();
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
   const [hideClosed, setHideClosed] = React.useState(true);
-  const allEpics = beads.filter((b) => b.issue_type === "epic");
+  // Explicitly ordered: open before closed, then priority ascending, then id
+  // for stability. Previously a bare .filter(), so the apparent priority order
+  // was incidental to whatever `bd export` returned.
+  const allEpics = beads
+    .filter((b) => b.issue_type === "epic")
+    .sort(
+      (a, b) =>
+        Number(a.status === "closed") - Number(b.status === "closed") ||
+        a.priority - b.priority ||
+        a.id.localeCompare(b.id),
+    );
   // "Filter out closed" (bead 8vm): hide closed epics (and closed children below).
   // Progress % still counts all children, so it stays accurate. A focused epic —
   // jumped to from a bead's detail drawer (bead 55b) — is always shown.
@@ -88,8 +98,18 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
                 className="overflow-hidden rounded-[14px] border border-border bg-[var(--surface)] shadow-[var(--shadow)]"
               >
                 <div
-                  onClick={() => setExpanded((s) => ({ ...s, [e.id]: !s[e.id] }))}
-                  className="flex cursor-pointer items-center gap-[14px] p-[16px_18px]"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openDetail(e.id)}
+                  onKeyDown={(ev) => {
+                    if (ev.target !== ev.currentTarget) return;
+                    if (ev.key === "Enter" || ev.key === " ") {
+                      ev.preventDefault();
+                      openDetail(e.id);
+                    }
+                  }}
+                  title={`Open ${e.id}`}
+                  className="flex cursor-pointer items-center gap-[14px] p-[16px_18px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
                 >
                   <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] bg-[var(--brand-weak)] text-[var(--brand)]">
                     <Icon name="target" size={19} />
@@ -98,6 +118,7 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
                     <div className="flex items-center gap-[9px]">
                       <span className="font-mono text-[11.5px] text-[var(--text-3)]">{e.id}</span>
                       <StatusChip status={e.status} />
+                      <PriorityChip p={e.priority} />
                     </div>
                     <div className="mt-[3px] text-[15px] font-semibold tracking-[-.01em]">
                       {e.title}
@@ -122,12 +143,28 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
                       />
                     </div>
                   </div>
-                  <Icon
-                    name="chevron"
-                    size={18}
-                    className="text-[var(--text-3)] transition-transform"
-                    style={{ transform: isOpen ? "rotate(180deg)" : "rotate(0deg)" }}
-                  />
+                  {/* The toggle is scoped to the chevron so the row itself can
+                      open details. Kept as a <button> inside a role="button"
+                      div (not a real <button>) to avoid the nested-interactive
+                      regression fixed in a3c1328 / GH #10. */}
+                  <button
+                    type="button"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
+                      setExpanded((st) => ({ ...st, [e.id]: !isOpen }));
+                    }}
+                    aria-expanded={isOpen}
+                    aria-label={isOpen ? `Collapse ${e.id}` : `Expand ${e.id}`}
+                    title={isOpen ? "Collapse children" : "Expand children"}
+                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[8px] text-[var(--text-3)] hover:bg-[var(--surface-2)] hover:text-[var(--text-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
+                  >
+                    <Icon
+                      name="chevron"
+                      size={18}
+                      className="transition-transform"
+                      style={{ transform: isOpen ? "rotate(180deg)" : "rotate(0deg)" }}
+                    />
+                  </button>
                 </div>
 
                 {isOpen && (
