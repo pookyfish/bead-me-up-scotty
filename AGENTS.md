@@ -4,6 +4,49 @@
 This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
 <!-- END:nextjs-agent-rules -->
 
+<!-- This section is project-owned and deliberately sits OUTSIDE the generated
+     Beads blocks below, which `bd setup` may rewrite. If a generated block ever
+     contradicts this section, THIS SECTION WINS. -->
+# Beads data is local-only — never sync it
+
+**Issue data in this repo never leaves the machine it was created on.** This is a
+deliberate choice, not an unfinished setup. Do not "fix" it.
+
+Concretely, never do any of these unless the user explicitly asks in the current
+session:
+
+- `bd dolt remote add …` — do not wire up a Dolt remote
+- `bd dolt push` / `bd dolt pull` — there is nothing to push to and nothing to pull
+- `git push` of anything under `.beads/`
+- un-ignoring `.beads/` in `.gitignore`, or force-adding files inside it
+
+`bd` prints a "no Dolt remote configured" advisory with a `repair:` command that
+adds a remote and pushes. **That advisory is wrong for this repo — ignore it.**
+It is suppressed locally via `dolt.local-only: true` in `.beads/config.yaml`, but
+that file is itself gitignored, so a fresh clone will start nagging again. Re-set
+it rather than following the repair hint:
+
+```bash
+bd config set dolt.local-only true
+```
+
+**Why:** this is a single-maintainer project worked on from one machine. A Dolt
+remote only buys cross-machine sync, which nobody here needs, and pushing issue
+data to a public repo would publish internal planning notes and `bd remember`
+memories alongside the source. External bug reports live in GitHub Issues; beads
+is the private, local work tracker.
+
+**The trade-off, stated plainly:** because `.beads/` is gitignored *and* there is
+no remote, the issue database has **no offsite copy**. If the disk fails, every
+issue, comment and memory is gone. Guard against that with periodic local
+exports, which involve no remote at all:
+
+```bash
+bd export --all -o ~/bd-backups/<project>-$(date +%F).jsonl
+```
+
+Git commits still work normally — this section is only about bead/Dolt data.
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->
 ## Beads Issue Tracker
 
@@ -24,7 +67,7 @@ bd close <id>         # Complete work
 - Run `bd prime` for detailed command reference and session close protocol
 - Use `bd remember` for persistent knowledge — do NOT use MEMORY.md files
 
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
+**Architecture in one line:** issues live in a local Dolt DB and **stay there** — this repo runs local-only, with no Dolt remote and no `refs/dolt/data` sync (see "Beads data is local-only" above, which overrides this block); `.beads/issues.jsonl` is a passive local export and is gitignored.
 
 ## Agent Context Profiles
 
@@ -80,5 +123,5 @@ bd prime                # Refresh Beads context
 - Run `bd prime` when Beads context is missing or stale. Codex 0.129.0+ can load Beads context automatically through native hooks; use `/hooks` to inspect or toggle them.
 - Keep persistent project memory in Beads via `bd remember`; do not create ad hoc memory files.
 
-**Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/SYNC_CONCEPTS.md for details and anti-patterns.
+**Architecture in one line:** issues live in a local Dolt DB and **stay there** — this repo runs local-only, with no Dolt remote and no `refs/dolt/data` sync (see "Beads data is local-only" above, which overrides this block); `.beads/issues.jsonl` is a passive local export and is gitignored.
 <!-- END BEADS CODEX SETUP -->
