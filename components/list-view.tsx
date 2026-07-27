@@ -87,6 +87,18 @@ export function ListView() {
       });
   }, [beads, filters, showArchived, humanAllowlist, colById, orders]);
 
+  // Per-column counts for the group headers. Derived from `rows` (not `beads`)
+  // so the count always matches what is rendered beneath the header once the
+  // filters and the archived toggle have been applied.
+  const countByCol = React.useMemo(() => {
+    const m = new Map<string, number>();
+    for (const b of rows) {
+      const c = colById.get(b.id);
+      if (c) m.set(c, (m.get(c) ?? 0) + 1);
+    }
+    return m;
+  }, [rows, colById]);
+
   function onDragEnd(e: DragEndEvent) {
     const activeId = String(e.active.id);
     const overId = e.over?.id ? String(e.over.id) : null;
@@ -165,6 +177,9 @@ export function ListView() {
                           />
                           <span className="text-[11px] font-semibold uppercase tracking-[.04em] text-[var(--text-3)]">
                             {meta.name}
+                          </span>
+                          <span className="rounded-full border border-border bg-[var(--surface-2)] px-2 py-px font-mono text-[10.5px] text-[var(--text-3)]">
+                            {countByCol.get(col) ?? 0}
                           </span>
                         </div>
                       )}
