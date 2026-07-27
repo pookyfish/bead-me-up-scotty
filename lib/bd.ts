@@ -54,6 +54,13 @@ async function runBdRaw(
     } catch (parseErr) {
       if (parseErr instanceof BdError) throw parseErr;
     }
+    // bd emits the pending-migration block as PLAIN-TEXT stderr, not the JSON
+    // envelope, so it would otherwise fall through uncoded and dump ~200 words
+    // of raw text into a toast. Tag it here so the UI keys off a stable code
+    // rather than string-matching in React. (gastownhall/beads#4259)
+    if (/pending schema migration|BD_ALLOW_REMOTE_MIGRATE|#4259/i.test(stderr)) {
+      throw new BdError(stderr, "schema_migration_required");
+    }
     throw new BdError(stderr || e.message || "bd command failed");
   }
 }

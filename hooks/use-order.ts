@@ -1,6 +1,7 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api-client";
+import { toastError } from "@/components/error-toast";
 
 /** Manual board ordering, scoped per project (stored in app config). */
 export const orderKey = (projectId: string) => ["order", projectId] as const;
@@ -30,8 +31,12 @@ export function useSetOrder(projectId: string) {
       }));
       return { prev };
     },
-    onError: (_e, _v, ctx) => {
+    onError: (err, _v, ctx) => {
+      // Reorder previously failed SILENTLY — the row snapped back with no
+      // explanation, which is exactly the schema-migration symptom a user hits
+      // first. Surface it like every other mutation.
       if (ctx?.prev) qc.setQueryData(KEY, ctx.prev);
+      toastError(err);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: KEY }),
   });

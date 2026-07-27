@@ -16,6 +16,20 @@ export function fail(err: unknown) {
     );
   }
   if (err instanceof BdError) {
+    // A blocked write on a stale schema is a precondition conflict, not a bad
+    // request: the client sent nothing wrong and retrying verbatim will work
+    // once the DB is migrated. The raw bd output rides along as `detail` so the
+    // UI can offer a "show technical details" expander without re-deriving it.
+    if (err.code === "schema_migration_required") {
+      return NextResponse.json(
+        {
+          error: "This project's beads database needs a one-time upgrade.",
+          code: err.code,
+          detail: err.message,
+        },
+        { status: 409 },
+      );
+    }
     // parse_error means bd's output drifted from our schema — a server-side
     // integration failure, not a bad client request.
     const status =

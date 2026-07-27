@@ -5,6 +5,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { toastError } from "@/components/error-toast";
 import { api, type BeadsResponse } from "@/lib/api-client";
 import type { Bead, CreateInput, UpdateInput, DepType } from "@/lib/schema";
 import { useApp } from "@/components/app-context";
@@ -77,7 +78,7 @@ export function useSetStatus() {
     },
     onError: (err, _vars, ctx) => {
       if (ctx?.prev) qc.setQueryData(KEY, ctx.prev);
-      toast.error((err as Error).message);
+      toastError(err);
     },
     onSettled: () => qc.invalidateQueries({ queryKey: KEY }),
   });
@@ -95,7 +96,7 @@ function mutationToast<TArgs, TRes>(
       toast.success(message(args, res));
       qc.invalidateQueries({ queryKey: key });
     },
-    onError: (err: unknown) => toast.error((err as Error).message),
+    onError: (err: unknown) => toastError(err),
   };
 }
 

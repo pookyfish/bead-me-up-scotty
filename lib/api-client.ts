@@ -111,6 +111,24 @@ export interface FsResponse {
 // and lib/self-update.ts can't drift apart. Re-exported here for existing callers.
 export type { UpdateStatus, UpdateStep, UpdateResult } from "./update-types";
 
+/**
+ * An error from the scotty API that preserves the server's machine-stable
+ * `code` and any raw `detail`. The plain `Error` thrown before this dropped
+ * both, so the UI had nothing to key off but the message string.
+ */
+export class ApiError extends Error {
+  code?: string;
+  detail?: string;
+  status: number;
+  constructor(message: string, status: number, code?: string, detail?: string) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.code = code;
+    this.detail = detail;
+  }
+}
+
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
@@ -118,7 +136,13 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   });
   const body = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error((body as { error?: string }).error || `Request failed (${res.status})`);
+    const b = body as { error?: string; code?: string; detail?: string };
+    throw new ApiError(
+      b.error || `Request failed (${res.status})`,
+      res.status,
+      b.code,
+      b.detail,
+    );
   }
   return body as T;
 }
