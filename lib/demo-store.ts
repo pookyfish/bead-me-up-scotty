@@ -54,6 +54,22 @@ export const demoStore: BeadsStore = {
     const b = find(id);
     Object.assign(b, patch, { updated_at: nowIso() });
     if (patch.status === "closed" && !b.closed_at) b.closed_at = nowIso();
+    // Reparenting: mirror bd's semantics (absent = leave alone, "" = detach)
+    // and keep the parent-child EDGE in sync with the field. The rest of the UI
+    // derives hierarchy from the edge — `bd export --json` never emits a
+    // `parent` field — so updating only `b.parent` would look correct in the
+    // drawer and silently do nothing on the board and list.
+    if (patch.parent !== undefined) {
+      b.parent = patch.parent || null;
+      b.dependencies = (b.dependencies ?? []).filter((d) => d.type !== "parent-child");
+      if (patch.parent) {
+        b.dependencies.push({
+          issue_id: b.id,
+          depends_on_id: patch.parent,
+          type: "parent-child",
+        });
+      }
+    }
     return { ...b };
   },
   async setStatus(id, status, actor, reason) {

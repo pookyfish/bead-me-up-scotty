@@ -175,6 +175,14 @@ export const updateInputSchema = z.object({
    * Absent means "leave labels alone"; `[]` means "clear them".
    */
   labels: z.array(z.string()).optional(),
+  /**
+   * New parent issue id. Mirrors `bd update --parent` semantics exactly, and
+   * the absent-vs-empty distinction IS the contract: field absent means "leave
+   * the parent alone", `""` means "detach from the current parent". Hence
+   * `.optional()` with no default — a default would make detaching the only
+   * expressible intent and reparenting impossible to distinguish from a no-op.
+   */
+  parent: z.string().optional(),
 });
 export type UpdateInput = z.infer<typeof updateInputSchema>;
 

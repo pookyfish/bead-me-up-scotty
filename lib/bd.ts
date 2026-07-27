@@ -202,6 +202,9 @@ export function createBdStore(repoPath: string): BeadsStore {
         if (patch.priority !== undefined) args.push("--priority", String(patch.priority));
         if (patch.issue_type !== undefined) args.push("-t", patch.issue_type);
         if (patch.assignee !== undefined) args.push("--assignee", patch.assignee);
+        // `!== undefined` rather than a truthiness check: `""` is the detach
+        // signal, so `if (patch.parent)` would make detaching inexpressible.
+        if (patch.parent !== undefined) args.push("--parent", patch.parent);
         // Labels are replace-all. `bd update --set-labels ""` is silently
         // dropped (verified against bd 1.1.0) — an empty value never clears —
         // so the "remove every label" case has to go through --remove-label
