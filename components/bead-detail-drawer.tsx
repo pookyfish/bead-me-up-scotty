@@ -7,7 +7,7 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import { Icon, typeIconName } from "@/components/icons";
-import { OriginBadge } from "@/components/board/bead-card";
+import { OriginBadge, PriorityChip } from "@/components/board/bead-card";
 import { CopyableId } from "@/components/copyable-id";
 import { useApp } from "@/components/app-context";
 import { useImageDrop } from "@/hooks/use-image-drop";
@@ -33,6 +33,8 @@ import {
   avatarColor,
   initials,
   epicOf,
+  childrenOf,
+  epicProgress,
   isHumanGate,
   relTime,
   fmtDate,
@@ -102,7 +104,8 @@ export function BeadDetailDrawer({
 }
 
 function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
-  const { index, beads, humanAllowlist, meta, projectId, openEpic } = useApp();
+  const { index, beads, humanAllowlist, meta, projectId, openEpic, openDetail, openCreate } =
+    useApp();
   const actor = meta?.humanActor ?? "you";
   const isDemo = meta?.kind === "demo";
 
@@ -184,6 +187,12 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
 
   const o = beadOrigin(bead, humanAllowlist);
   const ep = epicOf(bead, index);
+  // Children come from the parent-child dependency EDGE, never `bead.parent` —
+  // `bd export --json` (the source for the list cache) omits the parent field,
+  // so an edge-based lookup is the only one correct in every context.
+  const kids = childrenOf(bead.id, beads);
+  // epicProgress is parent-agnostic despite the name (worth renaming later).
+  const kidProgress = epicProgress(bead.id, beads);
   const deps = (bead.dependencies ?? []).filter((d) => d.type !== "parent-child");
   const notes = bead.notes?.trim() ?? "";
   const design = bead.design?.trim() ?? "";
@@ -337,15 +346,27 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
             </div>
           </div>
           <div className="flex flex-col gap-[5px]">
-            <span className={fieldLabel}>Epic</span>
+            {/* Labelled by what the parent actually IS. Only epics get routed to
+                the Epics screen — it renders issue_type === "epic" only, so
+                sending a task/feature parent there used to land the user on an
+                empty screen with nothing highlighted. */}
+            <span className={fieldLabel}>{ep && ep.issue_type !== "epic" ? "Parent" : "Epic"}</span>
             {ep ? (
               <button
                 type="button"
-                onClick={() => openEpic(ep.id)}
-                title={`Jump to ${ep.id} on the Epics screen`}
+                onClick={() => (ep.issue_type === "epic" ? openEpic(ep.id) : openDetail(ep.id))}
+                title={
+                  ep.issue_type === "epic"
+                    ? `Jump to ${ep.id} on the Epics screen`
+                    : `Open ${ep.id}`
+                }
                 className="flex h-9 items-center gap-[7px] rounded-[9px] border border-border bg-[var(--surface-2)] px-[10px] text-left text-[var(--brand)] hover:border-[var(--brand)] hover:bg-[var(--brand-weak)]"
               >
-                <Icon name="target" size={14} className="flex-shrink-0" />
+                <Icon
+                  name={ep.issue_type === "epic" ? "target" : typeIconName(ep.issue_type)}
+                  size={14}
+                  className="flex-shrink-0"
+                />
                 <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px]">
                   {ep.title}
                 </span>
@@ -596,9 +617,11 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
                   value={depType}
                   onChange={(e) => setDepType(e.target.value as DepType)}
                 >
+                  {/* parent-child deliberately absent: the Subtasks section and
+                      the Parent field own that relationship now. Offering it here
+                      created links this list then filtered out, so they vanished. */}
                   <option value="blocks">blocks</option>
                   <option value="related">related</option>
-                  <option value="parent-child">parent-child</option>
                 </select>
                 <button
                   disabled={!depTarget}
@@ -667,6 +690,96 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
                   <span>Require approval</span>
                 </button>
               ))}
+          </div>
+        </Section>
+
+        {/* Subtasks — one level deep, deliberately not recursive. */}
+        <Section>
+          <Header icon="target" label="Subtasks" count={kids.length} />
+          {kids.length > 0 && (
+            <div className="mb-[9px] flex items-center gap-[9px]">
+              <div className="h-[6px] flex-1 overflow-hidden rounded-full bg-[var(--surface-3)]">
+                <div
+                  className="h-full rounded-full transition-[width]"
+                  style={{
+                    width: `${kidProgress.pct}%`,
+                    background: kidProgress.pct === 100 ? "#16a34a" : "var(--brand)",
+                  }}
+                />
+              </div>
+              <span className="flex-shrink-0 font-mono text-[11px] text-[var(--text-3)]">
+                {kidProgress.closed}/{kidProgress.total} · {kidProgress.pct}%
+              </span>
+            </div>
+          )}
+          <div className="flex flex-col gap-[7px]">
+            {kids.map((k) => (
+              <div
+                key={k.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => openDetail(k.id)}
+                onKeyDown={(ev) => {
+                  if (ev.target !== ev.currentTarget) return;
+                  if (ev.key === "Enter" || ev.key === " ") {
+                    ev.preventDefault();
+                    openDetail(k.id);
+                  }
+                }}
+                className="flex cursor-pointer items-center gap-[9px] rounded-[9px] border border-border bg-[var(--surface)] p-[9px_11px] hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
+              >
+                <span
+                  className="h-[7px] w-[7px] flex-shrink-0 rounded-full"
+                  style={{ background: catColor(k.status) }}
+                  title={statusLabel(k.status)}
+                />
+                <span className="flex-shrink-0 font-mono text-[11px] text-[var(--text-3)]">
+                  {k.id}
+                </span>
+                <Icon
+                  name={typeIconName(k.issue_type)}
+                  size={14}
+                  className="flex-shrink-0"
+                  style={{ color: typeColor(k.issue_type) }}
+                />
+                <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12.5px]">
+                  {k.title}
+                </span>
+                <PriorityChip p={k.priority} />
+                <OriginBadge
+                  origin={beadOrigin(k, humanAllowlist)}
+                  title={originTitle(k.created_by, beadOrigin(k, humanAllowlist))}
+                />
+                <span
+                  className="flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full text-[9.5px] font-semibold text-white"
+                  style={{ background: avatarColor(k.assignee ?? "") }}
+                  title={k.assignee || "Unassigned"}
+                >
+                  {initials(k.assignee ?? "")}
+                </span>
+                <button
+                  title={`Detach ${k.id} from this bead`}
+                  aria-label={`Detach ${k.id}`}
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    update.mutate({ id: k.id, patch: { parent: "" } });
+                  }}
+                  className="flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-md text-[var(--text-3)] hover:bg-[#ef444415] hover:text-[#ef4444]"
+                >
+                  <Icon name="x" size={12} />
+                </button>
+              </div>
+            ))}
+            {kids.length === 0 && (
+              <div className="px-[2px] py-1 text-[12px] text-[var(--text-3)]">No subtasks yet.</div>
+            )}
+            <button
+              onClick={() => openCreate({ parent: bead.id })}
+              className="flex items-center gap-[7px] rounded-[9px] border border-dashed border-[var(--border-strong)] p-[8px_11px] text-[12.5px] font-medium text-[var(--text-2)] hover:border-[var(--brand)] hover:text-[var(--brand)]"
+            >
+              <Icon name="plus" size={14} />
+              <span>Add subtask</span>
+            </button>
           </div>
         </Section>
 
