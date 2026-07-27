@@ -14,6 +14,35 @@ import {
   epicProgress,
 } from "@/lib/beads-view";
 
+/** Chip styling shared with the list rows and drawer so labels read alike. */
+const labelChipClass =
+  "flex-shrink-0 rounded-md border border-border bg-[var(--surface-2)] px-[6px] py-px font-mono text-[10.5px] text-[var(--text-3)]";
+
+/**
+ * Label chips with a "+N" overflow indicator. `archived` is state, not a tag —
+ * the Epics screen has no archived toggle at all, so it would be pure noise.
+ */
+function LabelChips({ labels, max }: { labels: string[]; max: number }) {
+  const visible = labels.filter((l) => l !== "archived");
+  if (visible.length === 0) return null;
+  const shown = visible.slice(0, max);
+  const hidden = visible.slice(max);
+  return (
+    <>
+      {shown.map((l) => (
+        <span key={l} className={`hidden ${labelChipClass} lg:inline`}>
+          {l}
+        </span>
+      ))}
+      {hidden.length > 0 && (
+        <span className={`hidden ${labelChipClass} lg:inline`} title={hidden.join(", ")}>
+          +{hidden.length}
+        </span>
+      )}
+    </>
+  );
+}
+
 export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: number } | null }) {
   const { beads, humanAllowlist, openCreate, openDetail } = useApp();
   const [expanded, setExpanded] = React.useState<Record<string, boolean>>({});
@@ -115,10 +144,16 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
                     <Icon name="target" size={19} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-[9px]">
-                      <span className="font-mono text-[11.5px] text-[var(--text-3)]">{e.id}</span>
+                    {/* overflow-hidden: every chip on this row is flex-shrink-0,
+                        so without it a heavily-labelled epic would spill past
+                        the progress block instead of clipping. */}
+                    <div className="flex min-w-0 items-center gap-[9px] overflow-hidden">
+                      <span className="flex-shrink-0 font-mono text-[11.5px] text-[var(--text-3)]">
+                        {e.id}
+                      </span>
                       <StatusChip status={e.status} />
                       <PriorityChip p={e.priority} />
+                      <LabelChips labels={e.labels ?? []} max={3} />
                     </div>
                     <div className="mt-[3px] text-[15px] font-semibold tracking-[-.01em]">
                       {e.title}
@@ -193,6 +228,7 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
                           <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-medium">
                             {k.title}
                           </span>
+                          <LabelChips labels={k.labels ?? []} max={2} />
                           <PriorityChip p={k.priority} />
                           <OriginBadge origin={o} title={originTitle(k.created_by, o)} />
                           <span
