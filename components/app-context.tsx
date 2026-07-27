@@ -24,7 +24,10 @@ interface AppContextValue {
   humanAllowlist: string[];
   loading: boolean;
   error?: string;
+  /** Open a bead, STARTING A FRESH trail (clears any back history). */
   openDetail: (id: string) => void;
+  /** Open a bead, PUSHING onto the trail so back returns here. Drawer-internal only. */
+  pushDetail: (id: string) => void;
   /** Open the create dialog, optionally presetting the parent and/or the type. */
   openCreate: (opts?: { parent?: string; type?: BeadType }) => void;
   /** Jump to the Epics screen and focus a specific epic (bead 55b). */

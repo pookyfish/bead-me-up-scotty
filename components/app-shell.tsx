@@ -27,7 +27,11 @@ import { NotificationWatcher } from "@/components/notification-watcher";
 export function AppShell({ projectId }: { projectId: string }) {
   const [view, setView] = useLastView(projectId);
   const { toggle: toggleTheme } = useTheme();
-  const [openId, setOpenId] = React.useState<string | null>(null);
+  // Drawer navigation TRAIL, not a single id: clicking a subtask from its
+  // parent used to replace the drawer outright, leaving no way back (GH #15).
+  // The visible bead is the last entry.
+  const [openStack, setOpenStack] = React.useState<string[]>([]);
+  const openId = openStack.length ? openStack[openStack.length - 1] : null;
   const [palette, setPalette] = React.useState(false);
   const [create, setCreate] = React.useState<{
     open: boolean;
@@ -42,7 +46,30 @@ export function AppShell({ projectId }: { projectId: string }) {
   const beads = React.useMemo(() => data?.beads ?? [], [data]);
   const index = React.useMemo(() => makeIndex(beads), [beads]);
 
-  const openDetail = React.useCallback((id: string) => setOpenId(id), []);
+  // RESET. Every caller outside the drawer (board, list, epics, activity,
+  // needs-you, palette, assist panel) means "start here", not "continue a trail".
+  const openDetail = React.useCallback((id: string) => setOpenStack([id]), []);
+  // PUSH. Drawer-internal navigation only, so back can return.
+  const MAX_TRAIL = 25;
+  const pushDetail = React.useCallback(
+    (id: string) =>
+      setOpenStack((s) => {
+        if (s[s.length - 1] === id) return s; // re-clicking the current bead is a no-op
+        const next = [...s, id];
+        return next.length > MAX_TRAIL ? next.slice(next.length - MAX_TRAIL) : next;
+      }),
+    [],
+  );
+  const closeDetail = React.useCallback(() => setOpenStack([]), []);
+  // POP. Skips entries whose bead has since been deleted/archived away, so back
+  // can never land on an empty drawer; if nothing valid remains, it closes.
+  const backDetail = React.useCallback(() => {
+    setOpenStack((s) => {
+      const next = s.slice(0, -1);
+      while (next.length && !index.has(next[next.length - 1])) next.pop();
+      return next;
+    });
+  }, [index]);
   // Options object rather than positional args so future presets (assignee,
   // priority) can be added without churning every call site again.
   const openCreate = React.useCallback(
@@ -57,7 +84,7 @@ export function AppShell({ projectId }: { projectId: string }) {
   const focusNonce = React.useRef(0);
   const openEpic = React.useCallback(
     (epicId: string) => {
-      setOpenId(null); // close the detail drawer
+      setOpenStack([]); // close the detail drawer
       setView("epics");
       setFocusEpic({ id: epicId, nonce: (focusNonce.current += 1) });
     },
@@ -76,7 +103,7 @@ export function AppShell({ projectId }: { projectId: string }) {
         return;
       }
       if (e.key === "Escape") {
-        setOpenId(null);
+        setOpenStack([]);
         setCreate((c) => ({ ...c, open: false }));
         return;
       }
@@ -111,6 +138,7 @@ export function AppShell({ projectId }: { projectId: string }) {
         loading: isLoading,
         error: errorMessage,
         openDetail,
+        pushDetail,
         openCreate,
         openEpic,
       }}
@@ -152,7 +180,13 @@ export function AppShell({ projectId }: { projectId: string }) {
             </>
           )}
 
-          <BeadDetailDrawer openId={openId} onClose={() => setOpenId(null)} />
+          <BeadDetailDrawer
+            openId={openId}
+            canGoBack={openStack.length > 1}
+            backTo={openStack.length > 1 ? openStack[openStack.length - 2] : null}
+            onBack={backDetail}
+            onClose={closeDetail}
+          />
         </main>
       </div>
 

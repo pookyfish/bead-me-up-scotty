@@ -16,7 +16,7 @@ import type { Bead } from "@/lib/schema";
  * description is written, via the normal update path.
  */
 export function AiAssistPanel({ bead }: { bead: Bead }) {
-  const { projectId, openDetail } = useApp();
+  const { projectId, pushDetail } = useApp();
   const update = useUpdateBead();
   const [result, setResult] = React.useState<AssistResult | null>(null);
 
@@ -90,7 +90,7 @@ export function AiAssistPanel({ bead }: { bead: Bead }) {
               {result.duplicates.map((d) => (
                 <button
                   key={d.id}
-                  onClick={() => openDetail(d.id)}
+                  onClick={() => pushDetail(d.id)}
                   className="mt-1 block text-left hover:underline"
                 >
                   <span className="font-mono text-[var(--text-3)]">{d.id}</span>{" "}

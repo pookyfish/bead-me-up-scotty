@@ -65,9 +65,17 @@ const labelChipClass =
 
 export function BeadDetailDrawer({
   openId,
+  canGoBack,
+  backTo,
+  onBack,
   onClose,
 }: {
   openId: string | null;
+  /** True when a trail exists behind the current bead (GH #15). */
+  canGoBack?: boolean;
+  /** Id the back control returns to — used to NAME the destination. */
+  backTo?: string | null;
+  onBack?: () => void;
   onClose: () => void;
 }) {
   const { index } = useApp();
@@ -95,7 +103,14 @@ export function BeadDetailDrawer({
         />
         <div className="bd-scroll min-w-0 flex-1 overflow-y-auto">
           {bead ? (
-            <DrawerBody key={bead.id} bead={bead} onClose={onClose} />
+            <DrawerBody
+              key={bead.id}
+              bead={bead}
+              canGoBack={!!canGoBack}
+              backTo={backTo ?? null}
+              onBack={onBack}
+              onClose={onClose}
+            />
           ) : (
             <SheetTitle className="sr-only">Bead details</SheetTitle>
           )}
@@ -105,8 +120,20 @@ export function BeadDetailDrawer({
   );
 }
 
-function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
-  const { index, beads, humanAllowlist, meta, projectId, openEpic, openDetail, openCreate } =
+function DrawerBody({
+  bead,
+  canGoBack,
+  backTo,
+  onBack,
+  onClose,
+}: {
+  bead: Bead;
+  canGoBack: boolean;
+  backTo: string | null;
+  onBack?: () => void;
+  onClose: () => void;
+}) {
+  const { index, beads, humanAllowlist, meta, projectId, pushDetail, openCreate } =
     useApp();
   const actor = meta?.humanActor ?? "you";
   const isDemo = meta?.kind === "demo";
@@ -225,6 +252,14 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
       <SheetDescription className="sr-only">Bead details for {bead.id}</SheetDescription>
 
       <div className="sticky top-0 z-[2] flex items-center gap-[10px] border-b border-border bg-[var(--drawer)] p-[15px_20px]">
+        {/* Naming the destination rather than saying "Back" — you arrive here
+            from a subtask and need to know what you're returning to (GH #15).
+            No left-arrow icon exists; the drawer already rotates `chevron`. */}
+        {canGoBack && (
+          <IconBtn title={backTo ? `Back to ${backTo}` : "Back"} onClick={() => onBack?.()}>
+            <Icon name="chevron" size={15} className="rotate-90" />
+          </IconBtn>
+        )}
         <span className="h-[9px] w-[9px] rounded-full" style={{ background: catColor(bead.status) }} />
         <CopyableId id={bead.id} className="font-mono text-[13px] text-[var(--text-2)]" />
         <StatusChip status={bead.status} />
@@ -356,7 +391,7 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
             {ep ? (
               <button
                 type="button"
-                onClick={() => (ep.issue_type === "epic" ? openEpic(ep.id) : openDetail(ep.id))}
+                onClick={() => pushDetail(ep.id)}
                 title={
                   ep.issue_type === "epic"
                     ? `Jump to ${ep.id} on the Epics screen`
@@ -731,12 +766,12 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
                 key={k.id}
                 role="button"
                 tabIndex={0}
-                onClick={() => openDetail(k.id)}
+                onClick={() => pushDetail(k.id)}
                 onKeyDown={(ev) => {
                   if (ev.target !== ev.currentTarget) return;
                   if (ev.key === "Enter" || ev.key === " ") {
                     ev.preventDefault();
-                    openDetail(k.id);
+                    pushDetail(k.id);
                   }
                 }}
                 className="flex cursor-pointer items-center gap-[9px] rounded-[9px] border border-border bg-[var(--surface)] p-[9px_11px] hover:border-[var(--border-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
