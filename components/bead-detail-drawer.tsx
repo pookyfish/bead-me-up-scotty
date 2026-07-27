@@ -32,7 +32,7 @@ import {
   typeLabel,
   avatarColor,
   initials,
-  epicOf,
+  parentOf,
   childrenOf,
   epicProgress,
   isHumanGate,
@@ -186,7 +186,7 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
   };
 
   const o = beadOrigin(bead, humanAllowlist);
-  const ep = epicOf(bead, index);
+  const ep = parentOf(bead, index);
   // Children come from the parent-child dependency EDGE, never `bead.parent` —
   // `bd export --json` (the source for the list cache) omits the parent field,
   // so an edge-based lookup is the only one correct in every context.

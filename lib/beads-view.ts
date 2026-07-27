@@ -182,9 +182,35 @@ export function blockingDeps(b: Bead, index: Map<string, Bead>): string[] {
     .map((d) => d.depends_on_id);
 }
 
-export function epicOf(b: Bead, index: Map<string, Bead>): Bead | null {
+/**
+ * The bead's parent, whatever its type. Resolved from the parent-child
+ * dependency EDGE — never `bead.parent`, which `bd export --json` omits, so an
+ * edge lookup is the only one correct on board/list data as well as in the
+ * drawer.
+ *
+ * Replaces the former `epicOf`, which returned the same thing but was named as
+ * though the parent were always an epic — so a task-parented bead rendered a
+ * chip labelled "epic" and clicked through to the Epics screen, which renders
+ * epics only. Callers now branch on `parent.issue_type` themselves.
+ */
+export function parentOf(b: Bead, index: Map<string, Bead>): Bead | null {
   const d = (b.dependencies ?? []).find((x) => x.type === "parent-child");
   return d ? index.get(d.depends_on_id) ?? null : null;
+}
+
+/**
+ * Children per parent id, built in ONE pass over all beads. Callers render
+ * per-card counts from this rather than calling childrenOf() per card, which
+ * would be an O(n²) scan on a large board.
+ */
+export function childrenCountMap(beads: Bead[]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const b of beads) {
+    for (const d of b.dependencies ?? []) {
+      if (d.type === "parent-child") m.set(d.depends_on_id, (m.get(d.depends_on_id) ?? 0) + 1);
+    }
+  }
+  return m;
 }
 
 export function childrenOf(epicId: string, beads: Bead[]): Bead[] {

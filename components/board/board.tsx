@@ -14,7 +14,7 @@ import { useApp } from "@/components/app-context";
 import { useSetStatus } from "@/hooks/use-beads";
 import { useOrder, useSetOrder } from "@/hooks/use-order";
 import { useBoardPrefs } from "@/hooks/use-board-prefs";
-import { isBlocked } from "@/lib/beads-view";
+import { isBlocked, childrenCountMap } from "@/lib/beads-view";
 import { FilterBar } from "@/components/filter-bar";
 import { matchesFilters, emptyFilters, labelOptionsFrom, type Filters } from "@/lib/filters";
 import { BOARD_COLUMNS as COLUMNS, sortByOrder as sortCards } from "@/lib/board-columns";
@@ -33,6 +33,9 @@ export function Board() {
   // Derived from ALL beads (not the filtered set) so selecting one label
   // doesn't make the remaining options vanish from the dropdown.
   const labelOptions = React.useMemo(() => labelOptionsFrom(beads), [beads]);
+  // One pass over all beads, not childrenOf() per card — that would be O(n^2)
+  // on a large board.
+  const childCounts = React.useMemo(() => childrenCountMap(beads), [beads]);
   // Time-window filter for the Done column: null = all, else "closed within N days" (bead nad).
   const [doneWindow, setDoneWindow] = React.useState<number | null>(null);
   // Mount-time "now" for the window cutoff — captured once (day-granular, so it
@@ -158,6 +161,7 @@ export function Board() {
                   key={col.id}
                   col={col}
                   cards={cards}
+                  childCounts={childCounts}
                   control={
                     col.id === "done" ? (
                       <select

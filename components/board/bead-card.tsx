@@ -17,18 +17,18 @@ import {
   avatarColor,
   initials,
   isBlocked,
-  epicOf,
+  parentOf,
   checklistProgress,
 } from "@/lib/beads-view";
 
-export function BeadCard({ bead }: { bead: Bead }) {
+export function BeadCard({ bead, childCount = 0 }: { bead: Bead; childCount?: number }) {
   const { index, humanAllowlist, openDetail } = useApp();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: bead.id,
   });
 
   const o = beadOrigin(bead, humanAllowlist);
-  const ep = epicOf(bead, index);
+  const parent = parentOf(bead, index);
   const blocked = isBlocked(bead, index);
   const visLabels = (bead.labels ?? []).filter((l) => l !== "archived").slice(0, 2);
   const depCount = (bead.dependencies ?? []).filter((d) => d.type !== "parent-child").length;
@@ -130,15 +130,39 @@ export function BeadCard({ bead }: { bead: Bead }) {
             {checklist.done}/{checklist.total}
           </span>
         )}
-        {ep && (
+        {/* Epic parents keep the brand-coloured chip; any other parent gets a
+            neutral one with its own type icon. Previously every parent rendered
+            as an "epic", which was already wrong and gets much more visible
+            now that arbitrary subtasks exist. */}
+        {parent && (
           <span
-            title={ep.title}
-            className="inline-flex max-w-[96px] items-center gap-1 rounded-md bg-[var(--brand-weak)] px-[6px] py-px text-[10.5px] font-[550] text-[var(--brand)]"
+            title={`${parent.id} · ${parent.title}`}
+            className={
+              parent.issue_type === "epic"
+                ? "inline-flex max-w-[96px] items-center gap-1 rounded-md bg-[var(--brand-weak)] px-[6px] py-px text-[10.5px] font-[550] text-[var(--brand)]"
+                : "inline-flex max-w-[96px] items-center gap-1 rounded-md border border-border bg-[var(--surface-2)] px-[6px] py-px text-[10.5px] font-[550] text-[var(--text-3)]"
+            }
           >
-            <Icon name="target" size={11} className="flex-shrink-0" />
+            <Icon
+              name={parent.issue_type === "epic" ? "target" : typeIconName(parent.issue_type)}
+              size={11}
+              className="flex-shrink-0"
+            />
             <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-              {ep.title.replace(/\s*\([^)]*\)\s*/, "")}
+              {parent.title.replace(/\s*\([^)]*\)\s*/, "")}
             </span>
+          </span>
+        )}
+        {/* Subtask count — distinct from depCount, which deliberately excludes
+            parent-child edges. Counted once per render by the board/list, not
+            per card, to avoid an O(n^2) scan. */}
+        {childCount > 0 && (
+          <span
+            title={`${childCount} subtask${childCount === 1 ? "" : "s"}`}
+            className="inline-flex items-center gap-1 rounded-md border border-border bg-[var(--surface-2)] px-[6px] py-px text-[10.5px] font-[550] text-[var(--text-3)]"
+          >
+            <Icon name="list" size={11} className="flex-shrink-0" />
+            {childCount}
           </span>
         )}
       </div>

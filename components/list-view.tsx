@@ -32,7 +32,8 @@ import {
   avatarColor,
   initials,
   isBlocked,
-  epicOf,
+  parentOf,
+  childrenCountMap,
   relTime,
   fmtDateTime,
 } from "@/lib/beads-view";
@@ -64,6 +65,8 @@ export function ListView() {
   // Derived from ALL beads (not the filtered set) so selecting one label
   // doesn't make the remaining options vanish from the dropdown.
   const labelOptions = React.useMemo(() => labelOptionsFrom(beads), [beads]);
+  // One pass, not childrenOf() per row (that would be O(n^2)).
+  const childCounts = React.useMemo(() => childrenCountMap(beads), [beads]);
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
@@ -98,8 +101,8 @@ export function ListView() {
         // Tie-break on the parent epic's priority (gh-18): a medium task under a
         // high epic outranks a medium task under a low one. Own priority always
         // wins first, and manual drag rank above still wins over both.
-        const ea = epicOf(a, index)?.priority ?? DEFAULT_EPIC_PRIORITY;
-        const eb = epicOf(b, index)?.priority ?? DEFAULT_EPIC_PRIORITY;
+        const ea = parentOf(a, index)?.priority ?? DEFAULT_EPIC_PRIORITY;
+        const eb = parentOf(b, index)?.priority ?? DEFAULT_EPIC_PRIORITY;
         if (ea !== eb) return ea - eb;
         return (b.updated_at ?? "").localeCompare(a.updated_at ?? "");
       });
@@ -206,8 +209,10 @@ export function ListView() {
                         bead={b}
                         blocked={isBlocked(b, index)}
                         onOpen={() => openDetail(b.id)}
-                        epic={epicOf(b, index)}
-                        onOpenEpic={openEpic}
+                        parent={parentOf(b, index)}
+                        onOpenParent={openEpic}
+                        onOpenDetail={openDetail}
+                        childCount={childCounts.get(b.id) ?? 0}
                         humanAllowlist={humanAllowlist}
                       />
                     </React.Fragment>
@@ -226,15 +231,19 @@ function Row({
   bead,
   blocked,
   onOpen,
-  epic,
-  onOpenEpic,
+  parent,
+  onOpenParent,
+  onOpenDetail,
+  childCount,
   humanAllowlist,
 }: {
   bead: Bead;
   blocked: boolean;
   onOpen: () => void;
-  epic: Bead | null;
-  onOpenEpic: (id: string) => void;
+  parent: Bead | null;
+  onOpenParent: (id: string) => void;
+  onOpenDetail: (id: string) => void;
+  childCount: number;
   humanAllowlist: string[];
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -294,18 +303,36 @@ function Row({
       ))}
       {/* The epic is shown because it now INFLUENCES the sort order (gh-18):
           a ranking whose reason isn't on screen reads as a bug. */}
-      {epic && (
+      {childCount > 0 && (
+        <span
+          title={`${childCount} subtask${childCount === 1 ? "" : "s"}`}
+          className="hidden flex-shrink-0 items-center gap-[4px] rounded-md border border-border bg-[var(--surface-2)] px-[6px] py-px text-[10.5px] text-[var(--text-3)] lg:flex"
+        >
+          <Icon name="list" size={10} className="flex-shrink-0" />
+          {childCount}
+        </span>
+      )}
+      {/* Shown because the parent now INFLUENCES the sort order (gh-18): a
+          ranking whose reason isn't on screen reads as a bug. Epics route to
+          the Epics screen; any other parent opens its drawer, since the Epics
+          screen renders epics only. */}
+      {parent && (
         <button
           type="button"
           onClick={(e) => {
             e.stopPropagation();
-            onOpenEpic(epic.id);
+            if (parent.issue_type === "epic") onOpenParent(parent.id);
+            else onOpenDetail(parent.id);
           }}
-          title={`${epic.title} · P${epic.priority} — jump to this epic`}
+          title={`${parent.id} · ${parent.title} · P${parent.priority}`}
           className="hidden max-w-[150px] flex-shrink-0 items-center gap-[4px] rounded-md border border-border bg-[var(--surface-2)] px-[6px] py-px text-[10.5px] text-[var(--text-3)] hover:border-[var(--brand)] hover:text-[var(--brand)] lg:flex"
         >
-          <Icon name="target" size={10} className="flex-shrink-0" />
-          <span className="truncate">{epic.title}</span>
+          <Icon
+            name={parent.issue_type === "epic" ? "target" : typeIconName(parent.issue_type)}
+            size={10}
+            className="flex-shrink-0"
+          />
+          <span className="truncate">{parent.title}</span>
         </button>
       )}
       <span className="flex-shrink-0">
