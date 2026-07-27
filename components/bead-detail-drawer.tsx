@@ -151,6 +151,7 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
   const notes = bead.notes?.trim() ?? "";
   const design = bead.design?.trim() ?? "";
   const acceptance = bead.acceptance_criteria?.trim() ?? "";
+  const closeReason = bead.close_reason?.trim() ?? "";
   const comments = bead.comments ?? [];
   const activity = [
     { label: `Created by ${bead.created_by || "unknown"}`, time: fmtDate(bead.created_at) },
@@ -595,6 +596,17 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
             <Header icon="list" label="Notes" />
             <DescriptionContent
               text={notes}
+              projectId={projectId}
+              className={detailContentClass}
+            />
+          </Section>
+        )}
+
+        {closeReason && (
+          <Section>
+            <Header icon="check" label="Close reason" />
+            <DescriptionContent
+              text={closeReason}
               projectId={projectId}
               className={detailContentClass}
             />
