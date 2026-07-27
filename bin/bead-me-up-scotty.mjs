@@ -239,12 +239,38 @@ async function main() {
   });
 
   // Forward signals and clean up the child on exit.
+  //
+  // `next start` shuts down *gracefully*: on SIGINT/SIGTERM it stops accepting
+  // connections and then waits for in-flight requests to drain. Our SSE change
+  // stream (app/api/p/[projectId]/beads/stream) is an in-flight request that
+  // never completes on its own, so with any browser tab open the server waits
+  // forever and Ctrl+C looks like it did nothing. Give the graceful path a
+  // short deadline, then escalate to SIGKILL so Ctrl+C always works.
+  const FORCE_KILL_AFTER_MS = 4000;
   let shuttingDown = false;
+  let forceTimer = null;
+
+  const hardKill = () => {
+    if (forceTimer) clearTimeout(forceTimer);
+    try {
+      child.kill("SIGKILL");
+    } catch {
+      /* already gone */
+    }
+    process.exit(130);
+  };
+
   const forward = (sig) => {
-    if (shuttingDown) return;
+    if (shuttingDown) {
+      hardKill(); // second Ctrl+C — don't wait out the deadline
+      return;
+    }
     shuttingDown = true;
     child.kill(sig);
+    console.log("\n  Stopping…  (Ctrl+C again to force)");
+    forceTimer = setTimeout(hardKill, FORCE_KILL_AFTER_MS);
   };
+
   process.on("SIGINT", () => forward("SIGINT"));
   process.on("SIGTERM", () => forward("SIGTERM"));
   process.on("exit", () => {
@@ -255,6 +281,7 @@ async function main() {
     }
   });
   child.on("exit", (code, signal) => {
+    if (forceTimer) clearTimeout(forceTimer);
     process.exit(signal ? 128 : (code ?? 0));
   });
 

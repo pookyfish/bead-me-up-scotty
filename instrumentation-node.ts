@@ -10,7 +10,24 @@
  * appear to silently fail. These are normal network teardowns, not app bugs, so
  * swallow exactly those and let every other error crash as usual.
  */
-export {}; // ensure this file is treated as a module (it only has side effects)
+import { closeAllSseStreams } from "./lib/sse-registry";
+
+/**
+ * `next start` drains in-flight requests on SIGINT/SIGTERM before exiting, and
+ * the SSE stream above never completes on its own — so with a browser tab open
+ * the server would wait forever and Ctrl+C would appear to do nothing. Close
+ * the streams so the drain can finish. We deliberately don't call
+ * process.exit(): Next's own handler still owns the actual shutdown.
+ */
+let closing = false;
+const closeStreams = (sig: string) => {
+  if (closing) return;
+  closing = true;
+  const n = closeAllSseStreams();
+  if (n > 0) console.log(`[instrumentation] ${sig}: closed ${n} open SSE stream(s)`);
+};
+process.on("SIGINT", () => closeStreams("SIGINT"));
+process.on("SIGTERM", () => closeStreams("SIGTERM"));
 
 const isBenignNetError = (e: unknown): boolean => {
   const code = (e as NodeJS.ErrnoException | undefined)?.code;

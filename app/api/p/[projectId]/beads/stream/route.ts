@@ -1,4 +1,5 @@
 import { subscribeBeadsChange } from "@/lib/beads-watch";
+import { registerSseStream } from "@/lib/sse-registry";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -38,17 +39,23 @@ export async function GET(req: Request, { params }: Ctx) {
       );
       const heartbeat = setInterval(() => send(": ping\n\n"), HEARTBEAT_MS);
 
+      let unregister = () => {};
       const close = () => {
         if (closed) return;
         closed = true;
         clearInterval(heartbeat);
         unsub();
+        unregister();
         try {
           controller.close();
         } catch {
           /* already closed */
         }
       };
+
+      // Let shutdown close this stream: `next start` drains in-flight requests
+      // before exiting, and this one would otherwise never finish.
+      unregister = registerSseStream(close);
 
       req.signal.addEventListener("abort", close);
     },
