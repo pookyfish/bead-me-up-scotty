@@ -136,10 +136,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
-  setStatus: (projectId: string, id: string, status: string) =>
+  setStatus: (projectId: string, id: string, status: string, reason?: string) =>
     request<Bead>(`${base(projectId)}/beads/${enc(id)}/status`, {
       method: "POST",
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({ status, reason }),
     }),
   remove: (projectId: string, id: string) =>
     request<{ deleted: string }>(`${base(projectId)}/beads/${enc(id)}`, { method: "DELETE" }),

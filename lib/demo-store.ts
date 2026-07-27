@@ -56,12 +56,20 @@ export const demoStore: BeadsStore = {
     if (patch.status === "closed" && !b.closed_at) b.closed_at = nowIso();
     return { ...b };
   },
-  async setStatus(id, status) {
+  async setStatus(id, status, actor, reason) {
     const b = find(id);
     b.status = status;
     b.updated_at = nowIso();
     if (status === "in_progress" && !b.started_at) b.started_at = nowIso();
-    if (status === "closed") b.closed_at = nowIso();
+    if (status === "closed") {
+      b.closed_at = nowIso();
+      // Mirror bd: closing with no reason still records the literal "Closed".
+      if (!b.close_reason) b.close_reason = reason?.trim() || "Closed";
+    } else {
+      // Mirror `bd reopen` / `bd update -s <open>`, which clear both fields.
+      b.closed_at = null;
+      b.close_reason = null;
+    }
     return { ...b };
   },
   async remove(id) {

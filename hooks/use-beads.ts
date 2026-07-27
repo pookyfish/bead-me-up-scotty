@@ -67,8 +67,8 @@ export function useSetStatus() {
   const qc = useQueryClient();
   const KEY = beadsKey(projectId);
   return useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) =>
-      api.setStatus(projectId, id, status),
+    mutationFn: ({ id, status, reason }: { id: string; status: string; reason?: string }) =>
+      api.setStatus(projectId, id, status, reason),
     onMutate: async ({ id, status }) => {
       await qc.cancelQueries({ queryKey: KEY });
       const prev = qc.getQueryData<BeadsResponse>(KEY);

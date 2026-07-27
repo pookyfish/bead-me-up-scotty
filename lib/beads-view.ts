@@ -70,6 +70,16 @@ export function toggleTask(text: string, index: number): string {
   });
 }
 
+/**
+ * `bd close` with no `--reason` still records a reason: the literal "Closed".
+ * That placeholder carries no information, so treat it as absent rather than
+ * rendering a "Close reason" section that just says "Closed".
+ */
+export function closeReasonOf(b: Bead): string {
+  const reason = b.close_reason?.trim() ?? "";
+  return reason.toLowerCase() === "closed" ? "" : reason;
+}
+
 export type StatusCategory = "done" | "wip" | "blocked" | "frozen" | "active";
 
 export function category(status: string): StatusCategory {

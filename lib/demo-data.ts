@@ -55,7 +55,9 @@ function D(
     created_at: extra.created_at ?? "2026-06-09T10:00:00Z",
     updated_at: extra.updated_at ?? "2026-06-14T15:00:00Z",
     closed_at: status === "closed" ? extra.closed_at ?? "2026-06-15T11:00:00Z" : null,
-    close_reason: status === "closed" ? extra.close_reason ?? "" : null,
+    // Faithful to bd: closing without `--reason` still records the literal
+    // "Closed", which `closeReasonOf` treats as no reason at all.
+    close_reason: status === "closed" ? extra.close_reason ?? "Closed" : null,
     labels: extra.labels ?? [],
     dependencies,
     comments: extra.comments ?? [],

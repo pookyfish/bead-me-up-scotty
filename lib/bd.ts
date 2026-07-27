@@ -207,10 +207,16 @@ export function createBdStore(repoPath: string): BeadsStore {
       });
     },
 
-    setStatus(id, status, actor) {
+    setStatus(id, status, actor, reason) {
       return serializeWrite(repoPath, async () => {
         if (status === "closed") {
-          await runBdRaw(["close", id], rw(actor));
+          const args = ["close", id];
+          // Only `bd close --reason` persists a close reason, and re-closing an
+          // already-closed bead won't overwrite it — so this is the one chance
+          // to record why. Args go through execFile, so prose is safe verbatim.
+          const trimmed = reason?.trim();
+          if (trimmed) args.push("--reason", trimmed);
+          await runBdRaw(args, rw(actor));
         } else {
           await runBdRaw(["update", id, "-s", status], rw(actor));
         }

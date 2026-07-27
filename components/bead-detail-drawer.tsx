@@ -39,6 +39,7 @@ import {
   fmtDateTime,
   checklistProgress,
   toggleTask,
+  closeReasonOf,
 } from "@/lib/beads-view";
 import { BEAD_STATUSES, BLOCKING_DEP_TYPES, type Bead, type DepType } from "@/lib/schema";
 
@@ -112,6 +113,32 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
   const [gateReason, setGateReason] = React.useState("");
   const gateBead = isHumanGate(bead);
 
+  // Closing is the only moment a reason can be recorded — bd offers no way to
+  // attach one afterwards — so picking "Closed" opens a skippable composer
+  // instead of firing the mutation straight away.
+  const [closing, setClosing] = React.useState(false);
+  const [closeDraft, setCloseDraft] = React.useState("");
+  const closeRef = React.useRef<HTMLTextAreaElement>(null);
+
+  const startClosing = () => {
+    setCloseDraft("");
+    setClosing(true);
+  };
+  const cancelClosing = () => {
+    setClosing(false);
+    setCloseDraft("");
+  };
+  const confirmClose = () => {
+    setStatus.mutate(
+      { id: bead.id, status: "closed", reason: closeDraft.trim() || undefined },
+      { onSuccess: cancelClosing },
+    );
+  };
+
+  React.useEffect(() => {
+    if (closing) closeRef.current?.focus();
+  }, [closing]);
+
   // Inline edit of title + description (with image drop/paste on the textarea).
   const [editing, setEditing] = React.useState(false);
   const [previewEdit, setPreviewEdit] = React.useState(false);
@@ -151,7 +178,7 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
   const notes = bead.notes?.trim() ?? "";
   const design = bead.design?.trim() ?? "";
   const acceptance = bead.acceptance_criteria?.trim() ?? "";
-  const closeReason = bead.close_reason?.trim() ?? "";
+  const closeReason = closeReasonOf(bead);
   const comments = bead.comments ?? [];
   const activity = [
     { label: `Created by ${bead.created_by || "unknown"}`, time: fmtDate(bead.created_at) },
@@ -245,8 +272,15 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
             <span className={fieldLabel}>Status</span>
             <select
               className={selectClass}
-              value={bead.status}
-              onChange={(e) => setStatus.mutate({ id: bead.id, status: e.target.value })}
+              value={closing ? "closed" : bead.status}
+              onChange={(e) => {
+                const next = e.target.value;
+                if (next === "closed" && bead.status !== "closed") startClosing();
+                else {
+                  cancelClosing();
+                  setStatus.mutate({ id: bead.id, status: next });
+                }
+              }}
             >
               {BEAD_STATUSES.map((s) => (
                 <option key={s} value={s}>
@@ -307,6 +341,47 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
             )}
           </div>
         </div>
+
+        {closing && (
+          <div className="mb-4 rounded-[10px] border border-border bg-[var(--surface-2)] p-[11px_13px]">
+            <div className={`${fieldLabel} mb-[7px]`}>Close reason — optional</div>
+            <textarea
+              ref={closeRef}
+              value={closeDraft}
+              onChange={(e) => setCloseDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") cancelClosing();
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) confirmClose();
+              }}
+              rows={3}
+              placeholder="Why is this done? A commit, a PR link, or a one-liner. Markdown and bead IDs render."
+              className="w-full resize-y rounded-[9px] border border-border bg-[var(--surface)] p-[9px_11px] text-[13px] leading-[1.5] text-[var(--text)] outline-none focus:border-[var(--brand)]"
+            />
+            <div className="mt-[9px] flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={setStatus.isPending}
+                onClick={confirmClose}
+                className="flex h-8 items-center gap-[6px] rounded-lg px-3 text-[12.5px] font-[550] text-white disabled:opacity-50"
+                style={{ background: "var(--brand)" }}
+              >
+                <Icon name="check" size={14} />
+                {closeDraft.trim() ? "Close with reason" : "Close without a reason"}
+              </button>
+              <button
+                type="button"
+                disabled={setStatus.isPending}
+                onClick={cancelClosing}
+                className="h-8 rounded-lg border border-border px-3 text-[12.5px] text-[var(--text-2)] hover:bg-[var(--surface-3)] disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <span className="text-[11.5px] text-[var(--text-3)]">
+                bd can&rsquo;t attach a reason later — this is the only chance to record one.
+              </span>
+            </div>
+          </div>
+        )}
 
         <Section>
           <div className={`${fieldLabel} mb-[6px] flex items-center gap-2`}>
