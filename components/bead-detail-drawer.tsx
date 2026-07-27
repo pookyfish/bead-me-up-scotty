@@ -48,6 +48,16 @@ const selectClass =
 const fieldLabel = "text-[11px] font-[550] uppercase tracking-[.03em] text-[var(--text-3)]";
 const detailContentClass =
   "rounded-[10px] border border-border bg-[var(--surface-2)] p-[12px_13px] text-[13.5px] leading-[1.55] text-[var(--text-2)] [text-wrap:pretty]";
+/**
+ * `archived` is load-bearing state, not decoration: the board and list use it to
+ * hide beads (board.tsx / list-view.tsx) and the archive button writes it. The
+ * label editor keeps it out of the user's reach so a bead can't be silently
+ * un-archived by deleting a chip that looks cosmetic.
+ */
+const ARCHIVED_LABEL = "archived";
+/** Chip styling shared with the list rows (list-view.tsx) so labels read alike. */
+const labelChipClass =
+  "inline-flex items-center gap-[5px] rounded-md border border-border bg-[var(--surface-2)] px-[6px] py-[2px] font-mono text-[10.5px] text-[var(--text-3)]";
 
 export function BeadDetailDrawer({
   openId,
@@ -189,6 +199,15 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
   const otherBeads = beads.filter(
     (b) => b.id !== bead.id && !deps.some((d) => d.depends_on_id === b.id),
   );
+
+  // Every label already in use across the project, offered as datalist
+  // suggestions so labels converge instead of sprouting near-duplicates.
+  // `archived` is state (see LabelsField), not a tag, so it never appears.
+  const labelSuggestions = React.useMemo(() => {
+    const s = new Set<string>();
+    for (const b of beads) for (const l of b.labels ?? []) if (l !== ARCHIVED_LABEL) s.add(l);
+    return [...s].sort();
+  }, [beads]);
 
   return (
     <>
@@ -341,6 +360,13 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
             )}
           </div>
         </div>
+
+        <LabelsField
+          bead={bead}
+          suggestions={labelSuggestions}
+          onChange={(labels) => update.mutate({ id: bead.id, patch: { labels } })}
+        />
+
 
         {closing && (
           <div className="mb-4 rounded-[10px] border border-border bg-[var(--surface-2)] p-[11px_13px]">
@@ -775,6 +801,110 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
 
 function Section({ children }: { children: React.ReactNode }) {
   return <div className="mb-[18px]">{children}</div>;
+}
+
+/**
+ * Add/remove labels on a bead. Every mutation sends the FULL desired set (the
+ * update path is replace-all), and `archived` — if present — is always carried
+ * through untouched so editing labels can never un-archive a bead.
+ */
+function LabelsField({
+  bead,
+  suggestions,
+  onChange,
+}: {
+  bead: Bead;
+  suggestions: string[];
+  onChange: (labels: string[]) => void;
+}) {
+  const [draft, setDraft] = React.useState("");
+  const listId = `labels-${bead.id}`;
+  const all = bead.labels ?? [];
+  const isArchived = all.includes(ARCHIVED_LABEL);
+  const visible = all.filter((l) => l !== ARCHIVED_LABEL);
+
+  // Re-attach `archived` to whatever the user ended up with before sending.
+  const commitVisible = (next: string[]) =>
+    onChange(isArchived ? [...next, ARCHIVED_LABEL] : next);
+
+  const add = () => {
+    const v = draft.trim().replace(/,+$/, "").trim();
+    setDraft("");
+    // Ignore empties, duplicates, and any attempt to hand-type the archive flag.
+    if (!v || v === ARCHIVED_LABEL || visible.includes(v)) return;
+    commitVisible([...visible, v]);
+  };
+
+  return (
+    <div className="mb-4 flex flex-col gap-[5px]">
+      <span className={fieldLabel}>Labels</span>
+      <div className="flex flex-wrap items-center gap-[6px] rounded-[9px] border border-border bg-[var(--surface-2)] p-[7px_9px]">
+        {visible.map((l) => (
+          <span key={l} className={labelChipClass}>
+            {l}
+            <button
+              type="button"
+              onClick={() => commitVisible(visible.filter((x) => x !== l))}
+              title={`Remove label “${l}”`}
+              aria-label={`Remove label ${l}`}
+              className="text-[var(--text-3)] hover:text-[var(--danger,#ef4444)]"
+            >
+              <Icon name="x" size={11} />
+            </button>
+          </span>
+        ))}
+        {isArchived && (
+          <span
+            className={`${labelChipClass} opacity-70`}
+            title="This bead is archived. Use the archive button in the header to change that."
+          >
+            <Icon name="archive" size={10} />
+            {ARCHIVED_LABEL}
+          </span>
+        )}
+        <input
+          value={draft}
+          onChange={(e) => {
+            // A typed comma commits, so pasting "a,b" adds both.
+            if (e.target.value.includes(",")) {
+              const [head, ...rest] = e.target.value.split(",");
+              const v = head.trim();
+              if (v && v !== ARCHIVED_LABEL && !visible.includes(v)) {
+                commitVisible([...visible, v]);
+              }
+              setDraft(rest.join(",").trim());
+              return;
+            }
+            setDraft(e.target.value);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              setDraft("");
+            } else if (e.key === "Backspace" && !draft && visible.length) {
+              // Backspace on an empty input removes the last chip, as in most tag inputs.
+              commitVisible(visible.slice(0, -1));
+            }
+          }}
+          onBlur={add}
+          list={listId}
+          placeholder={visible.length ? "Add label…" : "Add a label…"}
+          aria-label="Add label"
+          className="min-w-[110px] flex-1 border-none bg-transparent text-[12.5px] text-[var(--text)] outline-none placeholder:text-[var(--text-3)]"
+        />
+        <datalist id={listId}>
+          {suggestions
+            .filter((s) => !visible.includes(s))
+            .map((s) => (
+              <option key={s} value={s} />
+            ))}
+        </datalist>
+      </div>
+    </div>
+  );
 }
 
 function Header({ icon, label, count }: { icon: string; label: string; count?: number }) {

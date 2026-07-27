@@ -202,7 +202,21 @@ export function createBdStore(repoPath: string): BeadsStore {
         if (patch.priority !== undefined) args.push("--priority", String(patch.priority));
         if (patch.issue_type !== undefined) args.push("-t", patch.issue_type);
         if (patch.assignee !== undefined) args.push("--assignee", patch.assignee);
-        await runBdRaw(args, rw(actor));
+        // Labels are replace-all. `bd update --set-labels ""` is silently
+        // dropped (verified against bd 1.1.0) — an empty value never clears —
+        // so the "remove every label" case has to go through --remove-label
+        // with the bead's current labels instead.
+        if (patch.labels !== undefined) {
+          if (patch.labels.length) {
+            args.push("--set-labels", patch.labels.join(","));
+          } else {
+            const current = (await show(id)).labels ?? [];
+            if (current.length) args.push("--remove-label", current.join(","));
+          }
+        }
+        // `bd update <id>` with no field flags is a no-op error; skip the call
+        // when clearing labels on a bead that had none.
+        if (args.length > 2) await runBdRaw(args, rw(actor));
         return show(id);
       });
     },

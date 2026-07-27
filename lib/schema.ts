@@ -168,6 +168,13 @@ export const updateInputSchema = z.object({
   priority: z.coerce.number().int().min(0).max(4).optional(),
   issue_type: z.enum(BEAD_TYPES).optional(),
   assignee: z.string().optional(),
+  /**
+   * Full desired label set (replace-all). Deliberately has NO `.default([])` —
+   * a default would make every unrelated patch (a priority or status change)
+   * look like "set labels to empty" and silently wipe the bead's labels.
+   * Absent means "leave labels alone"; `[]` means "clear them".
+   */
+  labels: z.array(z.string()).optional(),
 });
 export type UpdateInput = z.infer<typeof updateInputSchema>;
 
