@@ -126,18 +126,27 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
                 data-epic-id={e.id}
                 className="overflow-hidden rounded-[14px] border border-border bg-[var(--surface)] shadow-[var(--shadow)]"
               >
+                {/* Expanding to see children is the PRIMARY action on this
+                    screen, so the whole row owns it and the small "Details"
+                    button below owns the secondary one. An earlier pass had
+                    this inverted — row-click opened details and expand was
+                    left to the ~28px chevron alone — which @Nopik reported as
+                    a regression on GH #17. Note `!isOpen`, not `!st[e.id]`:
+                    isOpen resolves the auto-expand default, and reading the raw
+                    map reintroduces the "focused epic won't collapse" bug. */}
                 <div
                   role="button"
                   tabIndex={0}
-                  onClick={() => openDetail(e.id)}
+                  aria-expanded={isOpen}
+                  onClick={() => setExpanded((st) => ({ ...st, [e.id]: !isOpen }))}
                   onKeyDown={(ev) => {
                     if (ev.target !== ev.currentTarget) return;
                     if (ev.key === "Enter" || ev.key === " ") {
                       ev.preventDefault();
-                      openDetail(e.id);
+                      setExpanded((st) => ({ ...st, [e.id]: !isOpen }));
                     }
                   }}
-                  title={`Open ${e.id}`}
+                  title={isOpen ? "Hide children" : "Show children"}
                   className="flex cursor-pointer items-center gap-[14px] p-[16px_18px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
                 >
                   <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] bg-[var(--brand-weak)] text-[var(--brand)]">
@@ -178,20 +187,38 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
                       />
                     </div>
                   </div>
-                  {/* The toggle is scoped to the chevron so the row itself can
-                      open details. Kept as a <button> inside a role="button"
-                      div (not a real <button>) to avoid the nested-interactive
-                      regression fixed in a3c1328 / GH #10. */}
+                  {/* Secondary action, so it gets a small explicit target with a
+                      VISIBLE word — an icon alone wasn't discoverable, which is
+                      half of what GH #17 was about. stopPropagation is
+                      load-bearing: without it this also toggles the row. */}
                   <button
                     type="button"
                     onClick={(ev) => {
                       ev.stopPropagation();
+                      openDetail(e.id);
+                    }}
+                    aria-label={`Open details for ${e.id}`}
+                    title={`Open details for ${e.id}`}
+                    className="flex h-7 flex-shrink-0 items-center gap-[5px] rounded-[8px] border border-border bg-[var(--surface-2)] px-[9px] text-[11.5px] font-[550] text-[var(--text-2)] hover:border-[var(--brand)] hover:text-[var(--brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
+                  >
+                    <Icon name="list" size={12} className="flex-shrink-0" />
+                    <span>Details</span>
+                  </button>
+                  {/* Redundant mouse convenience for the row's own toggle. The
+                      row carries aria-expanded, so this is aria-hidden and out
+                      of the tab order — two elements announcing the same
+                      expanded state is a screen-reader annoyance. Stays a
+                      <button> inside a role="button" div, never a real
+                      <button>, per a3c1328 / GH #10. */}
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    aria-hidden="true"
+                    onClick={(ev) => {
+                      ev.stopPropagation();
                       setExpanded((st) => ({ ...st, [e.id]: !isOpen }));
                     }}
-                    aria-expanded={isOpen}
-                    aria-label={isOpen ? `Collapse ${e.id}` : `Expand ${e.id}`}
-                    title={isOpen ? "Collapse children" : "Expand children"}
-                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[8px] text-[var(--text-3)] hover:bg-[var(--surface-2)] hover:text-[var(--text-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
+                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[8px] text-[var(--text-3)] hover:bg-[var(--surface-2)] hover:text-[var(--text-2)]"
                   >
                     <Icon
                       name="chevron"
