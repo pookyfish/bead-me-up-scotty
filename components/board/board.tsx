@@ -16,7 +16,7 @@ import { useOrder, useSetOrder } from "@/hooks/use-order";
 import { useBoardPrefs } from "@/hooks/use-board-prefs";
 import { isBlocked } from "@/lib/beads-view";
 import { FilterBar } from "@/components/filter-bar";
-import { matchesFilters, emptyFilters, type Filters } from "@/lib/filters";
+import { matchesFilters, emptyFilters, labelOptionsFrom, type Filters } from "@/lib/filters";
 import { BOARD_COLUMNS as COLUMNS, sortByOrder as sortCards } from "@/lib/board-columns";
 import { Column } from "./column";
 import type { Bead } from "@/lib/schema";
@@ -30,6 +30,9 @@ export function Board() {
   const orders = React.useMemo(() => orderData?.orders ?? {}, [orderData]);
   const [filters, setFilters] = React.useState<Filters>(emptyFilters);
   const [showArchived, setShowArchived] = React.useState(false);
+  // Derived from ALL beads (not the filtered set) so selecting one label
+  // doesn't make the remaining options vanish from the dropdown.
+  const labelOptions = React.useMemo(() => labelOptionsFrom(beads), [beads]);
   // Time-window filter for the Done column: null = all, else "closed within N days" (bead nad).
   const [doneWindow, setDoneWindow] = React.useState<number | null>(null);
   // Mount-time "now" for the window cutoff — captured once (day-granular, so it
@@ -129,6 +132,7 @@ export function Board() {
         <FilterBar
           filters={filters}
           onChange={setFilters}
+          labelOptions={labelOptions}
           showArchived={showArchived}
           onShowArchived={setShowArchived}
         />
