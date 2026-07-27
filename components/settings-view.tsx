@@ -47,11 +47,29 @@ function SettingsForm({ data }: { data: DoctorResponse }) {
   const [actor, setActor] = React.useState(data.config.humanActor);
   const [allowlist, setAllowlist] = React.useState<string[]>(data.config.humanAllowlist);
   const [newName, setNewName] = React.useState("");
+  // Fallback poll interval, edited in seconds. Clamped to the config API's
+  // accepted range (1–300s = 1000–300000ms) before saving; falls back to the
+  // current value when the field is left blank or non-numeric.
+  const [pollSec, setPollSec] = React.useState(String(Math.round(data.config.pollIntervalMs / 1000)));
+  const clampSec = (s: string) => {
+    const n = Math.round(Number(s));
+    return Number.isFinite(n) && n > 0
+      ? Math.min(300, Math.max(1, n))
+      : Math.round(data.config.pollIntervalMs / 1000);
+  };
 
   const save = useMutation({
-    mutationFn: () => api.saveConfig({ humanActor: actor, humanAllowlist: allowlist }),
+    mutationFn: () =>
+      api.saveConfig({
+        humanActor: actor,
+        humanAllowlist: allowlist,
+        pollIntervalMs: clampSec(pollSec) * 1000,
+      }),
     onSuccess: () => {
       toast.success("Settings saved");
+      // Re-fetch beads so useBeads picks up the new meta.pollIntervalMs and
+      // reschedules its fallback poll immediately (TanStack re-reads the
+      // functional refetchInterval after each fetch).
       qc.invalidateQueries({ queryKey: ["doctor"] });
       qc.invalidateQueries({ queryKey: ["beads"] });
     },
@@ -139,9 +157,19 @@ function SettingsForm({ data }: { data: DoctorResponse }) {
               Live changes stream in instantly; this only backstops a dropped stream
             </div>
           </div>
-          <span className="rounded-lg border border-border bg-[var(--surface-2)] px-[10px] py-1 font-mono text-[13px] text-[var(--text-2)]">
-            {Math.round(data.config.pollIntervalMs / 1000)}s
-          </span>
+          <div className="flex flex-shrink-0 items-center gap-[6px]">
+            <input
+              type="number"
+              min={1}
+              max={300}
+              value={pollSec}
+              onChange={(e) => setPollSec(e.target.value)}
+              onBlur={() => setPollSec(String(clampSec(pollSec)))}
+              aria-label="Fallback refresh interval in seconds"
+              className={`${inputClass} w-[72px] text-right font-mono`}
+            />
+            <span className="font-mono text-[13px] text-[var(--text-3)]">s</span>
+          </div>
         </div>
         <div className="flex flex-col gap-[10px]">
           <div>

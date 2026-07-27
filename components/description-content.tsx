@@ -1,6 +1,7 @@
 "use client";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import rehypeHighlight from "rehype-highlight";
 import { api } from "@/lib/api-client";
 
 /**
@@ -75,8 +76,16 @@ export function DescriptionContent({
       <div className="bd-md">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
+          // Colorize fenced code blocks; `ignoreMissing` keeps unknown languages
+          // from throwing (they fall back to plain text). Themed via .hljs CSS.
+          rehypePlugins={[[rehypeHighlight, { ignoreMissing: true }]]}
           // Preserve attachment:// refs for local images, but reject executable
           // or local-file schemes when comments/descriptions render user text.
+          // NB: the syntax-highlighting branch had swapped this for a pass-through
+          // `(url) => url` so that attachment:// would resolve — but
+          // safeUrlTransform already allows attachment://, so the swap bought
+          // nothing and silently re-opened javascript:/file: URLs in rendered
+          // user text. Keep the guard.
           urlTransform={safeUrlTransform}
           components={components}
         >

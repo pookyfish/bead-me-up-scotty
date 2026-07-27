@@ -13,6 +13,8 @@ import { useApp } from "@/components/app-context";
 import { useImageDrop } from "@/hooks/use-image-drop";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
 import { DescriptionContent } from "@/components/description-content";
+import { MarkdownToolbar, applyTransform } from "@/components/markdown-toolbar";
+import { bold, italic, link } from "@/lib/markdown-edit";
 import { AiAssistPanel } from "@/components/ai-assist-panel";
 import {
   useUpdateBead,
@@ -467,6 +469,7 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
                 onDragOver={drop.onDragOver}
                 onDragLeave={drop.onDragLeave}
               >
+                <MarkdownToolbar textareaRef={descRef} value={descDraft} onChange={setDescDraft} />
                 <textarea
                   ref={descRef}
                   value={descDraft}
@@ -477,6 +480,16 @@ function DrawerBody({ bead, onClose }: { bead: Bead; onClose: () => void }) {
                     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
                       e.preventDefault();
                       saveEdit();
+                      return;
+                    }
+                    // Formatting shortcuts while the textarea is focused.
+                    if (e.metaKey || e.ctrlKey) {
+                      const fn =
+                        e.key === "b" ? bold : e.key === "i" ? italic : e.key === "k" ? link : null;
+                      if (fn) {
+                        e.preventDefault();
+                        applyTransform(descRef.current, descDraft, setDescDraft, fn);
+                      }
                     }
                   }}
                   rows={6}
