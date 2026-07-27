@@ -59,7 +59,7 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
           <span>Hide closed</span>
         </button>
         <button
-          onClick={() => openCreate()}
+          onClick={() => openCreate({ type: "epic" })}
           className="flex h-9 items-center gap-[6px] rounded-[9px] px-[14px] text-[13px] font-[550] text-white"
           style={{ background: "var(--brand)" }}
         >
@@ -168,7 +168,7 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
                       );
                     })}
                     <button
-                      onClick={() => openCreate(e.id)}
+                      onClick={() => openCreate({ parent: e.id })}
                       className="m-[2px] flex w-[calc(100%-4px)] items-center gap-[7px] rounded-[9px] p-[9px_12px] text-[12.5px] font-[550] text-[var(--brand)] hover:bg-[var(--surface)]"
                     >
                       <Icon name="plus" size={14} />

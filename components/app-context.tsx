@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import { type BeadType } from "@/lib/schema";
 import type { Bead } from "@/lib/schema";
 import type { Meta } from "@/lib/api-client";
 
@@ -24,7 +25,8 @@ interface AppContextValue {
   loading: boolean;
   error?: string;
   openDetail: (id: string) => void;
-  openCreate: (parent?: string) => void;
+  /** Open the create dialog, optionally presetting the parent and/or the type. */
+  openCreate: (opts?: { parent?: string; type?: BeadType }) => void;
   /** Jump to the Epics screen and focus a specific epic (bead 55b). */
   openEpic: (epicId: string) => void;
 }

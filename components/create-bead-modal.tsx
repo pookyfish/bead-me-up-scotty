@@ -38,10 +38,13 @@ interface FormState {
 export function CreateBeadModal({
   open,
   parent,
+  type,
   onOpenChange,
 }: {
   open: boolean;
   parent: string;
+  /** Preselected issue type, e.g. "epic" from the Epics screen. A default, not a lock. */
+  type?: BeadType;
   onOpenChange: (o: boolean) => void;
 }) {
   // ~50% wider than the old 540px default; drag the right edge to resize (persisted).
@@ -64,13 +67,25 @@ export function CreateBeadModal({
           title="Drag to resize"
           className="absolute right-0 top-0 z-20 h-full w-1.5 cursor-ew-resize hover:bg-[var(--brand)]/40"
         />
-        {open && <CreateForm parent={parent} onClose={() => onOpenChange(false)} />}
+        {/* Conditionally mounted, so the form remounts on every open and the
+            preset below is picked up fresh — no useEffect sync needed. */}
+        {open && (
+          <CreateForm parent={parent} type={type} onClose={() => onOpenChange(false)} />
+        )}
       </DialogContent>
     </Dialog>
   );
 }
 
-function CreateForm({ parent, onClose }: { parent: string; onClose: () => void }) {
+function CreateForm({
+  parent,
+  type: presetType,
+  onClose,
+}: {
+  parent: string;
+  type?: BeadType;
+  onClose: () => void;
+}) {
   const { beads, meta, projectId } = useApp();
   const create = useCreateBead();
   const qc = useQueryClient();
@@ -78,7 +93,7 @@ function CreateForm({ parent, onClose }: { parent: string; onClose: () => void }
   const isDemo = meta?.kind === "demo";
 
   const [form, setForm] = React.useState<FormState>({
-    type: "task",
+    type: presetType ?? "task",
     priority: 2,
     title: "",
     description: "",
@@ -178,7 +193,7 @@ function CreateForm({ parent, onClose }: { parent: string; onClose: () => void }
         </div>
         <div className="flex-1">
           <DialogTitle className="text-[15px] font-[650]">
-            {parent ? "New child bead" : "New bead"}
+            {presetType ? `New ${typeLabel(presetType).toLowerCase()}` : parent ? "New child bead" : "New bead"}
           </DialogTitle>
           <DialogDescription className="font-mono text-[11.5px] text-[var(--text-3)]">
             bd create … --json

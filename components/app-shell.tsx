@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import { type BeadType } from "@/lib/schema";
 import Link from "next/link";
 import { useBeads } from "@/hooks/use-beads";
 import { useBeadsStream } from "@/hooks/use-beads-stream";
@@ -28,10 +29,11 @@ export function AppShell({ projectId }: { projectId: string }) {
   const { toggle: toggleTheme } = useTheme();
   const [openId, setOpenId] = React.useState<string | null>(null);
   const [palette, setPalette] = React.useState(false);
-  const [create, setCreate] = React.useState<{ open: boolean; parent: string }>({
-    open: false,
-    parent: "",
-  });
+  const [create, setCreate] = React.useState<{
+    open: boolean;
+    parent: string;
+    type?: BeadType;
+  }>({ open: false, parent: "" });
 
   const { data, isLoading, error } = useBeads(projectId);
   // Live push: refetch the moment this project's .beads/ mutates, instead of
@@ -41,7 +43,13 @@ export function AppShell({ projectId }: { projectId: string }) {
   const index = React.useMemo(() => makeIndex(beads), [beads]);
 
   const openDetail = React.useCallback((id: string) => setOpenId(id), []);
-  const openCreate = React.useCallback((parent = "") => setCreate({ open: true, parent }), []);
+  // Options object rather than positional args so future presets (assignee,
+  // priority) can be added without churning every call site again.
+  const openCreate = React.useCallback(
+    (opts: { parent?: string; type?: BeadType } = {}) =>
+      setCreate({ open: true, parent: opts.parent ?? "", type: opts.type }),
+    [],
+  );
 
   // Jump to the Epics screen and focus an epic (bead 55b). The nonce makes each
   // request distinct so clicking the same epic again re-triggers the scroll.
@@ -151,6 +159,7 @@ export function AppShell({ projectId }: { projectId: string }) {
       <CreateBeadModal
         open={create.open}
         parent={create.parent}
+        type={create.type}
         onOpenChange={(o) => setCreate((c) => ({ ...c, open: o }))}
       />
 
