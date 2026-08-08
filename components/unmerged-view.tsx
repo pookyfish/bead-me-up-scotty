@@ -194,11 +194,76 @@ function BranchRow({
   );
 }
 
+function Legend() {
+  const Row = ({ chip, children }: { chip: React.ReactNode; children: React.ReactNode }) => (
+    <div className="flex items-baseline gap-2">
+      <span className="w-[150px] flex-shrink-0 text-right">{chip}</span>
+      <span className="text-[12px] text-[var(--text-2)]">{children}</span>
+    </div>
+  );
+  return (
+    <div className="flex flex-col gap-[7px] rounded-[10px] border border-border bg-[var(--surface)] px-4 py-3">
+      <div className="text-[12px] font-[650]">What every marking means <span className="font-normal text-[var(--text-3)]">(each pill also explains itself on hover)</span></div>
+      <Row chip={<Chip tone="red">⛔ closed bead, unmerged</Chip>}>
+        The lethal combo: this branch&apos;s bead was CLOSED but the branch never merged — finished
+        work is sitting lost. Merge it, or ack it if it&apos;s deliberate.
+      </Row>
+      <Row chip={<Chip tone="green">✓ merges clean</Chip>}>
+        A trial merge into the base ref succeeds with no conflicts (computed in-memory — the real
+        working tree is never touched).
+      </Row>
+      <Row chip={<Chip tone="amber">⚠ 3 conflicts</Chip>}>
+        The trial merge against the base ref hits conflicting files. Hover for the list; expand the
+        row (chevron) and conflicted files show red.
+      </Row>
+      <Row chip={<Chip tone="amber">⚔ fights 2 branches</Chip>}>
+        This branch conflicts with OTHER unmerged branches — whichever merges second will fight.
+        Details in the &quot;Branch-vs-branch conflicts&quot; section below the list.
+      </Row>
+      <Row chip={<Chip tone="muted">cluster 1</Chip>}>
+        Related-by-code: branches sharing this number changed at least one of the same files.
+        Review them together and mind merge order. Not a conflict by itself.
+      </Row>
+      <Row chip={<Chip tone="amber">adds-only</Chip>}>
+        Build-alongside smell: the branch ONLY adds new files — an agent may have built a parallel
+        system instead of extending the existing one.
+      </Row>
+      <Row chip={<Chip tone="amber">no bead</Chip>}>
+        Untracked work: no bead matches this branch&apos;s name or commit subjects.
+      </Row>
+      <Row chip={<Chip tone="muted">named deliberate</Chip>}>
+        The branch name itself says it&apos;s intentionally unmerged (UNREVIEWED, DO-NOT-MERGE, wip…),
+        so it sits dimmed at the bottom.
+      </Row>
+      <Row chip={<span className="inline-flex items-center rounded-full border border-[var(--brand)]/40 px-[7px] py-px font-mono text-[10.5px] font-semibold text-[var(--brand)]">sq10u · open</span>}>
+        The linked bead (click to open). A <span className="whitespace-nowrap">dashed border</span> means the link is a fuzzy
+        title match, not an exact bead-id match — trust it a little less.
+      </Row>
+      <Row chip={<span className="rounded-md border border-border px-[7px] py-px text-[10.5px] font-medium text-[var(--text-3)]">ack</span>}>
+        Mark a branch as deliberately unmerged: it dims and sinks. Kept per-commit, so new commits
+        on an acked branch re-surface it. un-ack reverses it.
+      </Row>
+      <Row chip={<span className="font-mono text-[11px]"><span className="text-[#22c55e]">A</span>/<span className="text-[#f59e0b]">M</span>/<span className="text-[#ef4444]">D</span>/R</span>}>
+        In an expanded row&apos;s file list: Added / Modified / Deleted / Renamed vs the merge-base.
+      </Row>
+      <Row chip={<span className="text-[12px]">👯 sections</span>}>
+        Below the list: &quot;Branch-vs-branch conflicts&quot; (proven pairwise fights) and &quot;Possibly
+        duplicate open beads&quot; (near-identical titles — two agents may be building the same thing).
+      </Row>
+      <div className="text-[11.5px] text-[var(--text-3)]">
+        Rows sort: red flags first, then untracked (no bead), then newest; acked/deliberate sink to
+        the bottom. Scans cache for a minute — Rescan forces a fresh pass.
+      </div>
+    </div>
+  );
+}
+
 export function UnmergedView() {
   const { projectId } = useApp();
   const { data, isLoading } = useUnmerged(projectId);
   const qc = useQueryClient();
   const [refreshing, setRefreshing] = React.useState(false);
+  const [showLegend, setShowLegend] = React.useState(false);
   const [acks, setAcks] = React.useState<Set<string>>(() =>
     typeof window === "undefined" ? new Set() : loadAcks(projectId),
   );
@@ -268,6 +333,15 @@ export function UnmergedView() {
           </span>
         )}
         <button
+          onClick={() => setShowLegend((s) => !s)}
+          className={cn(
+            "rounded-md border border-border px-[10px] py-1 text-[12px] font-medium hover:bg-[var(--surface-2)] hover:text-[var(--text)]",
+            showLegend ? "bg-[var(--brand-weak)] text-[var(--brand)]" : "text-[var(--text-2)]",
+          )}
+        >
+          Legend
+        </button>
+        <button
           onClick={refresh}
           disabled={refreshing}
           className="rounded-md border border-border px-[10px] py-1 text-[12px] font-medium text-[var(--text-2)] hover:bg-[var(--surface-2)] hover:text-[var(--text)] disabled:opacity-50"
@@ -289,6 +363,7 @@ export function UnmergedView() {
           </div>
         ) : (
           <div className="mx-auto flex max-w-4xl flex-col gap-3">
+            {showLegend && <Legend />}
             {redCount > 0 && (
               <div className="rounded-[10px] border border-[#ef4444]/50 bg-[#ef4444]/[.08] px-4 py-2 text-[12.5px] font-medium text-[#ef4444]">
                 ⛔ {redCount} branch{redCount === 1 ? " has" : "es have"} a CLOSED bead but never
