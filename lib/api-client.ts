@@ -1,5 +1,6 @@
 import type { Bead, CreateInput, UpdateInput, DepType } from "./schema";
 import type { UpdateStatus, UpdateResult } from "./update-types";
+import type { UnmergedResponse } from "./unmerged-types";
 
 export interface Meta {
   kind: "bd" | "demo";
@@ -193,6 +194,9 @@ export const api = {
 
   activity: (projectId: string) => request<ActivityResponse>(`${base(projectId)}/activity`),
 
+  unmerged: (projectId: string, refresh?: boolean) =>
+    request<UnmergedResponse>(`${base(projectId)}/unmerged${refresh ? "?refresh=1" : ""}`),
+
   insights: (projectId: string, days: number) =>
     request<InsightsData>(`${base(projectId)}/insights?days=${days}`),
 
@@ -255,6 +259,21 @@ export const api = {
         .map(encodeURIComponent)
         .join("/");
       return `${base(projectId)}/attachments/${encoded}`;
+    },
+  },
+
+  // Read-only media served from inside the project repo (design mockups,
+  // spritesheets, GIFs referenced by repo-relative path in bead descriptions).
+  media: {
+    /** Map a repo-relative path (or `repo://…` ref) to its serve URL. */
+    urlFor: (projectId: string, ref: string) => {
+      const rel = ref.replace(/^repo:\/\//, "").replace(/\\/g, "/");
+      const encoded = rel
+        .split("/")
+        .filter((s) => s && s !== ".")
+        .map(encodeURIComponent)
+        .join("/");
+      return `${base(projectId)}/media/${encoded}`;
     },
   },
 

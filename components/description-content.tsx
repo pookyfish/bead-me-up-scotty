@@ -15,11 +15,17 @@ import { api } from "@/lib/api-client";
  *    is provided; toggling reports the checkbox's document-order index so the
  *    caller can rewrite the source markdown (see lib/beads-view toggleTask).
  */
-const IMG_PATTERN = "!\\[([^\\]]*)\\]\\((attachment:\\/\\/[^)\\s]+|https?:\\/\\/[^)\\s]+)\\)";
-const SAFE_URL_PATTERN = /^(https?:|mailto:|attachment:\/\/)/i;
+const IMG_PATTERN =
+  "!\\[([^\\]]*)\\]\\((attachment:\\/\\/[^)\\s]+|repo:\\/\\/[^)\\s]+|https?:\\/\\/[^)\\s]+|[^)\\s:]+\\.(?:png|jpe?g|gif|webp|avif|bmp|svg|mp4|webm))\\)";
+const SAFE_URL_PATTERN = /^(https?:|mailto:|attachment:\/\/|repo:\/\/)/i;
 
 function safeUrlTransform(url: string): string {
-  return SAFE_URL_PATTERN.test(url) ? url : "";
+  if (SAFE_URL_PATTERN.test(url)) return url;
+  // Scheme-less repo-relative refs (design mockups, spritesheets) are allowed;
+  // they resolve through the media API. Anything with a scheme not on the
+  // allowlist — and protocol-relative `//host` URLs — is rejected.
+  if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url) && !url.startsWith("//")) return url;
+  return "";
 }
 
 export function DescriptionContent({
@@ -45,7 +51,14 @@ export function DescriptionContent({
     ),
     img: ({ src, alt }) => {
       const raw = typeof src === "string" ? src : "";
-      const resolved = raw.startsWith("attachment://") ? api.attachments.urlFor(projectId, raw) : raw;
+      // attachment:// → uploaded file; repo:// or a bare relative path → a file
+      // inside the project repo (served read-only by the media API); http(s)
+      // passes through untouched.
+      const resolved = raw.startsWith("attachment://")
+        ? api.attachments.urlFor(projectId, raw)
+        : raw.startsWith("repo://") || (raw && !/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(raw) && !raw.startsWith("//"))
+          ? api.media.urlFor(projectId, raw)
+          : raw;
       return (
         // eslint-disable-next-line @next/next/no-img-element
         <img

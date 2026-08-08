@@ -14,7 +14,32 @@ import {
 import type { BeadsStore, DoctorInfo } from "./store";
 
 const pExecFile = promisify(execFile);
-const BD_BIN = process.env.BD_BIN || "bd";
+
+/**
+ * On Windows the npm-installed `bd` is a .cmd/.ps1 shim, which execFile (no
+ * shell, by design — injection safety) cannot spawn. Walk PATH for the shim
+ * and use the real bd.exe it wraps (@beads/bd ships it under node_modules).
+ * BD_BIN still overrides everything.
+ */
+function resolveBdBin(): string {
+  if (process.env.BD_BIN) return process.env.BD_BIN;
+  if (process.platform !== "win32") return "bd";
+  for (const dir of (process.env.PATH || "").split(path.delimiter)) {
+    if (!dir) continue;
+    try {
+      const direct = path.join(dir, "bd.exe");
+      if (fs.existsSync(direct)) return direct;
+      if (fs.existsSync(path.join(dir, "bd.cmd"))) {
+        const wrapped = path.join(dir, "node_modules", "@beads", "bd", "bin", "bd.exe");
+        if (fs.existsSync(wrapped)) return wrapped;
+      }
+    } catch {
+      /* unreadable PATH entry — keep scanning */
+    }
+  }
+  return "bd";
+}
+const BD_BIN = resolveBdBin();
 
 export class BdError extends Error {
   code?: string;

@@ -32,6 +32,16 @@ export function useActivity(projectId: string) {
   });
 }
 
+/** Unmerged-branch analysis (git). Server caches for a minute; the view's
+ *  refresh button calls with refresh=true to force a re-scan. */
+export function useUnmerged(projectId: string) {
+  return useQuery({
+    queryKey: ["unmerged", projectId],
+    queryFn: () => api.unmerged(projectId),
+    refetchInterval: 120000,
+  });
+}
+
 /** Flow-metrics for the Insights dashboard over a rolling window of `days`. */
 export function useInsights(projectId: string, days: number) {
   return useQuery({

@@ -39,7 +39,7 @@ Starts the server and opens your browser. Run it from a folder that has a
 .beads repo to jump straight to that project; otherwise you get the picker.
 
 Options:
-  -p, --port <n>   Port to use (default 3000, or $PORT). Auto-picks a free
+  -p, --port <n>   Port to use (default 1701, or $PORT). Auto-picks a free
                    port if the default is busy; with an explicit --port it
                    fails instead of moving.
       --host <h>   Host to bind (default from Next; or $HOST).
@@ -70,7 +70,9 @@ function parseArgs(argv) {
   opts.portExplicit = portExplicit;
   if (opts.port === undefined) {
     const env = Number(process.env.PORT);
-    opts.port = Number.isInteger(env) && env > 0 ? env : 3000;
+    // 1701 (NCC-1701): pinned off :3000, which this machine's shared map
+    // runtime owns — scotty must never race it for the port.
+    opts.port = Number.isInteger(env) && env > 0 ? env : 1701;
   }
   opts.host = opts.host || process.env.HOST || "localhost";
   // The host ends up in a spawn() command line (browser open) and a URL;

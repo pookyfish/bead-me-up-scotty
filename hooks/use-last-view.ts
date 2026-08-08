@@ -9,6 +9,7 @@ const VIEWS: View[] = [
   "graph",
   "insights",
   "activity",
+  "unmerged",
   "needsyou",
   "achievements",
   "publish",
