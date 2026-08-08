@@ -11,6 +11,7 @@ export type View =
   | "graph"
   | "insights"
   | "activity"
+  | "timeline"
   | "unmerged"
   | "needsyou"
   | "achievements"

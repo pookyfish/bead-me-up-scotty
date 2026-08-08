@@ -42,6 +42,7 @@ const NAV: { key: View; label: string; icon: string }[] = [
   { key: "graph", label: "Graph", icon: "graph" },
   { key: "insights", label: "Insights", icon: "milestone" },
   { key: "activity", label: "Activity", icon: "comment" },
+  { key: "timeline", label: "Timeline", icon: "calendar" },
   { key: "unmerged", label: "Unmerged Work", icon: "branch" },
   { key: "needsyou", label: "Needs You", icon: "user" },
   { key: "achievements", label: "Achievements", icon: "feature" },
