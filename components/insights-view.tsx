@@ -16,8 +16,10 @@ import { useApp } from "@/components/app-context";
 import { useInsights } from "@/hooks/use-beads";
 import type { InsightsData } from "@/lib/api-client";
 
-const HUMAN = "#3b82f6";
-const AGENT = "#8b5cf6";
+// Series colors come from the shared chart tokens (globals.css) so Insights and
+// the Timeline activity chart read as one system, light and dark.
+const HUMAN = "var(--chart-created)";
+const AGENT = "var(--chart-closed)";
 const RANGES = [7, 30, 90];
 const WIP_KEY = "bmus.wipLimits";
 // Only columns where a work-in-progress limit is meaningful.
@@ -123,15 +125,13 @@ function Dashboard({ data, split }: { data: InsightsData; split: boolean }) {
               contentStyle={{ fontSize: 12, background: "var(--surface)", border: "1px solid var(--border)" }}
               labelFormatter={shortDate}
             />
-            {split ? (
-              <>
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Bar dataKey="human" stackId="a" fill={HUMAN} name="Human" radius={[0, 0, 0, 0]} />
-                <Bar dataKey="agent" stackId="a" fill={AGENT} name="Agent" radius={[3, 3, 0, 0]} />
-              </>
-            ) : (
-              <Bar dataKey="total" fill="var(--brand)" name="Closed" radius={[3, 3, 0, 0]} />
-            )}
+            {/* Direct children, never a fragment: recharts discovers Bar/Legend by
+                inspecting the chart's children, and a fragment hides them (the bug
+                that left this chart empty while the KPI tile showed totals). */}
+            {split && <Legend wrapperStyle={{ fontSize: 12 }} />}
+            {split && <Bar dataKey="human" stackId="a" fill={HUMAN} name="Human" radius={[0, 0, 0, 0]} />}
+            {split && <Bar dataKey="agent" stackId="a" fill={AGENT} name="Agent" radius={[3, 3, 0, 0]} />}
+            {!split && <Bar dataKey="total" fill="var(--brand)" name="Closed" radius={[3, 3, 0, 0]} />}
           </BarChart>
         </ResponsiveContainer>
       </Panel>
@@ -147,8 +147,8 @@ function Dashboard({ data, split }: { data: InsightsData; split: boolean }) {
               labelFormatter={shortDate}
             />
             <Legend wrapperStyle={{ fontSize: 12 }} />
-            <Line type="monotone" dataKey="created" stroke="#64748b" strokeWidth={2} dot={false} name="Created" />
-            <Line type="monotone" dataKey="closed" stroke="#16a34a" strokeWidth={2} dot={false} name="Closed" />
+            <Line type="monotone" dataKey="created" stroke="var(--chart-created)" strokeWidth={2} dot={false} name="Created" />
+            <Line type="monotone" dataKey="closed" stroke="var(--chart-closed)" strokeWidth={2} dot={false} name="Closed" />
           </LineChart>
         </ResponsiveContainer>
       </Panel>
