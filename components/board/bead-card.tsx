@@ -6,6 +6,7 @@ import type { Bead } from "@/lib/schema";
 import { Icon, typeIconName } from "@/components/icons";
 import { useApp } from "@/components/app-context";
 import { CopyableId } from "@/components/copyable-id";
+import { AgeChip } from "@/components/age-chip";
 import { beadOrigin, originTitle } from "@/lib/attribution";
 import {
   catColor,
@@ -61,6 +62,7 @@ export function BeadCard({ bead, childCount = 0 }: { bead: Bead; childCount?: nu
           className="font-mono text-[11.5px] tracking-[-.01em] text-[var(--text-3)]"
         />
         <span className="flex-1" />
+        <AgeChip bead={bead} />
         <PriorityChip p={bead.priority} />
         <OriginBadge origin={o} title={originTitle(bead.created_by, o)} />
       </div>

@@ -17,6 +17,8 @@ import { Icon, typeIconName } from "@/components/icons";
 import { useApp } from "@/components/app-context";
 import { useAddDep } from "@/hooks/use-beads";
 import { catColor, typeColor } from "@/lib/beads-view";
+import { ageOf } from "@/lib/bead-age";
+import { AgeChip } from "@/components/age-chip";
 import { cn } from "@/lib/utils";
 import type { Bead } from "@/lib/schema";
 
@@ -38,22 +40,27 @@ type BeadNodeData = { bead: Bead; onOpen: (id: string) => void; dim?: boolean };
 
 function BeadNode({ data }: NodeProps) {
   const { bead, onOpen, dim } = data as unknown as BeadNodeData;
+  const stale = ageOf(bead)?.tone === "stale";
   return (
     <div
       onClick={() => onOpen(bead.id)}
       className={cn(
-        "w-[150px] cursor-pointer rounded-[11px] border border-border bg-[var(--surface)] p-[9px_11px] shadow-[var(--shadow)] hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-lg)]",
+        "w-[176px] cursor-pointer rounded-[11px] border border-border bg-[var(--surface)] p-[9px_11px] shadow-[var(--shadow)] hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-lg)]",
         dim && "opacity-40",
+        stale && "opacity-70 saturate-[.85]",
       )}
     >
       <Handle type="target" position={Position.Left} style={{ background: "var(--text-3)" }} />
       <div className="mb-[5px] flex items-center gap-[6px]">
-        <span className="h-2 w-2 rounded-full" style={{ background: catColor(bead.status) }} />
+        <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: catColor(bead.status) }} />
         <span className="font-mono text-[10.5px] text-[var(--text-3)]">{bead.id.split("-").slice(-1)[0]}</span>
+        <AgeChip bead={bead} className="!px-[3px]" />
         <span className="flex-1" />
-        <Icon name={typeIconName(bead.issue_type)} size={12} style={{ color: typeColor(bead.issue_type) }} />
+        <Icon name={typeIconName(bead.issue_type)} size={12} className="flex-shrink-0" style={{ color: typeColor(bead.issue_type) }} />
       </div>
-      <div className="text-[12px] font-[550] leading-[1.3] text-[var(--text)] [text-wrap:pretty]">
+      {/* break-words: long unbroken tokens (species lists, file paths) must
+          wrap inside the card, never overflow it. */}
+      <div className="break-words text-[12px] font-[550] leading-[1.3] text-[var(--text)] [text-wrap:pretty]">
         {bead.title.replace(/\s*\([^)]*\)\s*/, "")}
       </div>
       <Handle type="source" position={Position.Right} style={{ background: "var(--text-3)" }} />

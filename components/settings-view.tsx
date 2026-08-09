@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Icon } from "@/components/icons";
 import { useTheme } from "@/components/theme-provider";
+import { AppearanceControls } from "@/components/appearance";
 import { THEMES } from "@/lib/themes";
 import { useApp } from "@/components/app-context";
 import { api, type DoctorResponse } from "@/lib/api-client";
@@ -147,6 +148,10 @@ function SettingsForm({ data }: { data: DoctorResponse }) {
         <div className="text-[11.5px] text-[var(--text-3)]">
           Attribution is global — it applies to every project.
         </div>
+      </Card>
+
+      <Card title="Appearance">
+        <AppearanceControls />
       </Card>
 
       <Card title="Freshness & theme">

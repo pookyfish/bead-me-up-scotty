@@ -66,6 +66,119 @@ const EVENT_META: Record<DayEvent["kind"], { label: string; symbol: string; colo
   commented: { label: "commented on", symbol: "💬", color: "var(--text-3)" },
 };
 
+const CHART_SERIES = [
+  { key: "closed" as const, name: "closed", symbol: "✓", color: "var(--chart-closed)" },
+  { key: "created" as const, name: "created", symbol: "+", color: "var(--chart-created)" },
+  { key: "commented" as const, name: "comments", symbol: "💬", color: "var(--chart-comments)" },
+];
+
+/** The month's activity as stacked daily bars — the timeline's actual
+ *  timeline. Stack order (closed, created, comments) keeps the two most
+ *  CVD-confusable hues non-adjacent; 2px surface gaps separate segments. */
+function ActivityChart({
+  monthKeys,
+  events,
+  selected,
+  onSelect,
+}: {
+  monthKeys: string[];
+  events: Map<string, DayEvent[]>;
+  selected: string;
+  onSelect: (key: string) => void;
+}) {
+  const [hover, setHover] = React.useState<{ key: string; x: number } | null>(null);
+  const counts = monthKeys.map((k) => {
+    const list = events.get(k) ?? [];
+    return {
+      key: k,
+      closed: list.filter((e) => e.kind === "closed").length,
+      created: list.filter((e) => e.kind === "created").length,
+      commented: list.filter((e) => e.kind === "commented").length,
+    };
+  });
+  const max = Math.max(4, ...counts.map((c) => c.closed + c.created + c.commented));
+  const BAR = 10;
+  const GAP = 4;
+  const H = 72;
+  const width = counts.length * (BAR + GAP);
+  const hovered = hover ? counts.find((c) => c.key === hover.key) : null;
+
+  return (
+    <div className="relative rounded-[10px] border border-border bg-[var(--surface)] px-3 pb-2 pt-[9px]">
+      <div className="mb-[6px] flex items-center gap-3">
+        <span className="text-[11.5px] font-[650] text-[var(--text-2)]">Activity</span>
+        {CHART_SERIES.map((s) => (
+          <span key={s.key} className="inline-flex items-center gap-[5px] text-[10.5px] text-[var(--text-2)]">
+            <span className="h-[8px] w-[8px] rounded-[2px]" style={{ background: s.color }} />
+            {s.symbol} {s.name}
+          </span>
+        ))}
+        <span className="ml-auto text-[10.5px] text-[var(--text-3)]">peak {max}/day · click a bar to open the day</span>
+      </div>
+      <svg
+        viewBox={`0 0 ${width} ${H + 14}`}
+        style={{ width: "100%", height: "auto", display: "block" }}
+        onMouseLeave={() => setHover(null)}
+      >
+        <line x1={0} y1={H + 0.5} x2={width} y2={H + 0.5} stroke="var(--border)" strokeWidth={1} />
+        {counts.map((c, i) => {
+          const x = i * (BAR + GAP);
+          const total = c.closed + c.created + c.commented;
+          let y = H;
+          const segs = CHART_SERIES.map((s) => {
+            const v = c[s.key];
+            const h = (v / max) * (H - 6);
+            y -= h;
+            // 2px surface gap between stacked segments (marks spec).
+            return { s, v, y: y, h: Math.max(0, h - (v > 0 ? 2 : 0)) };
+          });
+          const isSel = c.key === selected;
+          const day = Number(c.key.slice(-2));
+          return (
+            <g
+              key={c.key}
+              style={{ cursor: "pointer" }}
+              onClick={() => onSelect(c.key)}
+              onMouseEnter={(e) => setHover({ key: c.key, x: (e.currentTarget as SVGGElement).getBoundingClientRect().left })}
+            >
+              {/* full-height hit target, wider than the mark */}
+              <rect x={x - GAP / 2} y={0} width={BAR + GAP} height={H + 14} fill="transparent" />
+              {segs.map(({ s, v, y: sy, h }) =>
+                v > 0 ? (
+                  <rect key={s.key} x={x} y={sy} width={BAR} height={h} rx={2} fill={s.color} />
+                ) : null,
+              )}
+              {total === 0 && <rect x={x} y={H - 2} width={BAR} height={2} rx={1} fill="var(--surface-3)" />}
+              {isSel && (
+                <rect x={x - 1.5} y={2} width={BAR + 3} height={H - 2} rx={4} fill="none" stroke="var(--brand)" strokeWidth={1.5} />
+              )}
+              {(day === 1 || day % 7 === 1) && (
+                <text x={x + BAR / 2} y={H + 11} textAnchor="middle" fontSize={7.5} fill="var(--text-3)">
+                  {day}
+                </text>
+              )}
+            </g>
+          );
+        })}
+      </svg>
+      {hovered && (
+        <div
+          className="pointer-events-none absolute -top-2 z-10 -translate-y-full rounded-[8px] border border-border bg-[var(--surface)] px-[10px] py-[6px] text-[11px] shadow-[var(--shadow-lg)]"
+          style={{ left: Math.min(Math.max(0, ((monthKeys.indexOf(hovered.key) + 0.5) / monthKeys.length) * 100), 88) + "%" }}
+        >
+          <div className="font-[650]">{fmtDate(`${hovered.key}T12:00:00`)}</div>
+          {CHART_SERIES.map((s) => (
+            <div key={s.key} className="flex items-center gap-[6px] text-[var(--text-2)]">
+              <span className="h-[7px] w-[7px] rounded-[2px]" style={{ background: s.color }} />
+              {s.name}: <span className="font-mono text-[var(--text)]">{hovered[s.key]}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DayCell({
   date,
   inMonth,
@@ -277,6 +390,13 @@ export function TimelineView() {
               }
             />
           </div>
+
+          <ActivityChart
+            monthKeys={monthKeys}
+            events={events}
+            selected={selected}
+            onSelect={setSelected}
+          />
 
           <div>
             <div className="mb-1 grid grid-cols-7 gap-[6px]">

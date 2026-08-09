@@ -436,3 +436,15 @@ html[data-theme="rose-pine"] {
 .react-flow .react-flow__controls-button svg {
   fill: currentColor;
 }
+
+/* Timeline activity chart series (dataviz-validated light+dark palettes) */
+:root {
+  --chart-created: #6d5ef0;
+  --chart-closed: #16a34a;
+  --chart-comments: #b45309;
+}
+.dark {
+  --chart-created: #8b7ff5;
+  --chart-closed: #1fb155;
+  --chart-comments: #d97706;
+}
