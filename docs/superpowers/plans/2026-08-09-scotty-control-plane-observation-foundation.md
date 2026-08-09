@@ -13,12 +13,14 @@
 - Beads remains the sole task/work/dependency/comment authority; this plan must not read `.beads` files, call `bd`, call `getStore()`, or add a second task schema.
 - Herdr remains the sole controller of Herdr-managed CLI sessions. Stage 1 observes `herdr api snapshot`; it does not prompt, focus, stop, launch, or infer authorization.
 - Runtime Manager remains the service authority. Stage 1 uses only authenticated `GET /health` and `GET /services`; it never calls a lifecycle endpoint.
-- Git health uses only read-only commands and must not fetch, mutate refs, write the index/object database, create/remove worktrees, or recursively watch `.git`.
+- Git health uses only an exact read-command allowlist and must not fetch, mutate refs, write the index/object database, create/remove worktrees, or recursively watch `.git`. The extracted neutral runner preserves existing Unmerged Work `merge-tree --write-tree` behavior and is not mislabeled read-only.
 - `.orchestra/state.json` is coordination truth for this fork, but its large real schema is parsed section-by-section; malformed history records do not erase valid current records.
 - Preserve `actor identity != session != execution surface != orchestration role != Bead/task` in every type and fixture.
 - Every source reports stable provenance, observation time, freshness, capabilities, and stable diagnostic codes. Unknown and unavailable are not rendered as down, idle, or uncontrolled facts.
+- Freshness has one cross-source meaning: `live` was acquired successfully in this request (even if incomplete); `cached` is a validated unchanged-source cache hit; `stale` is retained last-known data after current acquisition failed; `unknown` means no trustworthy data. Adapters pass an explicit nondefault freshness for partial-live versus retained-stale results.
 - One failed source never fails the complete snapshot. Unknown project IDs still return the existing `ConfigError`/404 envelope.
 - Stage 1 has no UI, Board/List semantics, new Beads statuses, dispatch, lease writes, review writes, local persistence, or source configuration fields.
+- AgentChattr remains the separately approved optional communication-provider Stage 1.5. This milestone neither installs it nor adds it as a sixth observation source.
 - The Stage 1 signal stream carries only invalidation source IDs, never domain state. It reuses `lib/sse-registry.ts`; no second Beads watcher or shutdown registry is allowed.
 - The supervisor ruling on Beads `better-palia-maps-l4cq3.1` assigns the reusable SSE lifecycle to Stage 1. Focused Workbench consumes it later and retains ownership of client reconnect UX and Board/List behavior.
 - This repository forbids worktrees. All work uses the root checkout on `codex/scotty-control-plane-foundation`, and the checkout must return to clean `main` after integration.
@@ -30,7 +32,7 @@
 
 - [ ] Re-read `.orchestra/state.json`, verify `codex-supervisor` still holds supervision, and confirm no unresolved owner/lock conflict covers this work.
 - [ ] Verify the root Scotty checkout is `codex/scotty-control-plane-foundation`, the branch tracks its pushed remote, and the only uncommitted path is this registered plan.
-- [ ] Expand `active_work.files_touching` and acquire locks before dispatch for every implementation path named by Tasks 1-9: `package.json`, `package-lock.json`, `lib/control-plane/**`, `lib/git-read.ts`, `lib/git-read.test.ts`, `lib/git-unmerged.ts`, `lib/git-unmerged.test.ts`, `lib/signal-sse.ts`, `lib/signal-sse.test.ts`, `lib/orchestra-watch.ts`, `lib/orchestra-watch.test.ts`, `lib/api-client.ts`, `app/api/p/[projectId]/control-plane/route.ts`, `app/api/p/[projectId]/control-plane/stream/route.ts`, `app/api/p/[projectId]/beads/stream/route.ts`, `next.config.ts`, and `docs/control-plane-sources.md`.
+- [ ] Expand `active_work.files_touching` and acquire locks before implementation for every path named by Tasks 1-9: `package.json`, `package-lock.json`, `lib/control-plane/**`, `lib/git-command.ts`, `lib/git-command.test.ts`, `lib/git-unmerged.ts`, `lib/git-unmerged.test.ts`, `lib/signal-sse.ts`, `lib/signal-sse.test.ts`, `lib/signal-sse-test-helpers.ts`, `lib/orchestra-watch.ts`, `lib/orchestra-watch.test.ts`, `lib/api-client.ts`, `app/api/p/[projectId]/control-plane/route.ts`, `app/api/p/[projectId]/control-plane/route.test.ts`, `app/api/p/[projectId]/control-plane/stream/route.ts`, `app/api/p/[projectId]/control-plane/stream/route.test.ts`, `app/api/p/[projectId]/beads/stream/route.ts`, `next.config.ts`, and `docs/control-plane-sources.md`.
 - [ ] Stop and record a conflict if any listed path is locked by another active owner. Do not switch branches, stash, use a worktree, or absorb unrelated dirty files.
 - [ ] Read the installed Next 16 route-handler and streaming references before editing routes: `node_modules/next/dist/docs/01-app/01-getting-started/15-route-handlers.md`, `node_modules/next/dist/docs/01-app/02-guides/streaming.md`, `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/route.md`, and the route-runtime reference.
 - [ ] Record Task 1 BASE in the SDD ledger. Every task commit must use an explicit pathspec and immediately run `git show --stat --oneline HEAD`; stop if an unrelated path entered the commit.
@@ -98,9 +100,10 @@ describe("control-plane observation contract", () => {
       "Service inventory exceeded the read budget.",
       { epoch: 13 },
       ["observe-health"],
-      { observedAt: "2026-08-09T22:00:00.000Z" },
+      { observedAt: "2026-08-09T22:00:00.000Z", freshness: "live" },
     );
     expect(observationSchema.parse(result).error?.code).toBe("timeout");
+    expect(result.freshness).toBe("live");
   });
 
   it("preserves explicit live, cached, stale, and unknown freshness", () => {
@@ -301,13 +304,17 @@ git show --stat --oneline HEAD
 ### Task 2: Add the optional orchestra coordination adapter
 
 **Files:**
+- Modify: `lib/control-plane/types.ts`
 - Create: `lib/control-plane/orchestra.ts`
+- Create: `lib/control-plane/test-helpers.ts`
+- Test: `lib/control-plane/types.test.ts`
 - Test: `lib/control-plane/orchestra.test.ts`
 
 **Interfaces:**
 - Consumes: `Observation<T>` helpers from Task 1.
-- Produces: `OrchestraSnapshot`, `orchestraSnapshotSchema`, and `observeOrchestra(projectPath, deps?)`.
+- Produces client-safe `OrchestraSnapshot` and `orchestraSnapshotSchema` from `types.ts`; the server-only adapter exports `observeOrchestra(projectPath, deps?)`.
 - Guarantee: cache identity is resolved state path plus `mtimeMs` plus size; the adapter performs no write.
+- Payload budget: current maps plus bounded projections only. Never place raw historical arrays or arbitrary record blobs on the wire.
 
 - [ ] **Step 1: Write failing tests for live-file realities**
 
@@ -328,14 +335,26 @@ it("keeps valid current records around malformed history", async () => {
   const result = await observeOrchestra("C:/repo", fakeFs({ json: orchestraMixedFixture }));
   expect(result.data?.supervisor?.actor).toBe("codex-supervisor");
   expect(result.data?.activeWork).toHaveProperty("valid-entry");
-  expect(result.data?.rejectedRecords.decisions).toBe(1);
+  expect(result.data?.sections.decisions.rejected).toBe(1);
 });
 
-it("reuses a path/mtime/size cache hit", async () => {
+it("bounds and projects history instead of exposing raw records", async () => {
+  const result = await observeOrchestra("C:/repo", fakeFs({ json: orchestraLargeFixture }));
+  expect(result.data?.pendingIntegration).toHaveLength(50);
+  expect(result.data?.recentDecisions).toHaveLength(20);
+  expect(result.data?.sections.integrationQueue.truncated).toBe(true);
+  const serialized = JSON.stringify(result);
+  expect(serialized).not.toContain("raw_validation_blob");
+  expect(serialized).not.toContain("raw_details_blob");
+  expect(serialized).not.toContain("raw_files_changed_blob");
+});
+
+it("reuses a path/mtime/size cache hit and labels it cached", async () => {
   const deps = fakeFs({ json: orchestraMixedFixture, mtimeMs: 10, size: 100 });
   await observeOrchestra("C:/repo", deps);
-  await observeOrchestra("C:/repo", deps);
+  const second = await observeOrchestra("C:/repo", deps);
   expect(deps.readCount()).toBe(1);
+  expect(second.freshness).toBe("cached");
 });
 ```
 
@@ -349,47 +368,81 @@ Expected: FAIL because the adapter is missing.
 
 - [ ] **Step 3: Implement passthrough section schemas and independent record parsing**
 
-Implement these exact public shapes in `orchestra.ts`:
+Define these exact client-safe shapes and their Zod schemas in `types.ts`; `orchestra.ts` imports them and contains only server-side file/parse/cache behavior:
 
 ```ts
+export interface OrchestraSectionStats {
+  total: number;
+  included: number;
+  rejected: number;
+  truncated: boolean;
+}
+
 export interface OrchestraSnapshot {
   schemaVersion: 2;
   supervisor: {
     actor: string;
-    holder?: string;
-    sessionId?: string;
-    paneId?: string;
-    channelOfRecord?: string;
+    holder: string | null;
+    sessionId: string | null;
+    paneId: string | null;
+    channelOfRecord: string | null;
   } | null;
   activeWork: Record<string, {
-    beadId?: string;
-    status?: string;
-    repo?: string;
-    branch?: string;
+    beadId: string | null;
+    status: string | null;
+    repo: string | null;
+    branch: string | null;
     filesTouching: string[];
   }>;
   fileLocks: Record<string, {
     lockedBy: string;
-    beadId?: string;
-    lockedAt?: string;
-    reason?: string;
+    beadId: string | null;
+    lockedAt: string | null;
+    reason: string | null;
   }>;
-  integrationQueue: unknown[];
-  conflicts: unknown[];
-  decisions: unknown[];
-  impacts: unknown[];
-  rejectedRecords: Record<"activeWork" | "fileLocks" | "integrationQueue" | "conflicts" | "decisions" | "impacts", number>;
+  pendingIntegration: Array<{
+    agent: string | null;
+    branch: string | null;
+    repo: string | null;
+    beadId: string | null;
+    status: string;
+    submittedAt: string | null;
+  }>;
+  unresolvedConflicts: Array<{
+    reporter: string | null;
+    at: string | null;
+    type: string | null;
+    detail: string;
+    beadId: string | null;
+    files: string[];
+  }>;
+  unresolvedImpacts: Array<{
+    sourceAgent: string | null;
+    at: string | null;
+    type: string | null;
+    summary: string;
+    beadIds: string[];
+    urgency: string | null;
+  }>;
+  recentDecisions: Array<{
+    agent: string | null;
+    at: string | null;
+    decision: string;
+    affects: string[];
+    reason: string | null;
+  }>;
+  sections: Record<
+    "activeWork" | "fileLocks" | "integrationQueue" | "conflicts" | "decisions" | "impacts",
+    OrchestraSectionStats
+  >;
 }
 
 export const orchestraSnapshotSchema: z.ZodType<OrchestraSnapshot>;
-
-export async function observeOrchestra(
-  projectPath: string,
-  deps: OrchestraDeps = defaultOrchestraDeps,
-): Promise<Observation<OrchestraSnapshot>>;
 ```
 
-Use `.passthrough()` on each Zod record schema. Parse top-level `schema_version` first, then parse every map/array item with `safeParse`, preserving valid records and incrementing `rejectedRecords`. Report `capability: "degraded"` plus `incomplete_observation` when rejected counts are nonzero. Report file mtime as `sourceUpdatedAt`.
+Use `.passthrough()` only for raw input schemas. Parse top-level `schema_version` first, then parse every map/array item with `safeParse` and project only the fields above. Include only nonterminal integration records, unresolved conflicts, unresolved impacts, and the newest decisions. Cap pending integration/conflicts/impacts at 50 each, decisions at 20, every projected file/affects list at 50, and every projected human-readable string at 2,000 characters. Populate `sections` from the uncapped counts so the UI can explain omissions without receiving the raw history. Report `capability: "degraded"` plus `incomplete_observation` when rejected counts are nonzero, but retain all valid projections. Report file mtime as `sourceUpdatedAt`.
+
+Create `test-helpers.ts` with typed `fakeFs`, fake clock, abort-aware deferred promise, and bounded large-fixture builders used by later adapter tests. Helpers must expose counters explicitly; tests must not depend on module-global mocks.
 
 - [ ] **Step 4: Run adapter tests**
 
@@ -402,8 +455,9 @@ Expected: PASS for missing, malformed-record, version, cache, and valid cases.
 - [ ] **Step 5: Commit the orchestra adapter**
 
 ```powershell
-git add lib/control-plane/orchestra.ts lib/control-plane/orchestra.test.ts
-git commit -m "feat: observe orchestra coordination state"
+git add -- lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/test-helpers.ts lib/control-plane/orchestra.ts lib/control-plane/orchestra.test.ts
+git commit --only -m "feat: observe orchestra coordination state" -- lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/test-helpers.ts lib/control-plane/orchestra.ts lib/control-plane/orchestra.test.ts
+git show --stat --oneline HEAD
 ```
 
 ---
@@ -411,13 +465,15 @@ git commit -m "feat: observe orchestra coordination state"
 ### Task 3: Add the Herdr managed-session adapter
 
 **Files:**
+- Modify: `lib/control-plane/types.ts`
 - Create: `lib/control-plane/herdr.ts`
+- Test: `lib/control-plane/types.test.ts`
 - Test: `lib/control-plane/herdr.test.ts`
 
 **Interfaces:**
 - Consumes: Task 1 observation helpers.
-- Produces: `HerdrSessionObservation`, `HerdrSnapshot`, `herdrSnapshotSchema`, and `observeHerdr(projectPath, deps?)`.
-- Acquisition: `herdr api snapshot`, timeout 3000 ms, maximum output 4 MiB.
+- Produces client-safe `HerdrSessionObservation`, `HerdrSnapshot`, and `herdrSnapshotSchema` from `types.ts`; the server-only adapter exports `observeHerdr(projectPath, deps?)`.
+- Acquisition: `herdr api snapshot`, timeout 3000 ms, maximum output 4 MiB, accepting the aggregate snapshot `AbortSignal`.
 
 - [ ] **Step 1: Write failing session-identity and failure tests**
 
@@ -429,7 +485,15 @@ it("keeps two sessions for one actor distinct", async () => {
 
 it("filters by path containment rather than matching a name", async () => {
   const result = await observeHerdr("C:/repo", fakeExec(herdrMixedProjectFixture));
-  expect(result.data?.sessions.every((s) => s.cwd?.startsWith("C:\\repo"))).toBe(true);
+  expect(result.data?.sessions.map((s) => s.cwd)).toEqual(["C:\\repo", "C:\\repo\\packages\\ui"]);
+  expect(result.data?.sessions.some((s) => s.cwd === "C:\\repo2")).toBe(false);
+});
+
+it("rejects unsupported protocol versions and wrong envelope types", async () => {
+  const unsupported = await observeHerdr("C:/repo", fakeExec({ protocol: 20, result: herdrSnapshot }));
+  const wrongType = await observeHerdr("C:/repo", fakeExec({ protocol: 19, result: { type: "event" } }));
+  expect(unsupported.error?.code).toBe("unsupported_version");
+  expect(wrongType.error?.code).toBe("parse_error");
 });
 
 it.each([
@@ -450,15 +514,19 @@ npm run test:unit -- lib/control-plane/herdr.test.ts
 
 - [ ] **Step 3: Implement the official snapshot parser**
 
-Expose this normalized shape without merging identity dimensions:
+Define this normalized client-safe shape in `types.ts` without merging identity dimensions:
 
 ```ts
 export interface HerdrSessionObservation {
-  actorKind: string | null;
-  actorLabel: string | null;
+  provider: string | null;       // raw session.agent
+  displayName: string | null;    // raw optional session.name
   sessionId: string | null;
-  sessionRefKind: "id" | "path" | null;
-  sessionSource: string | null;
+  agentSession: {
+    source: string | null;
+    agent: string | null;
+    kind: string | null;
+    value: string | null;
+  } | null;
   surface: "herdr";
   status: "idle" | "working" | "blocked" | "done" | "unknown";
   workspaceId: string;
@@ -480,7 +548,9 @@ export interface HerdrSnapshot {
 export const herdrSnapshotSchema: z.ZodType<HerdrSnapshot>;
 ```
 
-Parse the `session_snapshot` envelope with a passthrough Zod schema. Use `path.relative()` containment after resolving both paths. Do not infer role or supervisor from `name`, title, or actor kind. Set capabilities to `observe-managed-sessions`; later stages separately authorize controls.
+Parse the official aggregate result and require `result.type === "session_snapshot"`. Define `SUPPORTED_HERDR_PROTOCOLS = new Set([19])`; any other protocol is `unsupported_version`, never best-effort parsing. Map raw `agent` to `provider`, raw optional `name` to `displayName`, raw `agent_session.{source,agent,kind,value}` to `agentSession`, and `agent_status` through the explicit status enum with unknown fallback. Populate `sessionId` only from a session reference whose kind is `id`; preserve other references without pretending they are IDs.
+
+Resolve project and session paths, then include a session only when the paths are equal or the session path begins with `resolvedProject + path.sep`; a lexical sibling such as `C:\repo2` must not match `C:\repo`. Do not infer role, supervisor, task, or actor identity from `name`, title, provider, or pane state. Set capabilities to `observe-managed-sessions`; later stages separately authorize controls.
 
 - [ ] **Step 4: Run Herdr tests**
 
@@ -491,8 +561,9 @@ npm run test:unit -- lib/control-plane/herdr.test.ts
 - [ ] **Step 5: Commit the Herdr adapter**
 
 ```powershell
-git add lib/control-plane/herdr.ts lib/control-plane/herdr.test.ts
-git commit -m "feat: observe Herdr managed sessions"
+git add -- lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/herdr.ts lib/control-plane/herdr.test.ts
+git commit --only -m "feat: observe Herdr managed sessions" -- lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/herdr.ts lib/control-plane/herdr.test.ts
+git show --stat --oneline HEAD
 ```
 
 ---
@@ -500,12 +571,14 @@ git commit -m "feat: observe Herdr managed sessions"
 ### Task 4: Add the Runtime Manager health and service adapter
 
 **Files:**
+- Modify: `lib/control-plane/types.ts`
 - Create: `lib/control-plane/runtime-manager.ts`
+- Test: `lib/control-plane/types.test.ts`
 - Test: `lib/control-plane/runtime-manager.test.ts`
 
 **Interfaces:**
 - Consumes: Task 1 observation helpers.
-- Produces: `RuntimeManagerSnapshot`, `runtimeManagerSnapshotSchema`, and `observeRuntimeManager(projectPath, deps?)`.
+- Produces client-safe `RuntimeManagerSnapshot` and `runtimeManagerSnapshotSchema` from `types.ts`; the server-only adapter exports `observeRuntimeManager(projectPath, deps?)`.
 - Acquisition: project-local `tools/runtime-manager/state/manager-token`, authenticated read-only HTTP on `127.0.0.1:1735`.
 
 - [ ] **Step 1: Write failing behavior tests**
@@ -519,10 +592,24 @@ it("returns not_configured without the project-local manager token", async () =>
 });
 
 it("returns degraded health when services exceed eight seconds", async () => {
-  const result = await observeRuntimeManager("C:/repo", fakeRuntime({ health: { ok: true, epoch: 13, pid: 7 }, servicesTimeout: true }));
+  vi.useFakeTimers();
+  const pending = observeRuntimeManager("C:/repo", fakeRuntime({ health: { ok: true, epoch: 13, pid: 7 }, servicesTimeout: true }));
+  await vi.advanceTimersByTimeAsync(8000);
+  const result = await pending;
   expect(result.capability).toBe("degraded");
   expect(result.data?.epoch).toBe(13);
+  expect(result.data?.services).toBeNull();
   expect(result.error?.code).toBe("timeout");
+  vi.useRealTimers();
+});
+
+it("aborts both reads when the aggregate snapshot deadline fires", async () => {
+  const parent = new AbortController();
+  const deps = fakeRuntime({ neverResolves: true });
+  const pending = observeRuntimeManager("C:/repo", deps, parent.signal);
+  parent.abort();
+  expect((await pending).error?.code).toBe("timeout");
+  expect(deps.activeRequests()).toBe(0);
 });
 
 it("preserves foreign ownership and never emits the token", async () => {
@@ -545,7 +632,7 @@ npm run test:unit -- lib/control-plane/runtime-manager.test.ts
 
 - [ ] **Step 3: Implement read-only authenticated observations**
 
-Use these public types:
+Define these public client-safe types and schemas in `types.ts`:
 
 ```ts
 export interface RuntimeManagerService {
@@ -568,7 +655,7 @@ export interface RuntimeManagerSnapshot {
 export const runtimeManagerSnapshotSchema: z.ZodType<RuntimeManagerSnapshot>;
 ```
 
-Use separate AbortControllers: 2000 ms for `/health`, 8000 ms for `/services`. A healthy manager plus failed inventory is degraded with retained health data shaped as `{ epoch, managerPid, services: null }`. Never return the token, response headers, or raw body. `foreign` is a first-class verdict, not an error and not an adopted service.
+Use separate child AbortControllers: 2000 ms for `/health`, 8000 ms for `/services`, both linked to an optional parent `AbortSignal` supplied by the aggregate snapshot. A healthy manager plus failed inventory is degraded with retained health data shaped exactly as `{ epoch, managerPid, services: null }`. Inject clock/timer/fetch dependencies so tests advance fake time and never wait eight real seconds. Every completion path clears timers and parent listeners. Never return the token, response headers, or raw body. `foreign` is a first-class verdict, not an error and not an adopted service.
 
 - [ ] **Step 4: Run Runtime Manager tests**
 
@@ -579,8 +666,9 @@ npm run test:unit -- lib/control-plane/runtime-manager.test.ts
 - [ ] **Step 5: Commit the Runtime Manager adapter**
 
 ```powershell
-git add lib/control-plane/runtime-manager.ts lib/control-plane/runtime-manager.test.ts
-git commit -m "feat: observe Runtime Manager health"
+git add -- lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/runtime-manager.ts lib/control-plane/runtime-manager.test.ts
+git commit --only -m "feat: observe Runtime Manager health" -- lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/runtime-manager.ts lib/control-plane/runtime-manager.test.ts
+git show --stat --oneline HEAD
 ```
 
 ---
@@ -588,13 +676,15 @@ git commit -m "feat: observe Runtime Manager health"
 ### Task 5: Add truthful project hook coverage observation
 
 **Files:**
+- Modify: `lib/control-plane/types.ts`
 - Create: `lib/control-plane/hooks.ts`
+- Test: `lib/control-plane/types.test.ts`
 - Test: `lib/control-plane/hooks.test.ts`
 
 **Interfaces:**
 - Consumes: Task 1 observation helpers.
-- Produces: `HookCoverageSnapshot`, `hookCoverageSnapshotSchema`, and `observeHookCoverage(projectPath, deps?)`.
-- This adapter reports project-local files and configured commands only; it does not claim global Codex interception or execute a hook.
+- Produces client-safe `HookCoverageSnapshot` and `hookCoverageSnapshotSchema` from `types.ts`; the server-only adapter exports `observeHookCoverage(projectPath, deps?)`.
+- This adapter reports only redacted project-local configuration evidence; it never returns raw command strings, command arguments, environment values, or absolute external paths, does not claim global Codex interception, and never executes a hook.
 
 - [ ] **Step 1: Write failing coverage tests**
 
@@ -603,6 +693,8 @@ it("reports project-only scope and unknown global Codex coverage", async () => {
   const result = await observeHookCoverage("C:/repo", fakeFiles(completeClaudeFixture));
   expect(result.data?.scope).toBe("project-only");
   expect(result.data?.codexGlobalCoverage).toBe("unknown");
+  expect(result.data?.claudeSettingsPresent).toBe(true);
+  expect(result.data?.codexHookConfigPresent).toBe(false);
 });
 
 it("degrades when configured hook commands point at missing files", async () => {
@@ -616,6 +708,21 @@ it("does not execute hook code", async () => {
   await observeHookCoverage("C:/repo", files);
   expect(files.executions()).toBe(0);
 });
+
+it("inspects Claude and Codex independently", async () => {
+  const result = await observeHookCoverage("C:/repo", fakeFiles(codexOnlyFixture));
+  expect(result.capability).toBe("available");
+  expect(result.data?.claudeSettingsPresent).toBe(false);
+  expect(result.data?.codexHookConfigPresent).toBe(true);
+});
+
+it("never serializes raw commands, secrets, or absolute external paths", async () => {
+  const result = await observeHookCoverage("C:/repo", fakeFiles(secretBearingExternalFixture));
+  const serialized = JSON.stringify(result);
+  expect(serialized).not.toContain("TOP_SECRET");
+  expect(serialized).not.toContain("C:\\outside\\private-hook.ps1");
+  expect(result.data?.references[0]).toMatchObject({ fileRef: null, fileScope: "external" });
+});
 ```
 
 - [ ] **Step 2: Verify tests fail**
@@ -626,23 +733,31 @@ npm run test:unit -- lib/control-plane/hooks.test.ts
 
 - [ ] **Step 3: Implement presence/configuration-only inspection**
 
-Expose:
+Define in `types.ts`:
 
 ```ts
+export interface HookReference {
+  provider: "claude" | "codex";
+  event: string;
+  executableBasename: string | null;
+  fileRef: string | null;
+  fileScope: "project" | "external" | "unknown";
+  exists: boolean | null;
+}
+
 export interface HookCoverageSnapshot {
   scope: "project-only";
   claudeSettingsPresent: boolean;
-  configuredCommands: string[];
-  existingConfiguredFiles: string[];
-  missingConfiguredFiles: string[];
-  codexRepoHookConfigPresent: boolean;
+  codexHookConfigPresent: boolean;
+  references: HookReference[];
+  missingConfiguredFiles: string[]; // project-relative refs only
   codexGlobalCoverage: "unknown";
 }
 
 export const hookCoverageSnapshotSchema: z.ZodType<HookCoverageSnapshot>;
 ```
 
-Read `.claude/settings.json` as JSON, extract command paths as strings, normalize paths inside the project, and check existence. Do not parse shell commands into authorization and do not execute JavaScript/PowerShell. Unknown formats return `parse_error`; missing settings returns `not_configured`.
+Inspect `.claude/settings.json` and `.codex/hooks.json` independently. `not_configured` applies only when neither file exists. If one file is valid and the other malformed, return the valid projection as degraded `parse_error` evidence rather than erasing it. Parse only enough syntax to identify event, executable basename, and a referenced file. A contained file is returned as a normalized project-relative `fileRef`; an external path is represented only by `{ fileRef: null, fileScope: "external" }`; an unresolvable command is `unknown`. Never include the raw command, arguments, environment values, home-directory expansion, response headers, or parse exception text in the wire payload. Do not treat configuration as authorization and do not execute JavaScript/PowerShell.
 
 - [ ] **Step 4: Run hook tests**
 
@@ -653,24 +768,30 @@ npm run test:unit -- lib/control-plane/hooks.test.ts
 - [ ] **Step 5: Commit hook observation**
 
 ```powershell
-git add lib/control-plane/hooks.ts lib/control-plane/hooks.test.ts
-git commit -m "feat: observe project hook coverage"
+git add -- lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/hooks.ts lib/control-plane/hooks.test.ts
+git commit --only -m "feat: observe project hook coverage" -- lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/hooks.ts lib/control-plane/hooks.test.ts
+git show --stat --oneline HEAD
 ```
 
 ---
 
-### Task 6: Extract the shared read-only Git runner and add lightweight health
+### Task 6: Extract the neutral Git process runner and add allowlisted lightweight health
 
 **Files:**
-- Create: `lib/git-read.ts`
+- Create: `lib/git-command.ts`
 - Modify: `lib/git-unmerged.ts:1-73`
+- Modify: `lib/control-plane/types.ts`
 - Create: `lib/control-plane/git-health.ts`
+- Test: `lib/git-command.test.ts`
+- Test: `lib/git-unmerged.test.ts`
+- Test: `lib/control-plane/types.test.ts`
 - Test: `lib/control-plane/git-health.test.ts`
 
 **Interfaces:**
-- Produces: `runGitRead(repoPath, args, options?)`, `GitHealthSnapshot`, `gitHealthSnapshotSchema`, and `observeGitHealth(projectPath, deps?)`.
+- Produces neutral `runGitCommand(repoPath, args, options?)` for existing Git consumers; client-safe `GitHealthSnapshot` and `gitHealthSnapshotSchema` from `types.ts`; and server-only allowlisted `observeGitHealth(projectPath, deps?, signal?)`.
 - Consumes: Task 1 observation helpers.
 - Existing `analyzeUnmerged()` behavior and its 60-second route cache remain unchanged.
+- Safety boundary: `runGitCommand` is not advertised as read-only because existing Unmerged Work legitimately uses `merge-tree --write-tree`, which writes Git objects. The health adapter alone enforces a strict read-command allowlist.
 
 - [ ] **Step 1: Write failing command-allowlist and health tests**
 
@@ -695,6 +816,18 @@ it("does not call full unmerged analysis", async () => {
   expect(result.data?.branch).toBe("main");
   expect(git.commands().some((args) => args.includes("merge-tree"))).toBe(false);
 });
+
+it("rejects a command outside the health allowlist before spawning Git", async () => {
+  const git = fakeGit({});
+  await expect(runGitHealthCommand("C:/repo", ["fetch"], { runGit: git.run })).rejects.toMatchObject({ code: "forbidden_git_command" });
+  expect(git.commands()).toEqual([]);
+});
+
+it.each(["nonzero", "spawn_error"])("preserves neutral runner %s semantics", async (mode) => {
+  const result = runGitCommand("C:/repo", ["rev-parse", "HEAD"], fakeExecMode(mode));
+  if (mode === "nonzero") await expect(result).resolves.toMatchObject({ code: 128 });
+  else await expect(result).rejects.toThrow();
+});
 ```
 
 - [ ] **Step 2: Verify tests fail**
@@ -705,11 +838,13 @@ npm run test:unit -- lib/control-plane/git-health.test.ts
 
 - [ ] **Step 3: Move the existing `runGit` implementation without changing semantics**
 
-Create `lib/git-read.ts` with the current `execFile("git", ["-C", repo, ...args])`, 15-second timeout, 16 MiB buffer, `windowsHide: true`, and numeric nonzero-exit handling from `lib/git-unmerged.ts:49-65`. Export the helper and import it from `git-unmerged.ts`.
+Create `lib/git-command.ts` with the current `execFile("git", ["-C", repo, ...args])`, 15-second default timeout, 16 MiB buffer, `windowsHide: true`, and numeric nonzero-exit handling from `lib/git-unmerged.ts:49-65`. Export it as `runGitCommand`, accept an optional timeout and `AbortSignal`, and import it from `git-unmerged.ts`. Update the misleading module comment: `merge-tree --write-tree` does not alter refs/index/worktree, but it can write object-database entries and therefore is not literally read-only.
+
+Add `git-command.test.ts` for numeric nonzero exits, spawn failures, timeouts/abort, buffer configuration, and argument preservation. Add `git-unmerged.test.ts` fixtures that pin existing base detection, clean/conflict trial-merge interpretation, and nonzero handling before and after extraction; these tests guard behavior parity rather than file location or function spelling.
 
 - [ ] **Step 4: Implement lightweight Git health**
 
-Expose:
+Define the client-safe shape/schema in `types.ts`:
 
 ```ts
 export interface GitHealthSnapshot {
@@ -730,10 +865,13 @@ export const gitHealthSnapshotSchema: z.ZodType<GitHealthSnapshot>;
 
 Detect base refs in this order: `origin/master`, `origin/main`, `master`, `main`. If no base exists, return available Git identity with null comparison fields and a degraded `incomplete_observation` diagnostic. Do not invoke `fetch`, `merge-tree`, `update-index`, `worktree`, `checkout`, or any write command.
 
+Inside `git-health.ts`, expose a testable server-only `runGitHealthCommand` whose exact allowlist covers only the command forms needed above. Reject every other command before invoking the neutral runner. Give the complete health observation one five-second budget, no more than two seconds per command, link every command to the parent aggregate `AbortSignal`, and retain partial identity as degraded data when later comparison commands exhaust the budget. Do not fetch or mutate to make health look current.
+
 - [ ] **Step 5: Run Git and existing checks**
 
 ```powershell
 npm run test:unit -- lib/control-plane/git-health.test.ts
+npm run test:unit -- lib/git-command.test.ts lib/git-unmerged.test.ts
 npm run lint
 ```
 
@@ -742,8 +880,9 @@ Expected: tests and lint PASS; Unmerged Work imports the shared runner without b
 - [ ] **Step 6: Commit shared Git reads and health**
 
 ```powershell
-git add lib/git-read.ts lib/git-unmerged.ts lib/control-plane/git-health.ts lib/control-plane/git-health.test.ts
-git commit -m "feat: expose lightweight Git health"
+git add -- lib/git-command.ts lib/git-command.test.ts lib/git-unmerged.ts lib/git-unmerged.test.ts lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/git-health.ts lib/control-plane/git-health.test.ts
+git commit --only -m "feat: expose lightweight Git health" -- lib/git-command.ts lib/git-command.test.ts lib/git-unmerged.ts lib/git-unmerged.test.ts lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/git-health.ts lib/control-plane/git-health.test.ts
+git show --stat --oneline HEAD
 ```
 
 ---
@@ -751,9 +890,12 @@ git commit -m "feat: expose lightweight Git health"
 ### Task 7: Build the failure-isolated project snapshot and GET contract
 
 **Files:**
+- Modify: `lib/control-plane/types.ts`
 - Create: `lib/control-plane/snapshot.ts`
+- Test: `lib/control-plane/types.test.ts`
 - Test: `lib/control-plane/snapshot.test.ts`
 - Create: `app/api/p/[projectId]/control-plane/route.ts`
+- Test: `app/api/p/[projectId]/control-plane/route.test.ts`
 - Modify: `lib/api-client.ts`
 
 **Interfaces:**
@@ -781,6 +923,29 @@ it("never collapses sessions into actor or task identity", async () => {
   const result = await buildControlPlaneSnapshot("better-palia-maps", snapshotDeps({ twoSessionsOneActor: true }));
   expect(result.sources.herdr.data?.sessions).toHaveLength(2);
 });
+
+it("bounds the complete snapshot when an adapter never settles", async () => {
+  vi.useFakeTimers();
+  const pending = buildControlPlaneSnapshot("better-palia-maps", snapshotDeps({ herdrNeverSettles: true }));
+  await vi.advanceTimersByTimeAsync(SNAPSHOT_DEADLINE_MS);
+  const result = await pending;
+  expect(result.sources.herdr.error?.code).toBe("timeout");
+  expect(result.sources.git.capability).toBe("available");
+  expect(vi.getTimerCount()).toBe(0);
+  vi.useRealTimers();
+});
+
+it("returns a source-empty Demo snapshot without invoking adapters", async () => {
+  const deps = snapshotDeps({ failIfCalled: true });
+  const result = await buildControlPlaneSnapshot("demo", deps);
+  expect(result.project.path).toBeNull();
+  expect(Object.values(result.sources).every((source) => source.error?.code === "not_configured")).toBe(true);
+  expect(deps.calls()).toEqual([]);
+});
+
+it("rejects an unknown project with the existing 404 code", async () => {
+  await expect(buildControlPlaneSnapshot("missing", snapshotDeps({}))).rejects.toMatchObject({ code: "unknown_project" });
+});
 ```
 
 - [ ] **Step 2: Verify tests fail**
@@ -789,12 +954,14 @@ it("never collapses sessions into actor or task identity", async () => {
 npm run test:unit -- lib/control-plane/snapshot.test.ts
 ```
 
-- [ ] **Step 3: Implement the snapshot using `Promise.allSettled`**
+- [ ] **Step 3: Implement the deadline-bounded snapshot using `Promise.allSettled`**
+
+Define the public shape and assembled `controlPlaneSnapshotSchema` in client-safe `types.ts`:
 
 ```ts
 export interface ControlPlaneSnapshot {
   generatedAt: string;
-  project: { id: string; name: string; path: string };
+  project: { id: string; name: string; path: string | null };
   sources: {
     orchestra: Observation<OrchestraSnapshot>;
     herdr: Observation<HerdrSnapshot>;
@@ -805,7 +972,11 @@ export interface ControlPlaneSnapshot {
 }
 ```
 
-Resolve the registered project with `getProject()` only. Start the five adapter promises together, use `Promise.allSettled`, and convert a rejected adapter to an `unavailable` observation with a source-specific stable message. Parse the final response with a Zod snapshot schema assembled with `observationOf(orchestraSnapshotSchema)`, `observationOf(herdrSnapshotSchema)`, `observationOf(runtimeManagerSnapshotSchema)`, `observationOf(hookCoverageSnapshotSchema)`, and `observationOf(gitHealthSnapshotSchema)`. Never import `store.ts`, `bd.ts`, `schema.ts`, `interactions.ts`, or `git-unmerged.ts` here.
+Resolve the registered project with `getProject()` only. If it returns `undefined`, throw `new ConfigError(\`Unknown project: ${projectId}\`, "unknown_project")` so the existing `fail()` envelope remains a 404. If it returns Demo (`path === null`), do not invoke any adapter: return five `not_configured` observations with `project.path: null`.
+
+For a real project, create one aggregate AbortController and `SNAPSHOT_DEADLINE_MS = 7000`. Start all five adapters together with its signal. Wrap every adapter promise in an injected-timer deadline race so even an adapter that ignores abort and never settles becomes a stable source-specific `timeout` observation. The aggregate deadline aborts child work; every wrapper clears timers/listeners. Then use `Promise.allSettled` to convert unexpected rejection to an `unavailable` observation with a stable source-specific message. Stage 2 owns the client query/polling consumer; Stage 1 guarantees only that this request itself is bounded.
+
+Parse the final response with `controlPlaneSnapshotSchema`, assembled in `types.ts` with `observationOf(orchestraSnapshotSchema)`, `observationOf(herdrSnapshotSchema)`, `observationOf(runtimeManagerSnapshotSchema)`, `observationOf(hookCoverageSnapshotSchema)`, and `observationOf(gitHealthSnapshotSchema)`. Never import `store.ts`, `bd.ts`, `schema.ts`, `interactions.ts`, or `git-unmerged.ts` here.
 
 - [ ] **Step 4: Add the dynamic Node route and client type**
 
@@ -830,7 +1001,7 @@ export async function GET(_req: Request, { params }: Ctx) {
 }
 ```
 
-Add `ControlPlaneSnapshot` as a type import and:
+Import `ControlPlaneSnapshot` from `lib/control-plane/types.ts`, never from the server-only aggregator, and add:
 
 ```ts
 controlPlane: {
@@ -843,16 +1014,18 @@ controlPlane: {
 
 ```powershell
 npm run test:unit -- lib/control-plane/snapshot.test.ts
+npm run test:unit -- app/api/p/[projectId]/control-plane/route.test.ts
 npm run lint
 ```
 
-Expected: all PASS. The resource-heavy full build remains reserved for Task 9.
+The route test must prove unknown projects return the existing 404 envelope and Demo returns a source-empty snapshot without adapter calls. Expected: all PASS. The resource-heavy full build remains reserved for Task 9.
 
 - [ ] **Step 6: Commit the snapshot API**
 
 ```powershell
-git add lib/control-plane/snapshot.ts lib/control-plane/snapshot.test.ts app/api/p/[projectId]/control-plane/route.ts lib/api-client.ts
-git commit -m "feat: expose control-plane observations"
+git add -- lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/snapshot.ts lib/control-plane/snapshot.test.ts app/api/p/[projectId]/control-plane/route.ts app/api/p/[projectId]/control-plane/route.test.ts lib/api-client.ts
+git commit --only -m "feat: expose control-plane observations" -- lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/snapshot.ts lib/control-plane/snapshot.test.ts app/api/p/[projectId]/control-plane/route.ts app/api/p/[projectId]/control-plane/route.test.ts lib/api-client.ts
+git show --stat --oneline HEAD
 ```
 
 ---
@@ -862,29 +1035,34 @@ git commit -m "feat: expose control-plane observations"
 **Files:**
 - Create: `lib/signal-sse.ts`
 - Test: `lib/signal-sse.test.ts`
+- Create: `lib/signal-sse-test-helpers.ts`
 - Create: `lib/orchestra-watch.ts`
 - Test: `lib/orchestra-watch.test.ts`
-- Create: `lib/control-plane-watch.ts`
 - Modify: `app/api/p/[projectId]/beads/stream/route.ts`
 - Create: `app/api/p/[projectId]/control-plane/stream/route.ts`
+- Test: `app/api/p/[projectId]/control-plane/stream/route.test.ts`
 - Modify: `next.config.ts`
 
 **Interfaces:**
 - Consumes: existing `subscribeBeadsChange()` and `registerSseStream()`.
-- Produces: `createSignalSseResponse()`, `subscribeOrchestraChange()`, and `subscribeControlPlaneChange()`.
-- Signal contract: `event: change` and a source ID (`beads` or `orchestra`) only; Herdr, Runtime Manager, hooks, and Git rely on the existing polling fallback until their authorities expose a safe subscription adapter.
+- Produces `createSignalSseResponse()` and `subscribeOrchestraChange()` only.
+- Signal contracts stay separate: the legacy Beads route still emits `event: change` / `data: 1`; the new control-plane stream emits `event: change` / `data: orchestra`. Herdr, Runtime Manager, hooks, and Git have no Stage 1 stream. Stage 2 will add the client polling/query consumer for all five observations.
 
 - [ ] **Step 1: Write failing lifecycle tests**
 
 ```ts
 it("emits source ids without domain state", async () => {
   const harness = signalHarness();
-  createSignalSseResponse(harness.request, harness.subscribe);
-  harness.emit("orchestra");
-  const chunk = await harness.readUntil("orchestra");
-  expect(chunk).toContain("event: change\ndata: orchestra\n\n");
-  expect(chunk).not.toContain("active_work");
-  harness.abort();
+  try {
+    createSignalSseResponse(harness.request, harness.subscribe);
+    harness.emit("orchestra");
+    const chunk = await harness.readUntil("orchestra", 1000);
+    expect(chunk).toContain("event: change\ndata: orchestra\n\n");
+    expect(chunk).not.toContain("active_work");
+  } finally {
+    harness.abort();
+    await harness.cancelReader();
+  }
 });
 
 it("cleans subscribe, heartbeat, and global registration exactly once", async () => {
@@ -907,7 +1085,39 @@ it("shares one orchestra watcher across subscribers and tears it down at zero", 
   b();
   expect(fs.closeCount()).toBe(1);
 });
+
+it.each(["request-abort", "reader-cancel", "shutdown", "enqueue-failure"])("cleans every %s path exactly once", async (mode) => {
+  const harness = signalHarness({ mode });
+  try {
+    await harness.trigger(mode);
+  } finally {
+    await harness.dispose();
+  }
+  expect(harness.unsubscribeCount()).toBe(1);
+  expect(harness.unregisterCount()).toBe(1);
+  expect(harness.clearedHeartbeatCount()).toBe(1);
+  expect(harness.openTimerCount()).toBe(0);
+});
+
+it("cleans registration when subscribe throws", () => {
+  const harness = signalHarness({ subscribeThrows: true });
+  expect(() => createSignalSseResponse(harness.request, harness.subscribe, harness.deps)).toThrow();
+  expect(harness.cleanupCounts()).toEqual({ unsubscribe: 0, unregister: 1, heartbeat: 0 });
+});
+
+it("preserves the Beads data: 1 contract", async () => {
+  const harness = signalHarness();
+  try {
+    createSignalSseResponse(harness.request, harness.subscribe);
+    harness.emit("1");
+    expect(await harness.readUntil("data: 1", 1000)).toContain("event: change\ndata: 1\n\n");
+  } finally {
+    await harness.dispose();
+  }
+});
 ```
+
+`signal-sse-test-helpers.ts` implements the bounded reader, fake timers, request abort, reader cancellation, enqueue failure, shutdown closer, throwing subscribe, and cleanup counters used above. Every stream test uses `try/finally`; no test awaits `response.text()` on an open SSE body.
 
 - [ ] **Step 2: Verify the tests fail**
 
@@ -917,12 +1127,11 @@ npm run test:unit -- lib/signal-sse.test.ts lib/orchestra-watch.test.ts
 
 - [ ] **Step 3: Extract the existing route lifecycle into `createSignalSseResponse`**
 
-Move, rather than duplicate, the current encoder, heartbeat, abort, idempotent close, controller close, and `registerSseStream` behavior from `beads/stream/route.ts`. Preserve `HEARTBEAT_MS = 25_000`, response headers, `dynamic = "force-dynamic"`, and `runtime = "nodejs"`.
+Move, rather than duplicate, the current encoder, heartbeat, abort, idempotent close, controller close, and `registerSseStream` behavior from `beads/stream/route.ts`. Preserve `HEARTBEAT_MS = 25_000`, response headers, `dynamic = "force-dynamic"`, and `runtime = "nodejs"`. Fix the existing enqueue-failure trap: enqueue failure must call the single `close()` path rather than setting `closed` first and thereby skipping unsubscribe/timer/registry cleanup. Reader cancellation, request abort, shutdown registry closure, subscribe failure, and duplicate close calls all converge on that same idempotent cleanup.
 
 The helper signature is:
 
 ```ts
-export type SignalSource = "beads" | "orchestra";
 export type SubscribeSignal = (emit: (payload: string) => void) => () => void;
 
 export function createSignalSseResponse(
@@ -934,24 +1143,18 @@ export function createSignalSseResponse(
 
 - [ ] **Step 4: Add a non-recursive, ref-counted orchestra watcher**
 
-Watch only the project `.orchestra` directory and filter for `state.json`; never watch the entire project recursively. Coalesce bursts for 200 ms, share one watcher per project, and tear it down at zero subscribers. Missing directory is a no-op so the query's polling fallback remains authoritative.
+Watch only the project `.orchestra` directory and filter for `state.json`; never watch the entire project recursively. Coalesce bursts for 200 ms, share one watcher per project, and tear it down at zero subscribers. Missing directory is a no-op. Do not claim a Stage 1 polling fallback exists; the snapshot remains requestable and Stage 2 supplies the polling consumer.
 
-- [ ] **Step 5: Compose control-plane signals and route both streams through the helper**
+- [ ] **Step 5: Route the independent Beads and orchestra streams through the helper**
 
-`subscribeControlPlaneChange(projectId, onChange)` composes:
+The transport helper treats payloads as opaque strings and never receives domain state. The existing Beads stream adapts `subscribeBeadsChange()` to `emit("1")` so its legacy `data: 1` wire contract does not change. The new control-plane stream subscribes only to `subscribeOrchestraChange()` and emits `"orchestra"`, matching the snapshot's non-Beads boundary.
 
-```ts
-const stopBeads = subscribeBeadsChange(projectId, () => onChange("beads"));
-const stopOrchestra = subscribeOrchestraChange(projectId, () => onChange("orchestra"));
-return () => { stopBeads(); stopOrchestra(); };
-```
-
-The transport helper treats payloads as opaque strings and never receives domain state. The existing Beads stream adapts its watcher to `emit("1")` so its legacy `data: 1` wire contract does not change. The new control-plane stream emits `SignalSource` IDs. Add `/control-plane(/stream)?` to the existing high-frequency request-log ignore pattern.
+Before opening a stream, the route resolves `getProject(projectId)`. Unknown projects use the existing `ConfigError("unknown_project")` 404 envelope; Demo returns `204 No Content` and creates no watcher/heartbeat/registry entry. Add route tests for both cases plus a real project subscription. Add `/control-plane(/stream)?` to the existing high-frequency request-log ignore pattern.
 
 - [ ] **Step 6: Run lifecycle tests and lint**
 
 ```powershell
-npm run test:unit -- lib/signal-sse.test.ts lib/orchestra-watch.test.ts
+npm run test:unit -- lib/signal-sse.test.ts lib/orchestra-watch.test.ts app/api/p/[projectId]/control-plane/stream/route.test.ts
 npm run lint
 ```
 
@@ -960,8 +1163,9 @@ Expected: all PASS; no second Beads watcher or SSE shutdown registry exists.
 - [ ] **Step 7: Commit the shared stream lifecycle**
 
 ```powershell
-git add lib/signal-sse.ts lib/signal-sse.test.ts lib/orchestra-watch.ts lib/orchestra-watch.test.ts lib/control-plane-watch.ts app/api/p/[projectId]/beads/stream/route.ts app/api/p/[projectId]/control-plane/stream/route.ts next.config.ts
-git commit -m "feat: stream control-plane invalidations"
+git add -- lib/signal-sse.ts lib/signal-sse.test.ts lib/signal-sse-test-helpers.ts lib/orchestra-watch.ts lib/orchestra-watch.test.ts app/api/p/[projectId]/beads/stream/route.ts app/api/p/[projectId]/control-plane/stream/route.ts app/api/p/[projectId]/control-plane/stream/route.test.ts next.config.ts
+git commit --only -m "feat: stream control-plane invalidations" -- lib/signal-sse.ts lib/signal-sse.test.ts lib/signal-sse-test-helpers.ts lib/orchestra-watch.ts lib/orchestra-watch.test.ts app/api/p/[projectId]/beads/stream/route.ts app/api/p/[projectId]/control-plane/stream/route.ts app/api/p/[projectId]/control-plane/stream/route.test.ts next.config.ts
+git show --stat --oneline HEAD
 ```
 
 ---
@@ -982,13 +1186,13 @@ Document this exact table and expand each row with the implemented diagnostic co
 
 | Source | Acquisition | Authority | Timeout | Signal | Explicit limitation |
 |---|---|---|---:|---|---|
-| Orchestra | `.orchestra/state.json` | coordination | filesystem read | `state.json` watcher | not process health |
-| Herdr | `herdr api snapshot` | managed sessions | 3000 ms | polling fallback | not supervisor authority |
-| Runtime Manager | authenticated `GET /health`, `GET /services` | named services | 2000/8000 ms | polling fallback | foreign is not owned |
-| Hooks | project-local settings/file presence | configured project hooks | filesystem read | polling fallback | global Codex coverage unknown |
-| Git | lightweight read-only CLI | repository health | 15000 ms/command | polling fallback | not full Unmerged Work analysis |
+| Orchestra | `.orchestra/state.json` | coordination | aggregate deadline | `state.json` watcher | bounded projections, not process health |
+| Herdr | `herdr api snapshot` protocol 19 | managed sessions | 3000 ms | Stage 2 polling | not supervisor authority |
+| Runtime Manager | authenticated `GET /health`, `GET /services` | named services | 2000/8000 ms, capped by aggregate deadline | Stage 2 polling | foreign is not owned |
+| Hooks | redacted project-local settings/file presence | configured project hooks | aggregate deadline | Stage 2 polling | global Codex coverage unknown |
+| Git | strict health-command allowlist | repository health | 5000 ms total, 2000 ms/command | Stage 2 polling | not full Unmerged Work analysis; neutral shared runner can write objects for existing merge-tree use |
 
-State plainly that Stage 2 joins this snapshot with the existing Beads React Query cache and that no source grants dispatch authority.
+State plainly that the Stage 1 GET request has a 7000 ms aggregate deadline; Stage 2 adds the polling/query consumer and joins this snapshot with the existing Beads React Query cache. The only Stage 1 invalidation stream is the orchestra watcher; the existing Beads stream remains separate. No source grants dispatch authority.
 
 - [ ] **Step 2: Run the complete unit and lint gates**
 
@@ -1016,21 +1220,28 @@ Expected: Next.js build and type checks PASS. Do not start a development server 
 Verify behavior, not only tests:
 
 - `snapshot.ts` has no import or call path into `bd.ts`, `store.ts`, or `.beads` files.
-- the Git adapter contains no mutating command and Unmerged Work still uses the shared read runner;
+- `types.ts` is the only client-imported contract boundary; client code imports no server-only adapter/aggregator;
+- the Git health adapter rejects every command outside its exact read allowlist, while Unmerged Work retains behavior through the honestly named neutral runner;
+- Git runner tests cover numeric nonzero exits, spawn errors, aborts, and existing Unmerged merge-tree behavior;
 - there is one global SSE shutdown registry and one Beads watcher registry;
+- every SSE cancellation/failure/shutdown path clears its heartbeat, watcher subscription, abort listener, and global registration exactly once; no stream test leaves a timer or open reader;
 - valid orchestra records survive malformed history and unknown versions fail explicitly;
+- orchestra history is bounded/projected and serialized output contains no raw validation/details/file blobs;
 - Runtime Manager token and raw bodies never reach the wire;
-- Herdr sessions remain separate records even when actor labels match;
+- hook observations contain no raw command, secret, environment value, or absolute external path;
+- Herdr requires protocol 19 plus a `session_snapshot` envelope, rejects sibling-path prefix matches, and keeps sessions separate even when display/provider labels match;
+- unknown projects retain the existing 404 envelope, Demo calls no adapters and creates no stream, and a never-settling adapter cannot exceed the 7000 ms snapshot deadline;
 - no Board/List, workbench query, visible component, or Beads status changed;
 - all code commits postdate the approved audit/design and supervisor Gate 0 resolution.
 
 - [ ] **Step 6: Commit documentation and any validation-only correction**
 
 ```powershell
-git add docs/control-plane-sources.md
-git commit -m "docs: define control-plane source authority"
+git add -- docs/control-plane-sources.md
+git commit --only -m "docs: define control-plane source authority" -- docs/control-plane-sources.md
+git show --stat --oneline HEAD
 ```
 
 - [ ] **Step 7: Submit, review, and integrate under the repository protocol**
 
-Post the branch, commit range, changed files, validation commands/results, source limitations, and review package to Bead `better-palia-maps-l4cq3.1`. Obtain task-by-task spec and quality review plus one independent whole-branch review. After all required checks pass, push the feature branch, merge it into `master`, push `master`, record `merged`, release owned locks, remove the active-work entry, and return the shared checkout to clean `master`.
+Post the branch, commit range, changed files, validation commands/results, source limitations, and review package to Bead `better-palia-maps-l4cq3.1`. Obtain task-by-task spec and quality review plus one independent whole-branch review. After all required checks pass, push the feature branch, merge it into `main`, push `main`, record `merged`, release owned locks, remove the active-work entry, and return the shared checkout to clean `main`.
