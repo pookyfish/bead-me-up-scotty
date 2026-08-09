@@ -67,10 +67,17 @@
   --border-strong: #d6d6dd;
   --text: #16161a;
   --text-2: #62626d;
-  --text-3: #71717a; /* was #9a9aa5 — 2.7:1 on white, failed WCAG AA (axe audit 2026-08-08); 4.9:1 now */
-  --brand: #6d5ef0;
+  /* Muted text. Measured against EVERY surface it lands on, not just white:
+     #9a9aa5 was 2.7:1, #71717a still failed on --surface-2 (4.29) and --bg
+     (4.48). #6d6d76 = 5.12 on white / 4.75 on --bg / 4.54 on --surface-2. */
+  --text-3: #6d6d76;
+  /* #6d5ef0 was 4.04:1 on --brand-weak (the active sidebar row) and 4.31 on
+     --bg; this keeps the indigo but clears AA on all four surfaces. */
+  --brand: #6152ee;
   --brand-2: #5546e0;
-  --brand-weak: #efedfd;
+  /* Lifted a shade: --text-3 and --ok land on this (selected timeline day,
+     sidebar active row) and were 4.44 / 4.40 against the old #efedfd. */
+  --brand-weak: #f4f3fe;
   --shadow: 0 1px 2px rgba(20, 20, 30, 0.05), 0 1px 1px rgba(20, 20, 30, 0.04);
   --shadow-lg: 0 12px 32px -8px rgba(20, 20, 40, 0.18), 0 4px 12px -4px rgba(20, 20, 40, 0.1);
   --drawer: #ffffff;
@@ -114,10 +121,13 @@
   --border-strong: #34343d;
   --text: #f2f2f5;
   --text-2: #a2a2ad;
-  --text-3: #6c6c77;
+  /* 3.77 / 3.48 / 3.24 on --bg / --surface / --surface-2 → 5.28 / 4.88 / 4.54. */
+  --text-3: #84848f;
   --brand: #8b7cf8;
   --brand-2: #9c8ffa;
-  --brand-weak: #211d3a;
+  /* Deepened a shade for the same reason as light's: --text-3 sits on this
+     (selected timeline day, sidebar active row) and was 4.36 on #211d3a. */
+  --brand-weak: #1d1a32;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 16px 40px -8px rgba(0, 0, 0, 0.6);
   --drawer: #141417;
@@ -156,6 +166,19 @@
 /* All are dark-mode, so the .dark class is also applied by the         */
 /* provider and supplies shadow + dark semantic literals; these blocks  */
 /* outrank .dark on specificity (html[data-theme] = 0,1,1 > .dark).     */
+/*                                                                     */
+/* CONTRAST INVARIANT (bead 1ovaf): every theme's --text/--text-2/     */
+/* --text-3 must clear WCAG AA 4.5:1 against ITS OWN --bg, --surface   */
+/* and --surface-2 — the three backgrounds body text actually lands on */
+/* (--surface-3 is hover/progress/code chrome). Each theme's muted     */
+/* value below was raised from the upstream palette's own comment/     */
+/* muted colour, which sat at 2.5–3.4:1. The before→after ratios are   */
+/* in the per-theme comments; recompute with scripts/a11y-audit.mjs    */
+/* --theme <id> before changing any of them.                           */
+/*                                                                     */
+/* Corollary: text sitting ON --brand uses --primary-foreground, never */
+/* a hardcoded text-white. Half these themes have a LIGHT brand (nord  */
+/* frost, gruvbox yellow), where white-on-brand is ~1.5:1.             */
 /* ------------------------------------------------------------------ */
 
 html[data-theme="dracula"] {
@@ -167,7 +190,9 @@ html[data-theme="dracula"] {
   --border-strong: #565972;
   --text: #f8f8f2;
   --text-2: #b9bcd0;
-  --text-3: #6272a4;
+  /* Dracula "comment" #6272a4 was 3.03 / 2.81 / 2.51; lightened along the same
+     hue to 5.50 / 5.11 / 4.55 on --bg / --surface / --surface-2. */
+  --text-3: #96a0c2;
   --brand: #bd93f9;
   --brand-2: #caa9fa;
   --brand-weak: #343352;
@@ -185,7 +210,8 @@ html[data-theme="nord"] {
   --border-strong: #4c566a;
   --text: #eceff4;
   --text-2: #d8dee9;
-  --text-3: #7b8493;
+  /* Between nord3 and nord4: #7b8493 was 3.31 / 2.93 / 2.67 → 5.60 / 4.96 / 4.51. */
+  --text-3: #a8aeb8;
   --brand: #88c0d0;
   --brand-2: #8fbcbb;
   --brand-weak: #2f3b41;
@@ -194,22 +220,28 @@ html[data-theme="nord"] {
   --input: #3b4252;
 }
 
+/* Solarized is the one theme whose WHOLE neutral ramp failed AA, not just the
+   muted step: base1/base0/base01 gave 4.17 / 3.52 / 2.07 on the old --surface-2.
+   Fixing only --text-3 would have made muted text BRIGHTER than primary, so the
+   ramp is re-based instead — surfaces pulled back to canonical Solarized
+   (base03 / base02, the old #0a4150 was invented and too light) and the text
+   ramp shifted one step up the same official palette. */
 html[data-theme="solarized-dark"] {
-  --bg: #002b36;
-  --surface: #073642;
-  --surface-2: #0a4150;
-  --surface-3: #0e4d5e;
-  --border: #0e4d5e;
-  --border-strong: #586e75;
-  --text: #93a1a1;
-  --text-2: #839496;
-  --text-3: #586e75;
-  --brand: #268bd2;
-  --brand-2: #2aa198;
+  --bg: #002b36; /* base03 */
+  --surface: #05323d;
+  --surface-2: #073642; /* base02 */
+  --surface-3: #0a4150;
+  --border: #0a4150;
+  --border-strong: #586e75; /* base01 — border only, never text */
+  --text: #eee8d5; /* base2 — 10.61 on --surface-2 (was base1, 4.17) */
+  --text-2: #93a1a1; /* base1 — 4.86 (was base0, 3.52) */
+  --text-3: #8b9c9e; /* 4.55 (was base01, 2.07) */
+  --brand: #48a0de; /* lightened base-blue: #268bd2 was 3.53 on --brand-weak */
+  --brand-2: #4fb3aa;
   --brand-weak: #073642;
   --drawer: #002129;
   --primary-foreground: #002b36;
-  --input: #0e4d5e;
+  --input: #0a4150;
 }
 
 html[data-theme="gruvbox-dark"] {
@@ -221,7 +253,9 @@ html[data-theme="gruvbox-dark"] {
   --border-strong: #665c54;
   --text: #ebdbb2;
   --text-2: #d5c4a1;
-  --text-3: #a89984;
+  /* Canonical gruvbox fg3 — fg4 (#a89984) was 5.30 / 4.72 / 4.17; now
+     6.77 / 6.03 / 5.32, and the ramp reads fg1 / fg2 / fg3. */
+  --text-3: #bdae93;
   --brand: #fabd2f;
   --brand-2: #fe8019;
   --brand-weak: #3c3530;
@@ -239,7 +273,9 @@ html[data-theme="tokyo-night"] {
   --border-strong: #3b4261;
   --text: #c0caf5;
   --text-2: #a9b1d6;
-  --text-3: #565f89;
+  /* Between Tokyo Night's comment and fg_dark: #565f89 was 2.76 / 2.51 / 2.35
+     → 5.39 / 4.90 / 4.59. */
+  --text-3: #878fb4;
   --brand: #7aa2f7;
   --brand-2: #bb9af7;
   --brand-weak: #24283b;
@@ -257,7 +293,10 @@ html[data-theme="catppuccin-mocha"] {
   --border-strong: #45475a;
   --text: #cdd6f4;
   --text-2: #bac2de;
-  --text-3: #6c7086;
+  /* Catppuccin overlay0 (#6c7086) was 3.36 / 2.96 / 2.57; overlay2 (#9399b2)
+     still missed --surface-2 at 4.45, so this is overlay2 nudged one step:
+     5.95 / 5.24 / 4.56. */
+  --text-3: #989bac;
   --brand: #cba6f7;
   --brand-2: #b4befe;
   --brand-weak: #2b2640;
@@ -274,8 +313,12 @@ html[data-theme="rose-pine"] {
   --border: #26233a;
   --border-strong: #403d52;
   --text: #e0def4;
-  --text-2: #908caa;
-  --text-3: #6e6a86;
+  /* Rosé Pine "muted" (#6e6a86) was 3.42 / 3.20 / 2.94, and "subtle"
+     (#908caa) is the only palette step that clears AA — so subtle becomes the
+     muted step (5.48 / 5.12 / 4.71) and the secondary step moves up to a
+     lighter subtle (8.70 / 8.13 / 7.48) to keep three distinguishable levels. */
+  --text-2: #b7b3ce;
+  --text-3: #908caa;
   --brand: #c4a7e7;
   --brand-2: #ebbcba;
   --brand-weak: #2a2440;
@@ -437,14 +480,82 @@ html[data-theme="rose-pine"] {
   fill: currentColor;
 }
 
+/* ------------------------------------------------------------------ */
+/* Overlay primary-action pattern (bead 1ovaf).                        */
+/*                                                                     */
+/* Cards and rows used to be interactive containers (role="button" +   */
+/* tabindex, or dnd-kit's sortable attributes) with real controls —    */
+/* copyable ids, expanders, parent links — nested inside them. That is */
+/* axe's `nested-interactive`: screen readers announce one control and */
+/* hide the rest, and keyboard users can't reach the inner ones.       */
+/*                                                                     */
+/* Instead: the container is inert and carries `.bd-stretch`; exactly  */
+/* ONE button inside it carries `.bd-stretch-action` and grows a       */
+/* transparent ::after over the whole container, so the entire card is */
+/* still one click (and, on the board/list, still one drag) target.    */
+/* Genuinely interactive children add `.bd-raise` to sit above that    */
+/* overlay and stay independently clickable and focusable.             */
+/* ------------------------------------------------------------------ */
+.bd-stretch {
+  position: relative;
+}
+.bd-stretch-action::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit; /* the action carries the container's radius */
+}
+.bd-stretch-action:focus-visible {
+  outline: none;
+}
+/* The ring is drawn on the overlay, so focus reads as "this whole card". */
+.bd-stretch-action:focus-visible::after {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+.bd-raise {
+  position: relative;
+  z-index: 1;
+}
+
 /* Timeline activity chart series (dataviz-validated light+dark palettes) */
 :root {
-  --chart-created: #6d5ef0;
+  --chart-created: #6152ee;
   --chart-closed: #16a34a;
   --chart-comments: #b45309;
+  /* The AA-safe green for TEXT ("✓3 closed", a completed checklist). #16a34a
+     is only 3.30:1 on white, so it stays a fill colour (dots, progress bars,
+     chart bars — none of which carry the text-contrast requirement) and green
+     type uses this instead. */
+  --ok: #157f3c;
+
+  /* Chip ink. Status and priority chips both paint their text over a ~12%
+     tint of that SAME colour, which eats contrast fast: the old vivid literals
+     (#eab308 amber, #f97316 orange) landed at 1.77:1 and 2.47:1. One hue set
+     serves both chips, per scheme, each verified against its own tint over
+     --surface, --surface-2 and --bg. The dot/fill literals in beads-view.ts are
+     deliberately NOT these — a 9px status dot carries no text. */
+  --ink-red: #b91e1e;
+  --ink-orange: #aa390b;
+  --ink-amber: #8b5506;
+  --ink-green: #127035;
+  --ink-blue: #1a5fb4;
+  --ink-slate: #475569;
 }
 .dark {
   --chart-created: #8b7ff5;
   --chart-closed: #1fb155;
   --chart-comments: #d97706;
+  /* Pastels, not the vivid 500s: the alternate dark themes are not all
+     near-black (gruvbox #32302f, nord #3b4252, solarized base02), and a
+     mid-tone ink only reaches ~3.4:1 there. These clear 4.5:1 on the LIGHTEST
+     surface any theme uses. */
+  --ok: #4ade80;
+
+  --ink-red: #fca5a5;
+  --ink-orange: #fdba74;
+  --ink-amber: #fcd34d;
+  --ink-green: #4ade80;
+  --ink-blue: #93c5fd;
+  --ink-slate: #cbd5e1;
 }

@@ -50,7 +50,7 @@ interface ThemeContextValue {
 // scope-hoisting from tripping a TDZ during SSR). Only used if a consumer renders
 // with no provider mounted, which doesn't happen in practice.
 const ThemeContext = React.createContext<ThemeContextValue>({
-  theme: { id: "light", name: "Light", mode: "light", swatch: ["#f6f6f8", "#ffffff", "#6d5ef0"] },
+  theme: { id: "light", name: "Light", mode: "light", swatch: ["#f6f6f8", "#ffffff", "#6152ee"] },
   mode: "light",
   setTheme: () => {},
   toggle: () => {},

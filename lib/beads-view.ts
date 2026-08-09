@@ -114,10 +114,31 @@ export function statusLabel(status: string): string {
   return STATUS_LABELS[status] ?? status;
 }
 
-const PRIO_COLORS = ["#ef4444", "#f97316", "#eab308", "#0ea5e9", "#64748b"];
+// Tokens, not literals: a chip paints this colour on a tint of ITSELF, so it
+// needs a different value per scheme to stay above 4.5:1 (see --ink-* in
+// globals.css). Only ever used as a CSS value, so var() is safe here.
+const PRIO_COLORS = [
+  "var(--ink-red)",
+  "var(--ink-orange)",
+  "var(--ink-amber)",
+  "var(--ink-blue)",
+  "var(--ink-slate)",
+];
 const PRIO_LABELS = ["Critical", "High", "Medium", "Low", "Backlog"];
 export function prioColor(p: number): string {
-  return PRIO_COLORS[p] ?? "#64748b";
+  return PRIO_COLORS[p] ?? "var(--ink-slate)";
+}
+
+/** Chip-safe ink for a status, paired with catColor's dot fill. */
+const CAT_INK: Record<StatusCategory, string> = {
+  done: "var(--ink-green)",
+  wip: "var(--ink-amber)",
+  blocked: "var(--ink-red)",
+  frozen: "var(--ink-slate)",
+  active: "var(--ink-blue)",
+};
+export function catInk(status: string): string {
+  return CAT_INK[category(status)];
 }
 export function prioLabel(p: number): string {
   return PRIO_LABELS[p] ?? String(p);
@@ -132,17 +153,21 @@ export function typeLabel(t: string): string {
   return t.charAt(0).toUpperCase() + t.slice(1);
 }
 
+// Avatar discs are always filled with WHITE initials, so every entry has to
+// clear 4.5:1 against white — the sky/green/amber/cyan hues used to sit at
+// 2.8–3.7:1 and the initials were unreadable (axe, bead 1ovaf). Same hues,
+// darkened to the point where they carry white text.
 const AVATARS = [
-  "#6d5ef0",
-  "#0ea5e9",
-  "#16a34a",
-  "#d97706",
+  "#6152ee",
+  "#0b7eb2",
+  "#12883e",
+  "#b16105",
   "#db2777",
-  "#0891b2",
+  "#07819e",
   "#7c3aed",
 ];
 export function avatarColor(name: string): string {
-  if (!name) return "#9aa0aa";
+  if (!name) return "#6f7784";
   let h = 0;
   for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
   return AVATARS[h % AVATARS.length];
@@ -152,6 +177,22 @@ export function initials(name: string): string {
   const parts = name.split(/[-_ .]/).filter(Boolean);
   if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
   return name.slice(0, 2).toUpperCase();
+}
+
+/**
+ * The distinctive tail of a bead id: "better-palia-maps-c5xyz" → "c5xyz".
+ *
+ * Every bead on a project screen carries the same project prefix, so rendering
+ * it spends the row's width on the one part that can't tell two beads apart —
+ * the List view was truncating to "better-palia-maps-c5…", hiding the id
+ * entirely, and Board cards wrapped the prefix onto a second line. Timeline,
+ * Crosstalk and the Graph already shortened ids inline; this is that logic in
+ * one place, and every id render site now calls it. The FULL id is still what
+ * gets copied and what appears in the hover title.
+ */
+export function shortBeadId(id: string): string {
+  const cut = id.lastIndexOf("-");
+  return cut === -1 || cut === id.length - 1 ? id : id.slice(cut + 1);
 }
 
 // ---- relationship helpers (need the full bead set for lookups) ----

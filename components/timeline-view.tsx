@@ -4,7 +4,7 @@ import { useApp } from "@/components/app-context";
 import { Icon } from "@/components/icons";
 import { OriginBadge } from "@/components/board/bead-card";
 import { originOf } from "@/lib/attribution";
-import { catColor, statusLabel, typeLabel, fmtDate } from "@/lib/beads-view";
+import { catColor, statusLabel, typeLabel, fmtDate, shortBeadId } from "@/lib/beads-view";
 import { cn } from "@/lib/utils";
 import type { Bead } from "@/lib/schema";
 
@@ -210,19 +210,16 @@ function DayCell({
         selected
           ? "border-[var(--brand)] bg-[var(--brand-weak)]"
           : "border-border hover:border-[var(--brand)]/45",
-        !inMonth && "opacity-35",
+        // Out-of-month days are recessed with a surface tint, not opacity:
+        // the old opacity-35 dragged the day number to 1.57:1 (bead 1ovaf).
+        !inMonth && "border-transparent bg-[var(--surface-2)]",
       )}
-      style={
-        !selected && heat > 0
-          ? { background: `color-mix(in srgb, var(--brand) ${Math.round(4 + heat * 16)}%, var(--surface))` }
-          : undefined
-      }
     >
       <span
         className={cn(
           "self-end text-[11px] font-semibold leading-none",
           isToday
-            ? "rounded-full bg-[var(--brand)] px-[6px] py-[3px] text-white"
+            ? "rounded-full bg-[var(--brand)] px-[6px] py-[3px] text-[var(--primary-foreground)]"
             : "text-[var(--text-3)]",
         )}
       >
@@ -231,8 +228,21 @@ function DayCell({
       {events.length > 0 && (
         <span className="flex flex-wrap gap-x-[6px] gap-y-[2px] text-[10.5px] font-semibold leading-[1.3]">
           {created > 0 && <span style={{ color: "var(--brand)" }}>+{created}</span>}
-          {closed > 0 && <span style={{ color: "#16a34a" }}>✓{closed}</span>}
+          {closed > 0 && <span style={{ color: "var(--ok)" }}>✓{closed}</span>}
           {commented > 0 && <span className="text-[var(--text-3)]">💬{commented}</span>}
+        </span>
+      )}
+      {/* Heat as a bar, not a background wash. The wash tinted the cell with
+          --brand at up to 20%, which dragged the day number and the +N counter
+          under 4.5:1 in EVERY theme (worst 3.38:1) — a decoration nobody could
+          read was making the text unreadable too. A bar encodes the same
+          "relative to the month's busiest day" and leaves text on --surface. */}
+      {heat > 0 && (
+        <span className="mt-auto h-[3px] overflow-hidden rounded-full bg-[var(--surface-3)]">
+          <span
+            className="block h-full rounded-full bg-[var(--brand)]"
+            style={{ width: `${Math.max(8, Math.round(heat * 100))}%` }}
+          />
         </span>
       )}
     </button>
@@ -291,7 +301,7 @@ function DayDetail({ date, events, tall }: { date: Date; events: DayEvent[]; tal
                 />
                 <span className="min-w-0 flex-1 truncate text-[12.5px]">{ev.bead.title}</span>
                 <span className="flex-shrink-0 font-mono text-[10.5px] text-[var(--text-3)]">
-                  {typeLabel(ev.bead.issue_type)} · {ev.bead.id.split("-").slice(-1)[0]}
+                  {typeLabel(ev.bead.issue_type)} · {shortBeadId(ev.bead.id)}
                 </span>
               </button>
             </li>
@@ -382,7 +392,7 @@ export function TimelineView() {
           <div className="flex min-w-0 flex-col gap-3">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <Stat label="created this month" value={<span style={{ color: "var(--brand)" }}>+{created}</span>} />
-            <Stat label="closed this month" value={<span style={{ color: "#16a34a" }}>✓{closed}</span>} />
+            <Stat label="closed this month" value={<span style={{ color: "var(--ok)" }}>✓{closed}</span>} />
             <Stat label="comments" value={commented} />
             <Stat label="active actors" value={actors.size} />
             <Stat
@@ -434,8 +444,9 @@ export function TimelineView() {
           </div>
 
           <div className="text-[11px] text-[var(--text-3)]">
-            + created · ✓ closed · 💬 commented — cell tint deepens with activity; click a day for
-            its full event list, click an event to open the bead.
+            + created · ✓ closed · 💬 commented — the bar under each day grows with its share of the
+            month&rsquo;s busiest day; click a day for its full event list, click an event to open the
+            bead.
           </div>
           </div>
 

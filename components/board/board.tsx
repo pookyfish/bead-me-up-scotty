@@ -142,7 +142,7 @@ export function Board() {
 
         <button
           onClick={() => openCreate()}
-          className="flex h-9 flex-shrink-0 items-center gap-[6px] rounded-[9px] px-[14px] text-[13px] font-[550] text-white"
+          className="flex h-9 flex-shrink-0 items-center gap-[6px] rounded-[9px] px-[14px] text-[13px] font-[550] text-[var(--primary-foreground)]"
           style={{ background: "var(--brand)", boxShadow: "0 2px 8px -2px var(--brand)" }}
         >
           <Icon name="plus" size={15} />

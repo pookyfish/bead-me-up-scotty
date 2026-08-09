@@ -14,7 +14,7 @@ export function AgeChip({ bead, className }: { bead: Bead; className?: string })
       className={cn(
         "inline-flex items-center gap-[3px] rounded-full px-[6px] py-px font-mono text-[10.5px] leading-[1.4]",
         age.tone === "stale"
-          ? "bg-[#b45309]/12 font-semibold text-[#b45309] dark:text-[#e8964a]"
+          ? "bg-[var(--ink-orange)]/12 font-semibold text-[var(--ink-orange)]"
           : age.tone === "aging"
             ? "text-[var(--text-3)]"
             : "text-[var(--text-3)] opacity-80",

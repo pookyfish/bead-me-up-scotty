@@ -77,7 +77,7 @@ export function Sidebar({
     <aside className="flex w-[228px] flex-shrink-0 flex-col border-r border-border bg-[var(--surface)] p-[18px_14px]">
       <div className="flex items-center gap-[10px] px-2 pb-[18px] pt-1">
         <div
-          className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-[9px] text-white"
+          className="flex h-[30px] w-[30px] flex-shrink-0 items-center justify-center rounded-[9px] text-[var(--primary-foreground)]"
           style={{ background: "var(--brand)", boxShadow: "0 2px 8px -2px var(--brand)" }}
         >
           <Icon name="logo" size={17} />
@@ -110,7 +110,7 @@ export function Sidebar({
               )}
               {n.key === "needsyou" && needsYouCount > 0 && (
                 <span
-                  className="min-w-[18px] rounded-full px-[6px] py-px text-center text-[11px] font-semibold text-white"
+                  className="min-w-[18px] rounded-full px-[6px] py-px text-center text-[11px] font-semibold text-[var(--primary-foreground)]"
                   style={{ background: "var(--brand)" }}
                 >
                   {needsYouCount}

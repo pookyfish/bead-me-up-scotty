@@ -77,7 +77,7 @@ export function UpdateIndicator() {
           )}
 
           {run.isError && (
-            <div className="rounded-[9px] border border-[#ef4444]/40 bg-[#ef4444]/5 p-[10px_12px] text-[12px] text-[#ef4444]">
+            <div className="rounded-[9px] border border-[#ef4444]/40 bg-[#ef4444]/5 p-[10px_12px] text-[12px] text-[var(--ink-red)]">
               {(run.error as Error).message}
             </div>
           )}
@@ -110,7 +110,7 @@ export function UpdateIndicator() {
               <button
                 onClick={() => run.mutate()}
                 disabled={run.isPending}
-                className="flex h-9 items-center gap-[7px] rounded-lg px-3 text-[12.5px] font-semibold text-white disabled:opacity-60"
+                className="flex h-9 items-center gap-[7px] rounded-lg px-3 text-[12.5px] font-semibold text-[var(--primary-foreground)] disabled:opacity-60"
                 style={{ background: "var(--brand)" }}
               >
                 <Icon name="rocket" size={14} />

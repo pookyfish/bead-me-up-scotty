@@ -435,7 +435,7 @@ function CreateForm({
         <button
           onClick={submit}
           disabled={!form.title.trim() || create.isPending}
-          className="flex h-[38px] items-center gap-[7px] rounded-[9px] px-4 text-[13px] font-semibold text-white disabled:opacity-50"
+          className="flex h-[38px] items-center gap-[7px] rounded-[9px] px-4 text-[13px] font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
           style={{ background: "var(--brand)", boxShadow: "0 2px 8px -2px var(--brand)" }}
         >
           <Icon name="check" size={15} />

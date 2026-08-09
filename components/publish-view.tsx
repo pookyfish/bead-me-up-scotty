@@ -159,7 +159,7 @@ export function PublishView() {
             <button
               onClick={() => build.mutate()}
               disabled={build.isPending}
-              className="flex h-[38px] items-center gap-[7px] rounded-[9px] px-4 text-[13px] font-semibold text-white disabled:opacity-50"
+              className="flex h-[38px] items-center gap-[7px] rounded-[9px] px-4 text-[13px] font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
               style={{ background: "var(--brand)", boxShadow: "0 2px 8px -2px var(--brand)" }}
             >
               <Icon name="rocket" size={15} />
@@ -186,7 +186,7 @@ export function PublishView() {
                 <button
                   onClick={() => deploy.mutate()}
                   disabled={deploy.isPending}
-                  className="flex h-9 items-center gap-[6px] rounded-[9px] px-3 text-[12.5px] font-[550] text-white disabled:opacity-50"
+                  className="flex h-9 items-center gap-[6px] rounded-[9px] px-3 text-[12.5px] font-[550] text-[var(--primary-foreground)] disabled:opacity-50"
                   style={{ background: "var(--brand)" }}
                 >
                   <Icon name="rocket" size={14} /> {deploy.isPending ? "Deploying…" : "Deploy"}

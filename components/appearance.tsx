@@ -21,7 +21,7 @@ export interface AccentPreset {
 }
 
 export const ACCENT_PRESETS: AccentPreset[] = [
-  { key: "indigo", name: "Indigo (default)", brand: "#6d5ef0", brand2: "#5546e0", weakLight: "#efedfd", weakDark: "#2a2749" },
+  { key: "indigo", name: "Indigo (default)", brand: "#6152ee", brand2: "#5546e0", weakLight: "#f4f3fe", weakDark: "#2a2749" },
   { key: "nord", name: "Nord frost", brand: "#5e81ac", brand2: "#4c6a91", weakLight: "#e9eef5", weakDark: "#2e3440" },
   { key: "teal", name: "Teal", brand: "#0d9488", brand2: "#0b7d73", weakLight: "#e6f5f3", weakDark: "#1f3a37" },
   { key: "rose", name: "Rose", brand: "#e11d63", brand2: "#c11855", weakLight: "#fdeaf1", weakDark: "#421a28" },

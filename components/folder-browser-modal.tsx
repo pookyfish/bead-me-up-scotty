@@ -158,7 +158,7 @@ function Browser({ onClose }: { onClose: () => void }) {
         <div className="flex-1 text-[11.5px] text-[var(--text-3)]">
           {data?.hasBeads ? (
             <span className="flex items-center gap-1.5 text-[var(--text-2)]">
-              <Check size={13} className="text-[#22c55e]" />
+              <Check size={13} className="text-[var(--ink-green)]" />
               This folder has a <span className="font-mono">.beads</span> repo
             </span>
           ) : (
@@ -174,7 +174,7 @@ function Browser({ onClose }: { onClose: () => void }) {
         <button
           onClick={() => data?.path && add.mutate(data.path)}
           disabled={!data?.hasBeads || add.isPending}
-          className="flex h-[36px] items-center gap-[7px] rounded-[9px] px-4 text-[13px] font-semibold text-white disabled:opacity-50"
+          className="flex h-[36px] items-center gap-[7px] rounded-[9px] px-4 text-[13px] font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
           style={{ background: "var(--brand)" }}
         >
           {add.isPending ? <Loader2 size={14} className="animate-spin" /> : <Check size={15} />}

@@ -92,7 +92,7 @@ function SettingsForm({ data }: { data: DoctorResponse }) {
           <Icon
             name={data.ok ? "check" : "x"}
             size={14}
-            style={{ color: data.ok ? "#22c55e" : "#ef4444" }}
+            style={{ color: data.ok ? "var(--ink-green)" : "var(--ink-red)" }}
           />
           <span>
             {isDemo
@@ -125,7 +125,7 @@ function SettingsForm({ data }: { data: DoctorResponse }) {
                 {n}
                 <button
                   onClick={() => setAllowlist((a) => a.filter((x) => x !== n))}
-                  className="cursor-pointer text-[var(--text-3)] hover:text-[#ef4444]"
+                  className="cursor-pointer text-[var(--text-3)] hover:text-[var(--ink-red)]"
                 >
                   ×
                 </button>
@@ -259,7 +259,7 @@ function SettingsForm({ data }: { data: DoctorResponse }) {
         <button
           onClick={() => save.mutate()}
           disabled={save.isPending}
-          className="flex h-[38px] items-center gap-[7px] rounded-[9px] px-4 text-[13px] font-semibold text-white disabled:opacity-50"
+          className="flex h-[38px] items-center gap-[7px] rounded-[9px] px-4 text-[13px] font-semibold text-[var(--primary-foreground)] disabled:opacity-50"
           style={{ background: "var(--brand)" }}
         >
           <Icon name="check" size={15} />
@@ -419,7 +419,7 @@ function NotificationsCard() {
         </button>
       </div>
       {prefs.enabled && permission === "denied" && (
-        <div className="text-[11.5px] text-[#ef4444]">
+        <div className="text-[11.5px] text-[var(--ink-red)]">
           Desktop permission is blocked in your browser — you will still see in-app toasts.
           Re-enable notifications for this site in your browser settings for desktop alerts.
         </div>

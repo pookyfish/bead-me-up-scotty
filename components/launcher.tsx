@@ -23,7 +23,7 @@ export function Launcher() {
     <div className="flex h-full flex-col overflow-y-auto bg-background text-foreground">
       <header className="flex items-center gap-[12px] border-b border-border p-[20px_28px]">
         <div
-          className="flex h-[34px] w-[34px] items-center justify-center rounded-[10px] text-white"
+          className="flex h-[34px] w-[34px] items-center justify-center rounded-[10px] text-[var(--primary-foreground)]"
           style={{ background: "var(--brand)", boxShadow: "0 2px 8px -2px var(--brand)" }}
         >
           <Icon name="logo" size={19} />
@@ -50,7 +50,7 @@ export function Launcher() {
           </h2>
           <button
             onClick={() => setAddOpen(true)}
-            className="flex h-[36px] items-center gap-[7px] rounded-[9px] px-[14px] text-[13px] font-semibold text-white"
+            className="flex h-[36px] items-center gap-[7px] rounded-[9px] px-[14px] text-[13px] font-semibold text-[var(--primary-foreground)]"
             style={{ background: "var(--brand)", boxShadow: "0 2px 8px -2px var(--brand)" }}
           >
             <Plus size={15} />
@@ -164,7 +164,7 @@ function ProjectCard({ project }: { project: ProjectInfo }) {
               remove.mutate();
             }
           }}
-          className="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-lg text-[var(--text-3)] opacity-0 transition-opacity hover:bg-[var(--surface-3)] hover:text-[#ef4444] group-hover:opacity-100"
+          className="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-lg text-[var(--text-3)] opacity-0 transition-opacity hover:bg-[var(--surface-3)] hover:text-[var(--ink-red)] group-hover:opacity-100"
         >
           <Trash2 size={14} />
         </button>
