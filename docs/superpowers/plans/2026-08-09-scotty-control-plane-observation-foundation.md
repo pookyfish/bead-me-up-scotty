@@ -34,7 +34,7 @@
 - [ ] Verify the root Scotty checkout is `codex/scotty-control-plane-foundation`, the branch tracks its pushed remote, and the only uncommitted path is this registered plan.
 - [ ] Expand `active_work.files_touching` and acquire locks before implementation for every path named by Tasks 1-9: `package.json`, `package-lock.json`, `lib/control-plane/**`, `lib/git-command.ts`, `lib/git-command.test.ts`, `lib/git-unmerged.ts`, `lib/git-unmerged.test.ts`, `lib/signal-sse.ts`, `lib/signal-sse.test.ts`, `lib/signal-sse-test-helpers.ts`, `lib/orchestra-watch.ts`, `lib/orchestra-watch.test.ts`, `lib/api-client.ts`, `app/api/p/[projectId]/control-plane/route.ts`, `app/api/p/[projectId]/control-plane/route.test.ts`, `app/api/p/[projectId]/control-plane/stream/route.ts`, `app/api/p/[projectId]/control-plane/stream/route.test.ts`, `app/api/p/[projectId]/beads/stream/route.ts`, `next.config.ts`, and `docs/control-plane-sources.md`.
 - [ ] Stop and record a conflict if any listed path is locked by another active owner. Do not switch branches, stash, use a worktree, or absorb unrelated dirty files.
-- [ ] Read the installed Next 16 route-handler and streaming references before editing routes: `node_modules/next/dist/docs/01-app/01-getting-started/15-route-handlers.md`, `node_modules/next/dist/docs/01-app/02-guides/streaming.md`, `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/route.md`, and the route-runtime reference.
+- [ ] Read the installed Next 16 route-handler and streaming references before editing routes: `node_modules/next/dist/docs/01-app/01-getting-started/15-route-handlers.md`, `node_modules/next/dist/docs/01-app/02-guides/streaming.md`, `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/route.md`, and `node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/02-route-segment-config/runtime.md`.
 - [ ] Record Task 1 BASE in the SDD ledger. Every task commit must use an explicit pathspec and immediately run `git show --stat --oneline HEAD`; stop if an unrelated path entered the commit.
 
 ---
@@ -490,8 +490,11 @@ it("filters by path containment rather than matching a name", async () => {
 });
 
 it("rejects unsupported protocol versions and wrong envelope types", async () => {
-  const unsupported = await observeHerdr("C:/repo", fakeExec({ protocol: 20, result: herdrSnapshot }));
-  const wrongType = await observeHerdr("C:/repo", fakeExec({ protocol: 19, result: { type: "event" } }));
+  const unsupported = await observeHerdr("C:/repo", fakeExec({
+    id: "request-1",
+    result: { type: "session_snapshot", snapshot: { ...herdrSnapshotFixture, protocol: 20 } },
+  }));
+  const wrongType = await observeHerdr("C:/repo", fakeExec({ id: "request-2", result: { type: "event" } }));
   expect(unsupported.error?.code).toBe("unsupported_version");
   expect(wrongType.error?.code).toBe("parse_error");
 });
@@ -548,7 +551,7 @@ export interface HerdrSnapshot {
 export const herdrSnapshotSchema: z.ZodType<HerdrSnapshot>;
 ```
 
-Parse the official aggregate result and require `result.type === "session_snapshot"`. Define `SUPPORTED_HERDR_PROTOCOLS = new Set([19])`; any other protocol is `unsupported_version`, never best-effort parsing. Map raw `agent` to `provider`, raw optional `name` to `displayName`, raw `agent_session.{source,agent,kind,value}` to `agentSession`, and `agent_status` through the explicit status enum with unknown fallback. Populate `sessionId` only from a session reference whose kind is `id`; preserve other references without pretending they are IDs.
+Parse the official protocol-19 envelope exactly as `{ id, result: { type: "session_snapshot", snapshot: { protocol, version, agents, ... } } }`. Require `result.type === "session_snapshot"` before reading `result.snapshot`; normalize `snapshot.agents` to `sessions` and ignore the request `id` after validation. Define `SUPPORTED_HERDR_PROTOCOLS = new Set([19])`; any other `result.snapshot.protocol` is `unsupported_version`, never best-effort parsing. Map raw `agent` to `provider`, raw optional `name` to `displayName`, raw `agent_session.{source,agent,kind,value}` to `agentSession`, and `agent_status` through the explicit status enum with unknown fallback. Populate `sessionId` only from a session reference whose kind is `id`; preserve other references without pretending they are IDs.
 
 Resolve project and session paths, then include a session only when the paths are equal or the session path begins with `resolvedProject + path.sep`; a lexical sibling such as `C:\repo2` must not match `C:\repo`. Do not infer role, supervisor, task, or actor identity from `name`, title, provider, or pane state. Set capabilities to `observe-managed-sessions`; later stages separately authorize controls.
 
@@ -1053,15 +1056,16 @@ git show --stat --oneline HEAD
 ```ts
 it("emits source ids without domain state", async () => {
   const harness = signalHarness();
+  const response = createSignalSseResponse(harness.request, harness.subscribe);
+  const reader = harness.readerFor(response);
   try {
-    createSignalSseResponse(harness.request, harness.subscribe);
     harness.emit("orchestra");
-    const chunk = await harness.readUntil("orchestra", 1000);
+    const chunk = await reader.readUntil("orchestra", 1000);
     expect(chunk).toContain("event: change\ndata: orchestra\n\n");
     expect(chunk).not.toContain("active_work");
   } finally {
     harness.abort();
-    await harness.cancelReader();
+    await reader.cancel();
   }
 });
 
@@ -1107,11 +1111,13 @@ it("cleans registration when subscribe throws", () => {
 
 it("preserves the Beads data: 1 contract", async () => {
   const harness = signalHarness();
+  const response = createSignalSseResponse(harness.request, harness.subscribe);
+  const reader = harness.readerFor(response);
   try {
-    createSignalSseResponse(harness.request, harness.subscribe);
     harness.emit("1");
-    expect(await harness.readUntil("data: 1", 1000)).toContain("event: change\ndata: 1\n\n");
+    expect(await reader.readUntil("data: 1", 1000)).toContain("event: change\ndata: 1\n\n");
   } finally {
+    await reader.cancel();
     await harness.dispose();
   }
 });
