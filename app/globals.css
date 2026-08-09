@@ -67,7 +67,7 @@
   --border-strong: #d6d6dd;
   --text: #16161a;
   --text-2: #62626d;
-  --text-3: #9a9aa5;
+  --text-3: #71717a; /* was #9a9aa5 — 2.7:1 on white, failed WCAG AA (axe audit 2026-08-08); 4.9:1 now */
   --brand: #6d5ef0;
   --brand-2: #5546e0;
   --brand-weak: #efedfd;

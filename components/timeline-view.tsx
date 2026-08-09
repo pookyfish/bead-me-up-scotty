@@ -163,8 +163,8 @@ function ActivityChart({
       </svg>
       {hovered && (
         <div
-          className="pointer-events-none absolute -top-2 z-10 -translate-y-full rounded-[8px] border border-border bg-[var(--surface)] px-[10px] py-[6px] text-[11px] shadow-[var(--shadow-lg)]"
-          style={{ left: Math.min(Math.max(0, ((monthKeys.indexOf(hovered.key) + 0.5) / monthKeys.length) * 100), 88) + "%" }}
+          className="pointer-events-none absolute top-[34px] z-10 rounded-[8px] border border-border bg-[var(--surface)] px-[10px] py-[6px] text-[11px] shadow-[var(--shadow-lg)]"
+          style={{ left: Math.min(Math.max(0, ((monthKeys.indexOf(hovered.key) + 0.5) / monthKeys.length) * 100), 82) + "%" }}
         >
           <div className="font-[650]">{fmtDate(`${hovered.key}T12:00:00`)}</div>
           {CHART_SERIES.map((s) => (
@@ -239,7 +239,7 @@ function DayCell({
   );
 }
 
-function DayDetail({ date, events }: { date: Date; events: DayEvent[] }) {
+function DayDetail({ date, events, tall }: { date: Date; events: DayEvent[]; tall?: boolean }) {
   const { humanAllowlist, index, openDetail } = useApp();
   if (events.length === 0) {
     return (
@@ -253,7 +253,12 @@ function DayDetail({ date, events }: { date: Date; events: DayEvent[] }) {
       <div className="px-1 pb-1 text-[12px] font-[650]">
         {fmtDate(date.toISOString())} · {events.length} event{events.length === 1 ? "" : "s"}
       </div>
-      <ol className="flex max-h-[300px] flex-col overflow-y-auto">
+      <ol
+        className={cn(
+          "flex flex-col overflow-y-auto",
+          tall ? "max-h-[calc(100vh-140px)]" : "max-h-[300px]",
+        )}
+      >
         {events.map((ev, i) => {
           const meta = EVENT_META[ev.kind];
           const time = new Date(ev.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -370,8 +375,11 @@ export function TimelineView() {
         </button>
       </div>
 
+      {/* Wide screens: calendar column + the day's events as a sticky right
+          pane that uses the full height — no burying it under the grid. */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <div className="mx-auto flex max-w-4xl flex-col gap-3">
+        <div className="mx-auto grid max-w-[1560px] grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,480px)]">
+          <div className="flex min-w-0 flex-col gap-3">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <Stat label="created this month" value={<span style={{ color: "var(--brand)" }}>+{created}</span>} />
             <Stat label="closed this month" value={<span style={{ color: "#16a34a" }}>✓{closed}</span>} />
@@ -425,11 +433,14 @@ export function TimelineView() {
             </div>
           </div>
 
-          <DayDetail date={selectedDate} events={events.get(selected) ?? []} />
-
           <div className="text-[11px] text-[var(--text-3)]">
             + created · ✓ closed · 💬 commented — cell tint deepens with activity; click a day for
             its full event list, click an event to open the bead.
+          </div>
+          </div>
+
+          <div className="min-w-0 xl:sticky xl:top-3">
+            <DayDetail date={selectedDate} events={events.get(selected) ?? []} tall />
           </div>
         </div>
       </div>

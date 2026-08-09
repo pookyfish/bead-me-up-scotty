@@ -137,12 +137,14 @@ function ExchangeCard({ ex }: { ex: Exchange }) {
       </button>
       <ol className="mt-2 flex flex-col gap-[6px]">
         {!expanded && ex.comments.length > 3 && (
-          <button
-            onClick={() => setExpanded(true)}
-            className="self-start rounded-[7px] border border-border px-[8px] py-[2px] text-[10.5px] text-[var(--text-3)] hover:text-[var(--text)]"
-          >
-            show {ex.comments.length - 3} earlier…
-          </button>
+          <li className="list-none">
+            <button
+              onClick={() => setExpanded(true)}
+              className="self-start rounded-[7px] border border-border px-[8px] py-[2px] text-[10.5px] text-[var(--text-3)] hover:text-[var(--text)]"
+            >
+              show {ex.comments.length - 3} earlier…
+            </button>
+          </li>
         )}
         {shown.map((c, i) => {
           const origin = originOf(c.author, humanAllowlist);
