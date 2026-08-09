@@ -16,6 +16,7 @@ import { GraphView } from "@/components/graph-view";
 import { InsightsView } from "@/components/insights-view";
 import { ActivityView } from "@/components/activity-view";
 import { TimelineView } from "@/components/timeline-view";
+import { CrosstalkView } from "@/components/crosstalk-view";
 import { UnmergedView } from "@/components/unmerged-view";
 import { NeedsYouView } from "@/components/needs-you-view";
 import { AchievementsView } from "@/components/achievements-view";
@@ -176,6 +177,7 @@ export function AppShell({ projectId }: { projectId: string }) {
               {view === "insights" && <InsightsView />}
               {view === "activity" && <ActivityView />}
               {view === "timeline" && <TimelineView />}
+              {view === "crosstalk" && <CrosstalkView />}
               {view === "unmerged" && <UnmergedView />}
               {view === "needsyou" && <NeedsYouView />}
               {view === "achievements" && <AchievementsView />}

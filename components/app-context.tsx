@@ -12,6 +12,7 @@ export type View =
   | "insights"
   | "activity"
   | "timeline"
+  | "crosstalk"
   | "unmerged"
   | "needsyou"
   | "achievements"
