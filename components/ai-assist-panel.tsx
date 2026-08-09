@@ -7,6 +7,7 @@ import { useApp } from "@/components/app-context";
 import { api, type AssistResult } from "@/lib/api-client";
 import { useUpdateBead } from "@/hooks/use-beads";
 import { DescriptionContent } from "@/components/description-content";
+import { shortBeadId } from "@/lib/beads-view";
 import type { Bead } from "@/lib/schema";
 
 /**
@@ -93,7 +94,7 @@ export function AiAssistPanel({ bead }: { bead: Bead }) {
                   onClick={() => pushDetail(d.id)}
                   className="mt-1 block text-left hover:underline"
                 >
-                  <span className="font-mono text-[var(--text-3)]">{d.id}</span>{" "}
+                  <span title={d.id} className="font-mono text-[var(--text-3)]">{shortBeadId(d.id)}</span>{" "}
                   <span className="text-[var(--text-2)]">{d.title}</span>
                   {d.reason ? <span className="text-[var(--text-3)]"> — {d.reason}</span> : null}
                 </button>
@@ -111,7 +112,7 @@ export function AiAssistPanel({ bead }: { bead: Bead }) {
             <button
               onClick={applyDescription}
               disabled={update.isPending}
-              className="flex h-8 items-center gap-[6px] rounded-lg px-3 text-[12.5px] font-[550] text-white disabled:opacity-50"
+              className="flex h-8 items-center gap-[6px] rounded-lg px-3 text-[12.5px] font-[550] text-[var(--primary-foreground)] disabled:opacity-50"
               style={{ background: "var(--brand)" }}
             >
               <Icon name="check" size={14} /> Apply description

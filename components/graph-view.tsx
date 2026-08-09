@@ -16,7 +16,7 @@ import "@xyflow/react/dist/style.css";
 import { Icon, typeIconName } from "@/components/icons";
 import { useApp } from "@/components/app-context";
 import { useAddDep } from "@/hooks/use-beads";
-import { catColor, typeColor } from "@/lib/beads-view";
+import { catColor, typeColor, shortBeadId } from "@/lib/beads-view";
 import { ageOf } from "@/lib/bead-age";
 import { AgeChip } from "@/components/age-chip";
 import { cn } from "@/lib/utils";
@@ -53,7 +53,7 @@ function BeadNode({ data }: NodeProps) {
       <Handle type="target" position={Position.Left} style={{ background: "var(--text-3)" }} />
       <div className="mb-[5px] flex items-center gap-[6px]">
         <span className="h-2 w-2 flex-shrink-0 rounded-full" style={{ background: catColor(bead.status) }} />
-        <span className="font-mono text-[10.5px] text-[var(--text-3)]">{bead.id.split("-").slice(-1)[0]}</span>
+        <span title={bead.id} className="font-mono text-[10.5px] text-[var(--text-3)]">{shortBeadId(bead.id)}</span>
         <AgeChip bead={bead} className="!px-[3px]" />
         <span className="flex-1" />
         <Icon name={typeIconName(bead.issue_type)} size={12} className="flex-shrink-0" style={{ color: typeColor(bead.issue_type) }} />
@@ -297,7 +297,7 @@ export function GraphView() {
         </div>
         {focusId && (
           <Toggle on onClick={() => setFocusId(null)} title="Clear focus and show the scoped graph">
-            focused: {focusId.split("-").slice(-1)[0]} ✕
+            focused: {shortBeadId(focusId)} ✕
           </Toggle>
         )}
         <Toggle on={kinds.blocks} onClick={() => setKinds((k) => ({ ...k, blocks: !k.blocks }))} title="Blocking dependencies">

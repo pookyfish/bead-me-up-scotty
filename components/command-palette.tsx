@@ -10,7 +10,7 @@ import { useApp, type View } from "@/components/app-context";
 import { useProjects } from "@/hooks/use-projects";
 import { useSetStatus, useUpdateBead } from "@/hooks/use-beads";
 import { BEAD_STATUSES, type Bead } from "@/lib/schema";
-import { statusLabel, catColor, typeLabel } from "@/lib/beads-view";
+import { statusLabel, catColor, typeLabel, shortBeadId } from "@/lib/beads-view";
 
 const VIEWS: { key: View; label: string; icon: string }[] = [
   { key: "board", label: "Board", icon: "board" },
@@ -203,7 +203,7 @@ function PaletteBody({ onView, close }: { onView: (v: View) => void; close: () =
         )}
 
         {page === "bead" && activeBead && (
-          <Command.Group heading={`${activeBead.id} · ${activeBead.title.slice(0, 52)}`}>
+          <Command.Group heading={`${shortBeadId(activeBead.id)} · ${activeBead.title.slice(0, 52)}`}>
             <Item
               icon="search"
               value="open details view"
@@ -354,7 +354,7 @@ function BeadItem({
         style={{ background: catColor(bead.status) }}
         title={statusLabel(bead.status)}
       />
-      <span className="flex-shrink-0 font-mono text-[11px] text-[var(--text-3)]">{bead.id}</span>
+      <span title={bead.id} className="flex-shrink-0 font-mono text-[11px] text-[var(--text-3)]">{shortBeadId(bead.id)}</span>
       <span className="flex-1 truncate text-[var(--text)]">{bead.title}</span>
       <span className="flex-shrink-0 text-[10px] uppercase tracking-[.03em] text-[var(--text-3)]">
         {typeLabel(bead.issue_type)}

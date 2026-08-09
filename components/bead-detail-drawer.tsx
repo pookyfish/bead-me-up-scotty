@@ -7,7 +7,7 @@ import {
   SheetDescription,
 } from "@/components/ui/sheet";
 import { Icon, typeIconName } from "@/components/icons";
-import { OriginBadge, PriorityChip } from "@/components/board/bead-card";
+import { OriginBadge, PriorityChip, StatusChip } from "@/components/board/bead-card";
 import { CopyableId } from "@/components/copyable-id";
 import { useApp } from "@/components/app-context";
 import { useImageDrop } from "@/hooks/use-image-drop";
@@ -44,6 +44,7 @@ import {
   checklistProgress,
   toggleTask,
   closeReasonOf,
+  shortBeadId,
 } from "@/lib/beads-view";
 import { BEAD_STATUSES, BLOCKING_DEP_TYPES, type Bead, type DepType } from "@/lib/schema";
 
@@ -308,7 +309,7 @@ function DrawerBody({
             <button
               disabled={setStatus.isPending}
               onClick={() => setStatus.mutate({ id: bead.id, status: "closed" })}
-              className="flex h-8 flex-shrink-0 items-center gap-[6px] rounded-lg px-3 text-[12.5px] font-[550] text-white disabled:opacity-50"
+              className="flex h-8 flex-shrink-0 items-center gap-[6px] rounded-lg px-3 text-[12.5px] font-[550] text-[var(--primary-foreground)] disabled:opacity-50"
               style={{ background: "var(--brand)" }}
             >
               <Icon name="check" size={14} /> Approve
@@ -446,7 +447,7 @@ function DrawerBody({
                 type="button"
                 disabled={setStatus.isPending}
                 onClick={confirmClose}
-                className="flex h-8 items-center gap-[6px] rounded-lg px-3 text-[12.5px] font-[550] text-white disabled:opacity-50"
+                className="flex h-8 items-center gap-[6px] rounded-lg px-3 text-[12.5px] font-[550] text-[var(--primary-foreground)] disabled:opacity-50"
                 style={{ background: "var(--brand)" }}
               >
                 <Icon name="check" size={14} />
@@ -569,7 +570,7 @@ function DrawerBody({
                 <button
                   onClick={saveEdit}
                   disabled={!titleDraft.trim() || update.isPending}
-                  className="flex h-8 items-center gap-[6px] rounded-lg px-3 text-[12.5px] font-[550] text-white disabled:opacity-50"
+                  className="flex h-8 items-center gap-[6px] rounded-lg px-3 text-[12.5px] font-[550] text-[var(--primary-foreground)] disabled:opacity-50"
                   style={{ background: "var(--brand)" }}
                 >
                   <Icon name="check" size={14} /> Save
@@ -603,7 +604,7 @@ function DrawerBody({
             {deps.map((d) => {
               const t = index.get(d.depends_on_id);
               const blocking = BLOCKING_DEP_TYPES.includes(d.type as DepType);
-              const c = blocking ? "#ef4444" : "var(--text-2)";
+              const c = blocking ? "var(--ink-red)" : "var(--text-2)";
               return (
                 <div
                   key={d.depends_on_id}
@@ -633,7 +634,7 @@ function DrawerBody({
                   <button
                     title="remove"
                     onClick={() => removeDep.mutate({ id: bead.id, dependsOnId: d.depends_on_id })}
-                    className="flex h-[22px] w-[22px] items-center justify-center rounded-md text-[var(--text-3)] hover:bg-[#ef444415] hover:text-[#ef4444]"
+                    className="flex h-[22px] w-[22px] items-center justify-center rounded-md text-[var(--text-3)] hover:bg-[#ef444415] hover:text-[var(--ink-red)]"
                   >
                     <Icon name="x" size={12} />
                   </button>
@@ -656,7 +657,7 @@ function DrawerBody({
                   <option value="">Select bead…</option>
                   {otherBeads.map((b) => (
                     <option key={b.id} value={b.id}>
-                      {b.id} · {b.title.slice(0, 40)}
+                      {shortBeadId(b.id)} · {b.title.slice(0, 40)}
                     </option>
                   ))}
                 </select>
@@ -678,7 +679,7 @@ function DrawerBody({
                     setAddingDep(false);
                     setDepTarget("");
                   }}
-                  className="flex h-8 items-center rounded-md px-3 text-[12px] font-[550] text-white disabled:opacity-50"
+                  className="flex h-8 items-center rounded-md px-3 text-[12px] font-[550] text-[var(--primary-foreground)] disabled:opacity-50"
                   style={{ background: "var(--brand)" }}
                 >
                   Add
@@ -722,7 +723,7 @@ function DrawerBody({
                       setAddingGate(false);
                       setGateReason("");
                     }}
-                    className="flex h-8 flex-shrink-0 items-center rounded-md px-3 text-[12px] font-[550] text-white disabled:opacity-50"
+                    className="flex h-8 flex-shrink-0 items-center rounded-md px-3 text-[12px] font-[550] text-[var(--primary-foreground)] disabled:opacity-50"
                     style={{ background: "var(--brand)" }}
                   >
                     Create gate
@@ -781,8 +782,11 @@ function DrawerBody({
                   style={{ background: catColor(k.status) }}
                   title={statusLabel(k.status)}
                 />
-                <span className="flex-shrink-0 font-mono text-[11px] text-[var(--text-3)]">
-                  {k.id}
+                <span
+                  title={k.id}
+                  className="flex-shrink-0 font-mono text-[11px] text-[var(--text-3)]"
+                >
+                  {shortBeadId(k.id)}
                 </span>
                 <Icon
                   name={typeIconName(k.issue_type)}
@@ -812,7 +816,7 @@ function DrawerBody({
                     ev.stopPropagation();
                     update.mutate({ id: k.id, patch: { parent: "" } });
                   }}
-                  className="flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-md text-[var(--text-3)] hover:bg-[#ef444415] hover:text-[#ef4444]"
+                  className="flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center rounded-md text-[var(--text-3)] hover:bg-[#ef444415] hover:text-[var(--ink-red)]"
                 >
                   <Icon name="x" size={12} />
                 </button>
@@ -912,7 +916,7 @@ function DrawerBody({
           </div>
           <div className="flex items-start gap-[9px]">
             <span
-              className="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-white"
+              className="flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-full text-[10px] font-semibold text-[var(--primary-foreground)]"
               style={{ background: "var(--brand)" }}
             >
               {initials(actor)}
@@ -932,7 +936,7 @@ function DrawerBody({
                     addComment.mutate({ id: bead.id, text: draft.trim() });
                     setDraft("");
                   }}
-                  className="h-8 rounded-lg px-[14px] text-[12.5px] font-[550] text-white disabled:opacity-50"
+                  className="h-8 rounded-lg px-[14px] text-[12.5px] font-[550] text-[var(--primary-foreground)] disabled:opacity-50"
                   style={{ background: "var(--brand)" }}
                 >
                   Comment
@@ -1008,7 +1012,7 @@ function LabelsField({
               onClick={() => commitVisible(visible.filter((x) => x !== l))}
               title={`Remove label “${l}”`}
               aria-label={`Remove label ${l}`}
-              className="text-[var(--text-3)] hover:text-[var(--danger,#ef4444)]"
+              className="text-[var(--text-3)] hover:text-[var(--ink-red)]"
             >
               <Icon name="x" size={11} />
             </button>
@@ -1080,17 +1084,6 @@ function Header({ icon, label, count }: { icon: string; label: string; count?: n
   );
 }
 
-function StatusChip({ status }: { status: string }) {
-  const c = catColor(status);
-  return (
-    <span
-      className="inline-flex items-center rounded-full px-2 py-px text-[10.5px] font-semibold tracking-[.01em]"
-      style={{ color: c, background: `${c}1c`, border: `1px solid ${c}33` }}
-    >
-      {statusLabel(status)}
-    </span>
-  );
-}
 
 function IconBtn({
   children,
@@ -1109,7 +1102,7 @@ function IconBtn({
       onClick={onClick}
       className={
         danger
-          ? "flex h-8 w-8 items-center justify-center rounded-lg border border-border text-[var(--text-2)] hover:border-[#ef444433] hover:bg-[#ef444415] hover:text-[#ef4444]"
+          ? "flex h-8 w-8 items-center justify-center rounded-lg border border-border text-[var(--text-2)] hover:border-[#ef444433] hover:bg-[#ef444415] hover:text-[var(--ink-red)]"
           : "flex h-8 w-8 items-center justify-center rounded-lg border border-border text-[var(--text-2)] hover:bg-[var(--surface-2)] hover:text-[var(--text)]"
       }
     >

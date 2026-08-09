@@ -2,12 +2,15 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { shortBeadId } from "@/lib/beads-view";
 
 /**
- * A bead id rendered as click-to-copy: copies the FULL id to the clipboard and
- * shows a toast (bead 2sc). Stops propagation so clicking the id inside a board
- * card or list row doesn't also open the bead. Falls back gracefully when the
- * clipboard API isn't available (e.g. a non-secure context).
+ * A bead id rendered as click-to-copy: shows the suffix only (the project
+ * prefix is identical on every bead in view), copies the FULL id to the
+ * clipboard and shows a toast (bead 2sc). Stops propagation so clicking the id
+ * inside a board card or list row doesn't also open the bead. Falls back
+ * gracefully when the clipboard API isn't available (e.g. a non-secure
+ * context).
  */
 export function CopyableId({ id, className }: { id: string; className?: string }) {
   const copy = (e: React.MouseEvent) => {
@@ -32,7 +35,7 @@ export function CopyableId({ id, className }: { id: string; className?: string }
         className,
       )}
     >
-      {id}
+      {shortBeadId(id)}
     </button>
   );
 }

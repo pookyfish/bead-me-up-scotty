@@ -3,7 +3,7 @@ import * as React from "react";
 import { useApp } from "@/components/app-context";
 import { Icon } from "@/components/icons";
 import { originOf } from "@/lib/attribution";
-import { avatarColor, initials, relTime, fmtDateTime } from "@/lib/beads-view";
+import { avatarColor, initials, relTime, fmtDateTime, shortBeadId } from "@/lib/beads-view";
 import { cn } from "@/lib/utils";
 import type { Bead } from "@/lib/schema";
 
@@ -129,7 +129,7 @@ function ExchangeCard({ ex }: { ex: Exchange }) {
         onClick={() => (index.has(ex.bead.id) ? openDetail(ex.bead.id) : undefined)}
         className="flex w-full items-baseline gap-2 text-left"
       >
-        <span className="font-mono text-[10.5px] text-[var(--text-3)]">{ex.bead.id.split("-").slice(-1)[0]}</span>
+        <span title={ex.bead.id} className="font-mono text-[10.5px] text-[var(--text-3)]">{shortBeadId(ex.bead.id)}</span>
         <span className="min-w-0 flex-1 truncate text-[13px] font-[600]">{ex.bead.title}</span>
         <span className="flex-shrink-0 text-[10.5px] text-[var(--text-3)]">
           {ex.actors.length} actors · {ex.hops} hops · {relTime(ex.lastAt)}

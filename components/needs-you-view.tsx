@@ -12,6 +12,7 @@ import {
   typeColor,
   relTime,
   fmtDateTime,
+  shortBeadId,
 } from "@/lib/beads-view";
 import type { Bead } from "@/lib/schema";
 
@@ -81,9 +82,10 @@ function GateCard({ gate }: { gate: Bead }) {
         <Icon name="gate" size={15} style={{ color: "var(--brand)" }} />
         <button
           onClick={() => openDetail(gate.id)}
+          title={gate.id}
           className="font-mono text-[11px] text-[var(--text-3)] hover:text-[var(--text)]"
         >
-          {gate.id}
+          {shortBeadId(gate.id)}
         </button>
         <span className="rounded-full border border-border bg-[var(--surface-2)] px-2 py-[1px] text-[10px] font-[650] uppercase tracking-wide text-[var(--text-2)]">
           Approval gate
@@ -112,9 +114,10 @@ function GateCard({ gate }: { gate: Bead }) {
               {i > 0 && ", "}
               <button
                 onClick={() => openDetail(b.id)}
+                title={b.id}
                 className="font-mono text-[var(--text)] hover:underline"
               >
-                {b.id}
+                {shortBeadId(b.id)}
               </button>
             </React.Fragment>
           ))}
@@ -125,7 +128,7 @@ function GateCard({ gate }: { gate: Bead }) {
         <button
           disabled={busy}
           onClick={() => setStatus.mutate({ id: gate.id, status: "closed" })}
-          className="flex h-8 items-center gap-[6px] rounded-lg px-3 text-[12.5px] font-[550] text-white disabled:opacity-50"
+          className="flex h-8 items-center gap-[6px] rounded-lg px-3 text-[12.5px] font-[550] text-[var(--primary-foreground)] disabled:opacity-50"
           style={{ background: "var(--brand)" }}
         >
           <Icon name="check" size={14} /> Approve
@@ -149,9 +152,10 @@ function NeedsYouCard({ bead }: { bead: Bead }) {
         <Icon name={typeIconName(bead.issue_type)} size={14} style={{ color: typeColor(bead.issue_type) }} />
         <button
           onClick={() => openDetail(bead.id)}
+          title={bead.id}
           className="font-mono text-[11px] text-[var(--text-3)] hover:text-[var(--text)]"
         >
-          {bead.id}
+          {shortBeadId(bead.id)}
         </button>
         <OriginBadge origin={o} title={o === "human" ? "Human" : "Agent"} />
         <span className="flex-1" />
@@ -188,7 +192,7 @@ function NeedsYouCard({ bead }: { bead: Bead }) {
         <button
           disabled={busy || !text.trim()}
           onClick={() => respond.mutate({ id: bead.id, text: text.trim() })}
-          className="flex h-8 items-center gap-[6px] rounded-lg px-3 text-[12.5px] font-[550] text-white disabled:opacity-50"
+          className="flex h-8 items-center gap-[6px] rounded-lg px-3 text-[12.5px] font-[550] text-[var(--primary-foreground)] disabled:opacity-50"
           style={{ background: "var(--brand)" }}
         >
           <Icon name="check" size={14} /> Respond
