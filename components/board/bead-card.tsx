@@ -8,8 +8,10 @@ import { useApp } from "@/components/app-context";
 import { CopyableId } from "@/components/copyable-id";
 import { AgeChip } from "@/components/age-chip";
 import { beadOrigin, originTitle } from "@/lib/attribution";
+import { cn } from "@/lib/utils";
 import {
   catColor,
+  catInk,
   statusLabel,
   prioColor,
   prioLabel,
@@ -24,9 +26,19 @@ import {
 
 export function BeadCard({ bead, childCount = 0 }: { bead: Bead; childCount?: number }) {
   const { index, humanAllowlist, openDetail } = useApp();
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: bead.id,
-  });
+  // setActivatorNodeRef (not setNodeRef) is what dnd-kit calls a drag HANDLE.
+  // The handle here is the title button, whose ::after covers the whole card —
+  // so the card is still dragged and clicked from anywhere, while the card
+  // element itself stops being an interactive control with controls inside it.
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: bead.id });
 
   const o = beadOrigin(bead, humanAllowlist);
   const parent = parentOf(bead, index);
@@ -39,9 +51,6 @@ export function BeadCard({ bead, childCount = 0 }: { bead: Bead; childCount?: nu
   return (
     <article
       ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      onClick={() => openDetail(bead.id)}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
@@ -49,7 +58,7 @@ export function BeadCard({ bead, childCount = 0 }: { bead: Bead; childCount?: nu
         boxShadow: "var(--shadow)",
         zIndex: isDragging ? 10 : undefined,
       }}
-      className="flex cursor-pointer touch-none flex-col gap-[9px] rounded-[11px] border border-border bg-[var(--surface)] p-[12px_13px] transition-[border-color,box-shadow] hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-lg)]"
+      className="bd-stretch flex cursor-pointer touch-none flex-col gap-[9px] rounded-[11px] border border-border bg-[var(--surface)] p-[12px_13px] transition-[border-color,box-shadow] hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-lg)]"
     >
       <div className="flex items-center gap-2">
         <span
@@ -59,17 +68,34 @@ export function BeadCard({ bead, childCount = 0 }: { bead: Bead; childCount?: nu
         />
         <CopyableId
           id={bead.id}
-          className="font-mono text-[11.5px] tracking-[-.01em] text-[var(--text-3)]"
+          className="bd-raise font-mono text-[11.5px] tracking-[-.01em] text-[var(--text-3)]"
         />
         <span className="flex-1" />
-        <AgeChip bead={bead} />
+        {/* .bd-raise on the chips whose hover title is the ONLY place their
+            information exists — the stretched overlay would otherwise swallow
+            the hover. Chips that merely label a visible icon stay under it, so
+            most of the card remains drag surface. */}
+        <AgeChip bead={bead} className="bd-raise" />
         <PriorityChip p={bead.priority} />
-        <OriginBadge origin={o} title={originTitle(bead.created_by, o)} />
+        <OriginBadge origin={o} title={originTitle(bead.created_by, o)} className="bd-raise" />
       </div>
 
-      <div className="text-[13.5px] font-[550] leading-[1.35] tracking-[-.006em] text-[var(--text)] [text-wrap:pretty]">
-        {bead.title}
-      </div>
+      {/* The card's single primary action AND its drag handle. Its ::after
+          covers the whole card (.bd-stretch-action), so pointer-down anywhere
+          but a .bd-raise child still starts a drag and a plain click still
+          opens the bead — with one accessible name instead of a control nest. */}
+      <h3 className="m-0 text-[13.5px] font-[550] leading-[1.35] tracking-[-.006em] text-[var(--text)] [text-wrap:pretty]">
+        <button
+          type="button"
+          ref={setActivatorNodeRef}
+          {...listeners}
+          {...attributes}
+          onClick={() => openDetail(bead.id)}
+          className="bd-stretch-action touch-none rounded-[11px] text-left font-[inherit] tracking-[inherit]"
+        >
+          {bead.title}
+        </button>
+      </h3>
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center gap-[5px] text-[11.5px] text-[var(--text-2)]">
@@ -107,7 +133,7 @@ export function BeadCard({ bead, childCount = 0 }: { bead: Bead; childCount?: nu
           <span
             title="dependencies"
             className="inline-flex items-center gap-[3px] font-mono text-[11px]"
-            style={{ color: blocked ? "#ef4444" : "var(--text-3)" }}
+            style={{ color: blocked ? "var(--ink-red)" : "var(--text-3)" }}
           >
             <Icon name="link" size={13} />
             {depCount}
@@ -126,7 +152,7 @@ export function BeadCard({ bead, childCount = 0 }: { bead: Bead; childCount?: nu
           <span
             title="checklist progress"
             className="inline-flex items-center gap-[3px] font-mono text-[11px]"
-            style={{ color: checklist.done === checklist.total ? "#16a34a" : "var(--text-3)" }}
+            style={{ color: checklist.done === checklist.total ? "var(--ok)" : "var(--text-3)" }}
           >
             <Icon name="check" size={13} />
             {checklist.done}/{checklist.total}
@@ -141,8 +167,8 @@ export function BeadCard({ bead, childCount = 0 }: { bead: Bead; childCount?: nu
             title={`${parent.id} · ${parent.title}`}
             className={
               parent.issue_type === "epic"
-                ? "inline-flex max-w-[96px] items-center gap-1 rounded-md bg-[var(--brand-weak)] px-[6px] py-px text-[10.5px] font-[550] text-[var(--brand)]"
-                : "inline-flex max-w-[96px] items-center gap-1 rounded-md border border-border bg-[var(--surface-2)] px-[6px] py-px text-[10.5px] font-[550] text-[var(--text-3)]"
+                ? "bd-raise inline-flex max-w-[96px] items-center gap-1 rounded-md bg-[var(--brand-weak)] px-[6px] py-px text-[10.5px] font-[550] text-[var(--brand)]"
+                : "bd-raise inline-flex max-w-[96px] items-center gap-1 rounded-md border border-border bg-[var(--surface-2)] px-[6px] py-px text-[10.5px] font-[550] text-[var(--text-3)]"
             }
           >
             <Icon
@@ -177,9 +203,35 @@ export function PriorityChip({ p }: { p: number }) {
   return (
     <span
       className="inline-flex flex-shrink-0 items-center rounded-md px-[7px] py-[3px] text-[10.5px] font-semibold leading-none tracking-[.01em]"
-      style={{ color: c, background: `${c}1f`, border: `1px solid ${c}33` }}
+      style={{
+        color: c,
+        background: `color-mix(in srgb, ${c} 7%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${c} 16%, transparent)`,
+      }}
     >
       {prioLabel(p)}
+    </span>
+  );
+}
+
+/**
+ * Status pill. Lived as a byte-identical private copy in BOTH epics-view and
+ * bead-detail-drawer; it now lives once, next to the other chips.
+ * `catInk`, not `catColor`: this one carries text, so it needs the AA-safe ink
+ * rather than the dot fill.
+ */
+export function StatusChip({ status }: { status: string }) {
+  const c = catInk(status);
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2 py-px text-[10.5px] font-semibold tracking-[.01em]"
+      style={{
+        color: c,
+        background: `color-mix(in srgb, ${c} 7%, transparent)`,
+        border: `1px solid color-mix(in srgb, ${c} 16%, transparent)`,
+      }}
+    >
+      {statusLabel(status)}
     </span>
   );
 }
@@ -188,16 +240,18 @@ export function OriginBadge({
   origin,
   title,
   withLabel = false,
+  className,
 }: {
   origin: "human" | "agent";
   title: string;
   withLabel?: boolean;
+  className?: string;
 }) {
   const human = origin === "human";
   return (
     <span
       title={title}
-      className="inline-flex flex-shrink-0 items-center justify-center gap-[5px] rounded-md"
+      className={cn("inline-flex flex-shrink-0 items-center justify-center gap-[5px] rounded-md", className)}
       style={
         withLabel
           ? {

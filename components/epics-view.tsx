@@ -1,7 +1,7 @@
 "use client";
 import * as React from "react";
 import { Icon, typeIconName } from "@/components/icons";
-import { OriginBadge, PriorityChip } from "@/components/board/bead-card";
+import { OriginBadge, PriorityChip, StatusChip } from "@/components/board/bead-card";
 import { useApp } from "@/components/app-context";
 import { beadOrigin, originTitle } from "@/lib/attribution";
 import {
@@ -12,6 +12,7 @@ import {
   initials,
   childrenOf,
   epicProgress,
+  shortBeadId,
 } from "@/lib/beads-view";
 
 /** Chip styling shared with the list rows and drawer so labels read alike. */
@@ -99,7 +100,7 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
         </button>
         <button
           onClick={() => openCreate({ type: "epic" })}
-          className="flex h-9 items-center gap-[6px] rounded-[9px] px-[14px] text-[13px] font-[550] text-white"
+          className="flex h-9 items-center gap-[6px] rounded-[9px] px-[14px] text-[13px] font-[550] text-[var(--primary-foreground)]"
           style={{ background: "var(--brand)" }}
         >
           <Icon name="plus" size={15} />
@@ -134,21 +135,7 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
                     a regression on GH #17. Note `!isOpen`, not `!st[e.id]`:
                     isOpen resolves the auto-expand default, and reading the raw
                     map reintroduces the "focused epic won't collapse" bug. */}
-                <div
-                  role="button"
-                  tabIndex={0}
-                  aria-expanded={isOpen}
-                  onClick={() => setExpanded((st) => ({ ...st, [e.id]: !isOpen }))}
-                  onKeyDown={(ev) => {
-                    if (ev.target !== ev.currentTarget) return;
-                    if (ev.key === "Enter" || ev.key === " ") {
-                      ev.preventDefault();
-                      setExpanded((st) => ({ ...st, [e.id]: !isOpen }));
-                    }
-                  }}
-                  title={isOpen ? "Hide children" : "Show children"}
-                  className="flex cursor-pointer items-center gap-[14px] p-[16px_18px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
-                >
+                <div className="bd-stretch flex cursor-pointer items-center gap-[14px] p-[16px_18px]">
                   <div className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-[10px] bg-[var(--brand-weak)] text-[var(--brand)]">
                     <Icon name="target" size={19} />
                   </div>
@@ -157,16 +144,31 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
                         so without it a heavily-labelled epic would spill past
                         the progress block instead of clipping. */}
                     <div className="flex min-w-0 items-center gap-[9px] overflow-hidden">
-                      <span className="flex-shrink-0 font-mono text-[11.5px] text-[var(--text-3)]">
-                        {e.id}
+                      <span
+                        title={e.id}
+                        className="flex-shrink-0 font-mono text-[11.5px] text-[var(--text-3)]"
+                      >
+                        {shortBeadId(e.id)}
                       </span>
                       <StatusChip status={e.status} />
                       <PriorityChip p={e.priority} />
                       <LabelChips labels={e.labels ?? []} max={3} />
                     </div>
-                    <div className="mt-[3px] text-[15px] font-semibold tracking-[-.01em]">
-                      {e.title}
-                    </div>
+                    {/* The row's primary action is expand/collapse (GH #17), so
+                        the title owns it and stretches over the whole header
+                        via ::after. The header itself is no longer a
+                        role="button" with buttons inside it. */}
+                    <h2 className="m-0 mt-[3px] text-[15px] font-semibold tracking-[-.01em]">
+                      <button
+                        type="button"
+                        aria-expanded={isOpen}
+                        onClick={() => setExpanded((st) => ({ ...st, [e.id]: !isOpen }))}
+                        title={isOpen ? "Hide children" : "Show children"}
+                        className="bd-stretch-action rounded-[14px] text-left font-[inherit] tracking-[inherit]"
+                      >
+                        {e.title}
+                      </button>
+                    </h2>
                   </div>
                   <div className="flex w-[200px] flex-shrink-0 flex-col items-end gap-[7px]">
                     <div className="flex items-baseline gap-[6px]">
@@ -189,36 +191,31 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
                   </div>
                   {/* Secondary action, so it gets a small explicit target with a
                       VISIBLE word — an icon alone wasn't discoverable, which is
-                      half of what GH #17 was about. stopPropagation is
-                      load-bearing: without it this also toggles the row. */}
+                      half of what GH #17 was about. .bd-raise lifts it above the
+                      title's stretched overlay (which replaced the old
+                      stopPropagation dance). */}
                   <button
                     type="button"
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      openDetail(e.id);
-                    }}
+                    onClick={() => openDetail(e.id)}
                     aria-label={`Open details for ${e.id}`}
                     title={`Open details for ${e.id}`}
-                    className="flex h-7 flex-shrink-0 items-center gap-[5px] rounded-[8px] border border-border bg-[var(--surface-2)] px-[9px] text-[11.5px] font-[550] text-[var(--text-2)] hover:border-[var(--brand)] hover:text-[var(--brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
+                    className="bd-raise flex h-7 flex-shrink-0 items-center gap-[5px] rounded-[8px] border border-border bg-[var(--surface-2)] px-[9px] text-[11.5px] font-[550] text-[var(--text-2)] hover:border-[var(--brand)] hover:text-[var(--brand)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
                   >
                     <Icon name="list" size={12} className="flex-shrink-0" />
                     <span>Details</span>
                   </button>
-                  {/* Redundant mouse convenience for the row's own toggle. The
-                      row carries aria-expanded, so this is aria-hidden and out
-                      of the tab order — two elements announcing the same
-                      expanded state is a screen-reader annoyance. Stays a
-                      <button> inside a role="button" div, never a real
-                      <button>, per a3c1328 / GH #10. */}
+                  {/* Redundant mouse affordance for the title's own toggle. The
+                      title button carries aria-expanded, so this is aria-hidden
+                      and out of the tab order — two elements announcing the same
+                      expanded state is a screen-reader annoyance (a3c1328 /
+                      GH #10). aria-hidden + tabIndex=-1 also keeps it out of
+                      axe's nested-interactive count. */}
                   <button
                     type="button"
                     tabIndex={-1}
                     aria-hidden="true"
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      setExpanded((st) => ({ ...st, [e.id]: !isOpen }));
-                    }}
-                    className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[8px] text-[var(--text-3)] hover:bg-[var(--surface-2)] hover:text-[var(--text-2)]"
+                    onClick={() => setExpanded((st) => ({ ...st, [e.id]: !isOpen }))}
+                    className="bd-raise flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[8px] text-[var(--text-3)] hover:bg-[var(--surface-2)] hover:text-[var(--text-2)]"
                   >
                     <Icon
                       name="chevron"
@@ -236,15 +233,17 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
                       return (
                         <div
                           key={k.id}
-                          onClick={() => openDetail(k.id)}
-                          className="flex cursor-pointer items-center gap-[11px] rounded-[9px] p-[9px_12px] hover:bg-[var(--surface)]"
+                          className="bd-stretch flex cursor-pointer items-center gap-[11px] rounded-[9px] p-[9px_12px] hover:bg-[var(--surface)]"
                         >
                           <span
                             className="h-2 w-2 flex-shrink-0 rounded-full"
                             style={{ background: catColor(k.status) }}
                           />
-                          <span className="w-[74px] flex-shrink-0 font-mono text-[11px] text-[var(--text-3)]">
-                            {k.id}
+                          <span
+                            title={k.id}
+                            className="w-[54px] flex-shrink-0 font-mono text-[11px] text-[var(--text-3)]"
+                          >
+                            {shortBeadId(k.id)}
                           </span>
                           <Icon
                             name={typeIconName(k.issue_type)}
@@ -252,9 +251,15 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
                             className="flex-shrink-0"
                             style={{ color: typeColor(k.issue_type) }}
                           />
-                          <span className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[13px] font-medium">
+                          {/* Was a bare onClick div — not keyboard reachable at
+                              all. Now the title is the row's one real control. */}
+                          <button
+                            type="button"
+                            onClick={() => openDetail(k.id)}
+                            className="bd-stretch-action flex-1 overflow-hidden text-ellipsis whitespace-nowrap rounded-[9px] text-left text-[13px] font-medium"
+                          >
                             {k.title}
-                          </span>
+                          </button>
                           <LabelChips labels={k.labels ?? []} max={2} />
                           <PriorityChip p={k.priority} />
                           <OriginBadge origin={o} title={originTitle(k.created_by, o)} />
@@ -290,14 +295,3 @@ export function EpicsView({ focusEpic }: { focusEpic?: { id: string; nonce: numb
   );
 }
 
-function StatusChip({ status }: { status: string }) {
-  const c = catColor(status);
-  return (
-    <span
-      className="inline-flex items-center rounded-full px-2 py-px text-[10.5px] font-semibold tracking-[.01em]"
-      style={{ color: c, background: `${c}1c`, border: `1px solid ${c}33` }}
-    >
-      {statusLabel(status)}
-    </span>
-  );
-}

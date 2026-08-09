@@ -165,7 +165,7 @@ export function ListView() {
 
         <button
           onClick={() => openCreate()}
-          className="flex h-9 flex-shrink-0 items-center gap-[6px] rounded-[9px] px-[14px] text-[13px] font-[550] text-white"
+          className="flex h-9 flex-shrink-0 items-center gap-[6px] rounded-[9px] px-[14px] text-[13px] font-[550] text-[var(--primary-foreground)]"
           style={{ background: "var(--brand)", boxShadow: "0 2px 8px -2px var(--brand)" }}
         >
           <Icon name="plus" size={15} />
@@ -246,34 +246,30 @@ function Row({
   childCount: number;
   humanAllowlist: string[];
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: bead.id,
-  });
+  // Same overlay-action pattern as the board card: the row is inert and the
+  // title button owns both the click and dnd-kit's drag activator, so the
+  // copyable id and the parent link stay independently reachable.
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    setActivatorNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: bead.id });
   const o = beadOrigin(bead, humanAllowlist);
   const labels = (bead.labels ?? []).filter((l) => l !== "archived").slice(0, 2);
-  const openFromKeyboard = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.target !== e.currentTarget) return;
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      onOpen();
-    }
-  };
   return (
     <div
       ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      role="button"
-      tabIndex={0}
-      onClick={onOpen}
-      onKeyDown={openFromKeyboard}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
         opacity: isDragging ? 0.4 : 1,
         zIndex: isDragging ? 10 : undefined,
       }}
-      className="flex w-full cursor-pointer touch-none items-center gap-3 rounded-[10px] border border-border bg-[var(--surface)] px-[13px] py-[9px] text-left transition-[border-color,box-shadow] hover:border-[var(--border-strong)] hover:shadow-[var(--shadow)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--brand)]"
+      className="bd-stretch flex w-full cursor-pointer touch-none items-center gap-3 rounded-[10px] border border-border bg-[var(--surface)] px-[13px] py-[9px] text-left transition-[border-color,box-shadow] hover:border-[var(--border-strong)] hover:shadow-[var(--shadow)]"
     >
       <span
         className="h-[9px] w-[9px] flex-shrink-0 rounded-full"
@@ -288,11 +284,18 @@ function Row({
       />
       <CopyableId
         id={bead.id}
-        className="w-[150px] flex-shrink-0 truncate font-mono text-[11.5px] text-[var(--text-3)]"
+        className="bd-raise w-[92px] flex-shrink-0 truncate font-mono text-[11.5px] text-[var(--text-3)]"
       />
-      <span className="min-w-0 flex-1 truncate text-[13.5px] font-[550] text-[var(--text)]">
+      <button
+        type="button"
+        ref={setActivatorNodeRef}
+        {...listeners}
+        {...attributes}
+        onClick={onOpen}
+        className="bd-stretch-action min-w-0 flex-1 touch-none truncate rounded-[10px] text-left text-[13.5px] font-[550] text-[var(--text)]"
+      >
         {bead.title}
-      </span>
+      </button>
       {labels.map((l) => (
         <span
           key={l}
@@ -325,7 +328,7 @@ function Row({
             else onOpenDetail(parent.id);
           }}
           title={`${parent.id} · ${parent.title} · P${parent.priority}`}
-          className="hidden max-w-[150px] flex-shrink-0 items-center gap-[4px] rounded-md border border-border bg-[var(--surface-2)] px-[6px] py-px text-[10.5px] text-[var(--text-3)] hover:border-[var(--brand)] hover:text-[var(--brand)] lg:flex"
+          className="bd-raise hidden max-w-[150px] flex-shrink-0 items-center gap-[4px] rounded-md border border-border bg-[var(--surface-2)] px-[6px] py-px text-[10.5px] text-[var(--text-3)] hover:border-[var(--brand)] hover:text-[var(--brand)] lg:flex"
         >
           <Icon
             name={parent.issue_type === "epic" ? "target" : typeIconName(parent.issue_type)}
@@ -339,7 +342,7 @@ function Row({
         <PriorityChip p={bead.priority} />
       </span>
       <span className="hidden w-[26px] flex-shrink-0 justify-center sm:flex">
-        <OriginBadge origin={o} title={originTitle(bead.created_by, o)} />
+        <OriginBadge origin={o} title={originTitle(bead.created_by, o)} className="bd-raise" />
       </span>
       <span className="hidden min-w-0 max-w-[130px] flex-shrink-0 items-center gap-[6px] md:flex">
         <span
@@ -354,7 +357,7 @@ function Row({
       </span>
       <span
         title={fmtDateTime(bead.updated_at)}
-        className="hidden w-[64px] flex-shrink-0 text-right font-mono text-[11px] text-[var(--text-3)] xl:inline"
+        className="bd-raise hidden w-[64px] flex-shrink-0 text-right font-mono text-[11px] text-[var(--text-3)] xl:inline"
       >
         {relTime(bead.updated_at)}
       </span>
