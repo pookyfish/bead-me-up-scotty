@@ -7,7 +7,33 @@ import { join } from "node:path";
 const out = process.argv[2] ?? "shots";
 const base = process.argv[3] ?? "http://localhost:1701";
 const project = process.argv[4] ?? "better-palia-maps";
-const VIEWS = ["board", "list", "epics", "graph", "timeline", "crosstalk", "unmerged", "insights", "settings"];
+// [storage key, sidebar label]. The label is how we switch views: clicking the
+// nav keeps the loaded bead cache, where a reload-per-view raced the fetch and
+// shot Epics as "No epics yet" and the Board as "Loading beads…".
+const VIEWS = [
+  ["board", "Board"],
+  ["list", "List"],
+  ["epics", "Epics"],
+  ["graph", "Graph"],
+  ["timeline", "Timeline"],
+  ["crosstalk", "Crosstalk"],
+  ["unmerged", "Unmerged Work"],
+  ["insights", "Insights"],
+  ["settings", "Settings"],
+];
+
+/** Wait until nothing on screen is still loading, then let layout settle. */
+async function waitForContent(page) {
+  await page
+    .waitForFunction(
+      () =>
+        !document.querySelector("[data-skeleton]") &&
+        !/Loading beads/.test(document.body.innerText),
+      { timeout: 25000 },
+    )
+    .catch(() => {});
+  await page.waitForTimeout(900);
+}
 
 mkdirSync(out, { recursive: true });
 const browser = await chromium.launch();
@@ -23,16 +49,14 @@ for (const mode of ["light", "dark"]) {
     },
     [project, mode],
   );
-  for (const view of VIEWS) {
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await page.waitForSelector("aside nav button", { timeout: 15000 }).catch(() => {});
+  await waitForContent(page);
+
+  for (const [view, label] of VIEWS) {
     if (mode === "dark" && !["board", "timeline", "graph"].includes(view)) continue; // dark spot-check only
-    await page.evaluate(([key, v]) => localStorage.setItem(`bmus.view.${key}`, v), [project, view]);
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await page.waitForSelector("aside nav button", { timeout: 15000 }).catch(() => {});
-    await page.waitForTimeout(1100);
-    // Insights/Unmerged fetch heavy data; give their loading states time to resolve.
-    await page
-      .waitForFunction(() => !/Loading insights|Scanning branches/.test(document.body.innerText), { timeout: 25000 })
-      .catch(() => {});
+    await page.locator("aside nav button", { hasText: label }).first().click();
+    await waitForContent(page);
     await page.screenshot({ path: join(out, `${mode}-${view}.png`) });
     process.stdout.write(`${mode}-${view}.png\n`);
   }

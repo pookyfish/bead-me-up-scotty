@@ -5,7 +5,8 @@ import { useApp } from "@/components/app-context";
 import { useUnmerged } from "@/hooks/use-beads";
 import { api } from "@/lib/api-client";
 import { Icon } from "@/components/icons";
-import { relTime, fmtDateTime } from "@/lib/beads-view";
+import { Skeleton } from "@/components/ui/skeleton";
+import { relTime, fmtDateTime, shortBeadId } from "@/lib/beads-view";
 import { cn } from "@/lib/utils";
 import type { UnmergedBranch, PairConflict } from "@/lib/unmerged-types";
 
@@ -40,9 +41,9 @@ function Chip({
   children: React.ReactNode;
 }) {
   const tones: Record<string, string> = {
-    red: "bg-[#ef4444]/12 text-[#ef4444] border-[#ef4444]/35",
-    amber: "bg-[#f59e0b]/12 text-[#b45309] dark:text-[#fbbf24] border-[#f59e0b]/35",
-    green: "bg-[#22c55e]/12 text-[#15803d] dark:text-[#4ade80] border-[#22c55e]/35",
+    red: "bg-[#ef4444]/12 text-[var(--ink-red)] border-[#ef4444]/35",
+    amber: "bg-[#f59e0b]/12 text-[var(--ink-amber)] border-[#f59e0b]/35",
+    green: "bg-[#22c55e]/12 text-[var(--ink-green)] border-[#22c55e]/35",
     muted: "border-border bg-[var(--surface-2)] text-[var(--text-3)]",
     brand: "border-[var(--brand)]/35 bg-[var(--brand-weak)] text-[var(--brand)]",
   };
@@ -56,6 +57,43 @@ function Chip({
     >
       {children}
     </span>
+  );
+}
+
+/**
+ * Loading placeholder shaped like the branch list it resolves to — same
+ * max-width, same row geometry, same 6px rhythm — so the scan (which is the
+ * slowest view in the app: it shells out to git) reads as "rows are coming"
+ * instead of a sentence that vanishes. The chevron + branch-name + chip layout
+ * is mirrored, not the exact content, since branch count isn't known yet.
+ */
+function BranchListSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Scanning branches"
+      data-skeleton=""
+      className="mx-auto flex max-w-4xl flex-col gap-[6px]"
+    >
+      {[0, 1, 2, 3, 4].map((i) => (
+        <div
+          key={i}
+          className="rounded-[10px] border border-border bg-[var(--surface)] px-3 py-[9px]"
+        >
+          <div className="flex items-center gap-2">
+            <Skeleton className="h-3 w-3 flex-shrink-0 rounded-sm" />
+            <Skeleton className="h-3" style={{ width: `${34 - i * 4}%` }} />
+            <span className="flex-1" />
+            <Skeleton className="h-[18px] w-16 rounded-full" />
+            <Skeleton className="h-[18px] w-24 rounded-full" />
+          </div>
+          <div className="mt-[7px] flex items-center gap-2">
+            <Skeleton className="h-[10px] w-28" />
+            <Skeleton className="h-[10px] w-20" />
+          </div>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -82,9 +120,15 @@ function BranchRow({
       className={cn(
         "rounded-[10px] border px-3 py-[9px]",
         red
-          ? "border-[#ef4444]/50 bg-[#ef4444]/[.06]"
+          ? // Opaque mix over --surface, not a translucent red over the page
+            // background: the see-through version let --bg darken the row to
+            // where muted text read 4.39:1 (bead 1ovaf).
+            "border-[#ef4444]/50 bg-[color-mix(in_srgb,#ef4444_6%,var(--surface))]"
           : "border-border bg-[var(--surface)]",
-        acked && "opacity-55",
+        // Acked rows are de-emphasised with a dashed border, not opacity:
+        // opacity-55 dropped their muted text to 2.2:1 (bead 1ovaf). They
+        // already sort to the bottom and carry an explicit ack chip.
+        acked && "border-dashed",
       )}
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -141,12 +185,12 @@ function BranchRow({
             className={cn(
               "inline-flex items-center gap-1 rounded-full border px-[7px] py-px font-mono text-[10.5px] font-semibold",
               b.bead.status === "closed"
-                ? "border-[#ef4444]/40 text-[#ef4444]"
+                ? "border-[#ef4444]/40 text-[var(--ink-red)]"
                 : "border-[var(--brand)]/40 text-[var(--brand)] hover:bg-[var(--brand-weak)]",
               b.bead.match === "fuzzy" && "border-dashed",
             )}
           >
-            {b.bead.id.split("-").slice(-1)[0]} · {b.bead.status}
+            {shortBeadId(b.bead.id)} · {b.bead.status}
           </button>
         ) : (
           <Chip tone="amber" title="No bead found matching this branch name or its commit subjects — untracked work.">
@@ -177,14 +221,14 @@ function BranchRow({
                 <span
                   className={cn(
                     "mr-[6px] inline-block w-[10px] font-semibold",
-                    f.status === "A" && "text-[#22c55e]",
-                    f.status === "D" && "text-[#ef4444]",
-                    f.status === "M" && "text-[#f59e0b]",
+                    f.status === "A" && "text-[var(--ink-green)]",
+                    f.status === "D" && "text-[var(--ink-red)]",
+                    f.status === "M" && "text-[var(--ink-amber)]",
                   )}
                 >
                   {f.status}
                 </span>
-                <span className={cn(b.conflict.files.includes(f.path) && "text-[#ef4444]")}>{f.path}</span>
+                <span className={cn(b.conflict.files.includes(f.path) && "text-[var(--ink-red)]")}>{f.path}</span>
               </li>
             ))}
           </ul>
@@ -243,7 +287,7 @@ function Legend() {
         Mark a branch as deliberately unmerged: it dims and sinks. Kept per-commit, so new commits
         on an acked branch re-surface it. un-ack reverses it.
       </Row>
-      <Row chip={<span className="font-mono text-[11px]"><span className="text-[#22c55e]">A</span>/<span className="text-[#f59e0b]">M</span>/<span className="text-[#ef4444]">D</span>/R</span>}>
+      <Row chip={<span className="font-mono text-[11px]"><span className="text-[var(--ink-green)]">A</span>/<span className="text-[var(--ink-amber)]">M</span>/<span className="text-[var(--ink-red)]">D</span>/R</span>}>
         In an expanded row&apos;s file list: Added / Modified / Deleted / Renamed vs the merge-base.
       </Row>
       <Row chip={<span className="text-[12px]">👯 sections</span>}>
@@ -352,9 +396,7 @@ export function UnmergedView() {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
         {isLoading && !data ? (
-          <div className="p-8 text-center text-[13px] text-[var(--text-3)]">
-            Scanning branches (read-only git — trial merges never touch the working tree)…
-          </div>
+          <BranchListSkeleton />
         ) : !data?.available ? (
           <div className="p-8 text-center text-[13px] text-[var(--text-3)]">{data?.reason}</div>
         ) : branches.length === 0 ? (
@@ -365,7 +407,7 @@ export function UnmergedView() {
           <div className="mx-auto flex max-w-4xl flex-col gap-3">
             {showLegend && <Legend />}
             {redCount > 0 && (
-              <div className="rounded-[10px] border border-[#ef4444]/50 bg-[#ef4444]/[.08] px-4 py-2 text-[12.5px] font-medium text-[#ef4444]">
+              <div className="rounded-[10px] border border-[#ef4444]/50 bg-[color-mix(in_srgb,#ef4444_8%,var(--surface))] px-4 py-2 text-[12.5px] font-medium text-[var(--ink-red)]">
                 ⛔ {redCount} branch{redCount === 1 ? " has" : "es have"} a CLOSED bead but never
                 merged — that work is finished and lost. Merge it or ack it as deliberate.
               </div>
@@ -392,7 +434,7 @@ export function UnmergedView() {
                   {conflictPairs.map((p) => (
                     <li
                       key={`${p.a}|${p.b}`}
-                      className="rounded-[8px] border border-[#f59e0b]/40 bg-[#f59e0b]/[.06] px-3 py-[6px] text-[12px]"
+                      className="rounded-[8px] border border-[#f59e0b]/40 bg-[color-mix(in_srgb,#f59e0b_6%,var(--surface))] px-3 py-[6px] text-[12px]"
                       title={p.files.join("\n")}
                     >
                       <span className="font-mono font-semibold">{p.a}</span>
@@ -430,7 +472,7 @@ function SimilarBeads({ pairs }: { pairs: { aId: string; aTitle: string; bId: st
       title={title}
       className="inline-flex max-w-[45%] items-center gap-1 truncate rounded-full border border-[var(--brand)]/40 px-[8px] py-px text-[11px] font-medium text-[var(--brand)] hover:bg-[var(--brand-weak)]"
     >
-      <span className="font-mono font-semibold">{id.split("-").slice(-1)[0]}</span>
+      <span title={id} className="font-mono font-semibold">{shortBeadId(id)}</span>
       <span className="truncate">{title}</span>
     </button>
   );

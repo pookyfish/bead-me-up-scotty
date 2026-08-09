@@ -13,6 +13,8 @@ import {
   Legend,
 } from "recharts";
 import { useApp } from "@/components/app-context";
+import { Skeleton } from "@/components/ui/skeleton";
+import { shortBeadId } from "@/lib/beads-view";
 import { useInsights } from "@/hooks/use-beads";
 import type { InsightsData } from "@/lib/api-client";
 
@@ -64,7 +66,7 @@ export function InsightsView() {
               key={r}
               onClick={() => setDays(r)}
               className={`px-[10px] py-[5px] text-[12px] ${
-                days === r ? "bg-[var(--brand)] text-white" : "bg-[var(--surface-2)] text-[var(--text-2)]"
+                days === r ? "bg-[var(--brand)] text-[var(--primary-foreground)]" : "bg-[var(--surface-2)] text-[var(--text-2)]"
               }`}
             >
               {r}d
@@ -75,7 +77,7 @@ export function InsightsView() {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
         {isLoading && !data ? (
-          <div className="p-8 text-center text-[13px] text-[var(--text-3)]">Loading insights…</div>
+          <InsightsSkeleton />
         ) : !data ? (
           <div className="p-8 text-center text-[13px] text-[var(--text-3)]">No data.</div>
         ) : (
@@ -169,13 +171,13 @@ function Dashboard({ data, split }: { data: InsightsData; split: boolean }) {
             <div className="flex flex-col gap-[6px]">
               {data.aging.map((a) => (
                 <div key={a.id} className="flex items-center gap-2 text-[12.5px]">
-                  <span className="font-mono text-[11px] text-[var(--text-3)]">{a.id}</span>
+                  <span title={a.id} className="font-mono text-[11px] text-[var(--text-3)]">{shortBeadId(a.id)}</span>
                   <span className="flex-1 truncate text-[var(--text-2)]">{a.title}</span>
                   <span
                     className="rounded-full px-[7px] py-px text-[11px] font-semibold"
                     style={{
-                      color: a.days >= 7 ? "#ef4444" : "var(--text-2)",
-                      background: a.days >= 7 ? "#ef444418" : "var(--surface-2)",
+                      color: a.days >= 7 ? "var(--ink-red)" : "var(--text-2)",
+                      background: a.days >= 7 ? "color-mix(in srgb, var(--ink-red) 10%, transparent)" : "var(--surface-2)",
                     }}
                   >
                     {a.days}d
@@ -207,7 +209,7 @@ function Dashboard({ data, split }: { data: InsightsData; split: boolean }) {
                     </div>
                     <div
                       className="text-[18px] font-[650]"
-                      style={{ color: over ? "#ef4444" : "var(--text)" }}
+                      style={{ color: over ? "var(--ink-red)" : "var(--text)" }}
                     >
                       {c.count}
                       {over && <span className="ml-1 text-[11px] font-medium">over limit</span>}
@@ -236,7 +238,39 @@ function Dashboard({ data, split }: { data: InsightsData; split: boolean }) {
   );
 }
 
-function Kpi({ label, value }: { label: string; value: string }) {
+/**
+ * Loading placeholder built from the REAL Kpi/Panel shells, so the dashboard
+ * doesn't jump when the data lands — it only fills in. Four KPI tiles and the
+ * two full-width chart panels are what every load resolves to, so those are
+ * what the skeleton promises.
+ */
+function InsightsSkeleton() {
+  return (
+    <div
+      role="status"
+      aria-label="Loading insights"
+      data-skeleton=""
+      className="mx-auto flex max-w-5xl flex-col gap-5"
+    >
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <Kpi
+            key={i}
+            label={<Skeleton className="h-3 w-24" />}
+            value={<Skeleton className="h-6 w-16" />}
+          />
+        ))}
+      </div>
+      {[0, 1].map((i) => (
+        <Panel key={i} title={<Skeleton className="h-3 w-44" />}>
+          <Skeleton className="h-[220px] w-full" />
+        </Panel>
+      ))}
+    </div>
+  );
+}
+
+function Kpi({ label, value }: { label: React.ReactNode; value: React.ReactNode }) {
   return (
     <div className="rounded-[12px] border border-border bg-[var(--surface)] p-4">
       <div className="text-[11px] uppercase tracking-[.03em] text-[var(--text-3)]">{label}</div>
@@ -245,7 +279,7 @@ function Kpi({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
   return (
     <section className="flex flex-col gap-3 rounded-[13px] border border-border bg-[var(--surface)] p-[16px_18px]">
       <div className="text-[13px] font-semibold">{title}</div>
