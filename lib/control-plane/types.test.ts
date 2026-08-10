@@ -1,0 +1,54 @@
+import { describe, expect, it } from "vitest";
+import {
+  availableObservation,
+  failedObservation,
+  observationSchema,
+} from "./types";
+
+describe("control-plane observation contract", () => {
+  it("requires data for an available observation", () => {
+    expect(
+      observationSchema.safeParse({
+        source: "herdr",
+        authority: "managed-session-runtime",
+        observedAt: "2026-08-09T22:00:00.000Z",
+        freshness: "live",
+        capability: "available",
+        capabilities: ["observe"],
+      }).success,
+    ).toBe(false);
+  });
+
+  it("allows degraded data only with a stable diagnostic", () => {
+    const result = failedObservation(
+      "runtime-manager",
+      "service-runtime",
+      "degraded",
+      "timeout",
+      "Service inventory exceeded the read budget.",
+      { epoch: 13 },
+      ["observe-health"],
+      { observedAt: "2026-08-09T22:00:00.000Z", freshness: "live" },
+    );
+    expect(observationSchema.parse(result).error?.code).toBe("timeout");
+    expect(result.freshness).toBe("live");
+  });
+
+  it("preserves explicit live, cached, stale, and unknown freshness", () => {
+    expect(availableObservation("git", "repository", {}, ["observe"], { freshness: "live" }).freshness).toBe("live");
+    expect(availableObservation("orchestra", "coordination", {}, ["observe"], { freshness: "cached" }).freshness).toBe("cached");
+    expect(failedObservation("git", "repository", "degraded", "timeout", "Timed out.", {}, ["observe"], { freshness: "stale" }).freshness).toBe("stale");
+    expect(failedObservation("herdr", "runtime", "unavailable", "unavailable", "Unavailable.", undefined, [], { freshness: "unknown" }).freshness).toBe("unknown");
+  });
+
+  it("does not merge actor, session, surface, role, or task identity", () => {
+    const result = availableObservation(
+      "herdr",
+      "managed-session-runtime",
+      { sessions: [{ actor: "codex-supervisor", sessionId: "s1" }, { actor: "codex-supervisor", sessionId: "s2" }] },
+      ["observe"],
+      { observedAt: "2026-08-09T22:00:00.000Z" },
+    );
+    expect(result.data.sessions).toHaveLength(2);
+  });
+});
