@@ -345,4 +345,20 @@ describe("observeOrchestra", () => {
     expect(result.data?.unresolvedImpacts).toEqual([]);
     expect(result.data?.sections.impacts.included).toBe(0);
   });
+
+  it.each(["bad\u0000key", "x".repeat(513)])("rejects control-bearing or oversized active-work key %s", async (key) => {
+    const result = await observeOrchestra("C:/unsafe-key", fakeFs({
+      json: { ...orchestraMixedFixture, active_work: { [key]: orchestraMixedFixture.active_work["valid-entry"] } },
+    }));
+    expect(result.data?.activeWork).toEqual({});
+    expect(result.error?.code).toBe("incomplete_observation");
+  });
+
+  it("rejects a control-bearing active-work bead ID instead of projecting it", async () => {
+    const result = await observeOrchestra("C:/unsafe-bead", fakeFs({
+      json: { ...orchestraMixedFixture, active_work: { safe: { ...orchestraMixedFixture.active_work["valid-entry"], bead_id: "bad\u0000bead" } } },
+    }));
+    expect(result.data?.activeWork).toEqual({});
+    expect(result.error?.code).toBe("incomplete_observation");
+  });
 });

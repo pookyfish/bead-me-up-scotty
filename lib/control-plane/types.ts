@@ -198,9 +198,13 @@ export type SupervisorCheckpointProjection =
   | { status: "valid"; checkpoint: SupervisorCheckpoint }
   | { status: "invalid"; code: "invalid_checkpoint" };
 
-const checkpointTextSchema = z.string().min(1).max(2_000).regex(/^[^\u0000-\u001F\u007F]*$/);
+export const CHECKPOINT_TEXT_MAX_LENGTH = 512;
+export const CONTROL_PLANE_DIAGNOSTIC_TEXT_MAX_LENGTH = 2_000;
+export const coordinationIdentitySchema = z.string().min(1).max(CHECKPOINT_TEXT_MAX_LENGTH).regex(/^[^\u0000-\u001F\u007F]*$/);
+const checkpointTextSchema = coordinationIdentitySchema;
+const diagnosticTextSchema = z.string().min(1).max(CONTROL_PLANE_DIAGNOSTIC_TEXT_MAX_LENGTH).regex(/^[^\u0000-\u001F\u007F]*$/);
 const planPathSchema = checkpointTextSchema.refine((value) =>
-  !/^[A-Za-z]:[\\/]/.test(value) && !value.startsWith("/") && !value.startsWith("\\\\") && !value.split(/[\\/]+/).includes(".."),
+  !/^[A-Za-z]:/.test(value) && !value.startsWith("/") && !value.startsWith("\\") && !/[\\/]{2,}/.test(value) && value.split(/[\\/]/).every((segment) => segment !== "" && segment !== "." && segment !== ".."),
   "planPath must be project-relative",
 );
 const exactSessionBindingSchema: z.ZodType<ExactSessionBinding> = z.discriminatedUnion("source", [
@@ -239,7 +243,7 @@ export interface ControlPlaneDiagnostic {
   nextAction: string;
 }
 export const controlPlaneDiagnosticSchema: z.ZodType<ControlPlaneDiagnostic> = z.object({
-  code: z.enum(["supervisor_continuity_stalled", "supervisor_owner_update_overdue", "supervisor_continuity_unproven"]), severity: z.enum(["warning", "info"]), workKey: checkpointTextSchema, beadId: checkpointTextSchema.nullable(), stage: checkpointTextSchema, message: checkpointTextSchema, nextAction: checkpointTextSchema,
+  code: z.enum(["supervisor_continuity_stalled", "supervisor_owner_update_overdue", "supervisor_continuity_unproven"]), severity: z.enum(["warning", "info"]), workKey: coordinationIdentitySchema, beadId: coordinationIdentitySchema.nullable(), stage: checkpointTextSchema, message: diagnosticTextSchema, nextAction: checkpointTextSchema,
 });
 
 export const orchestraSectionStatsSchema: z.ZodType<OrchestraSectionStats> = z.object({
@@ -258,7 +262,7 @@ const orchestraSupervisorSchema = z.object({
 });
 
 const orchestraActiveWorkSchema = z.object({
-  beadId: orchestraNullableStringSchema,
+  beadId: coordinationIdentitySchema.nullable(),
   status: orchestraNullableStringSchema,
   repo: orchestraNullableStringSchema,
   branch: orchestraNullableStringSchema,
@@ -320,7 +324,7 @@ const orchestraSectionNameSchema = z.enum([
 export const orchestraSnapshotSchema: z.ZodType<OrchestraSnapshot> = z.object({
   schemaVersion: z.literal(2),
   supervisor: orchestraSupervisorSchema.nullable(),
-  activeWork: z.record(orchestraBoundedStringSchema, orchestraActiveWorkSchema),
+  activeWork: z.record(coordinationIdentitySchema, orchestraActiveWorkSchema),
   fileLocks: z.record(orchestraBoundedStringSchema, orchestraFileLockSchema),
   pendingIntegration: z.array(orchestraPendingIntegrationSchema).max(50),
   unresolvedConflicts: z.array(orchestraConflictSchema).max(50),

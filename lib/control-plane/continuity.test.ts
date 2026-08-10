@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { evaluateSupervisorContinuity } from "./continuity";
-import { availableObservation, failedObservation, type OrchestraSnapshot } from "./types";
+import { availableObservation, CHECKPOINT_TEXT_MAX_LENGTH, controlPlaneDiagnosticSchema, failedObservation, supervisorCheckpointSchema, type OrchestraSnapshot } from "./types";
 
 const now = new Date("2026-08-09T21:00:00.000Z");
 
@@ -28,6 +28,21 @@ const checkpoint = {
 };
 
 const herdr = availableObservation("herdr", "managed-session-runtime", { protocol: 19, version: "0.8", sessions: [] }, ["observe"], { observedAt: now.toISOString() });
+const session = (sessionId: string, status: "idle" | "working" | "blocked" | "done" | "unknown", extras: Record<string, unknown> = {}) => ({
+  provider: "codex", displayName: "supervisor", sessionId, surface: "herdr" as const, status,
+  workspaceId: "w", tabId: "t", paneId: "p", terminalId: "terminal", cwd: "C:/repo", focused: false, revision: 1, stateChangeSeq: 1, agentSession: null, ...extras,
+});
+const herdrWith = (...sessions: ReturnType<typeof session>[]) => availableObservation("herdr", "managed-session-runtime", { protocol: 19, version: "0.8", sessions }, ["observe"], { observedAt: now.toISOString() });
+const checkpointFor = (phase: "planning" | "implementation" | "review" | "correction" | "transition" | "handoff", binding: unknown = null) => ({
+  ...checkpoint,
+  checkpoint: {
+    ...checkpoint.checkpoint,
+    phase,
+    supervisorBinding: phase === "planning" || phase === "handoff" ? binding : null,
+    workerBinding: phase === "implementation" || phase === "correction" ? binding : null,
+    reviewerBinding: phase === "review" ? binding : null,
+  },
+});
 
 describe("supervisor continuity", () => {
   it("reports the exact declared next action when an approved plan silently stalls", () => {
@@ -49,5 +64,63 @@ describe("supervisor continuity", () => {
   it("treats unavailable coordination as unproven rather than passing", () => {
     const unavailable = failedObservation("orchestra", "coordination", "unavailable", "unavailable", "No state", undefined, [], { observedAt: now.toISOString(), freshness: "unknown" });
     expect(evaluateSupervisorContinuity({ orchestra: unavailable, herdr, now })).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_unproven", workKey: "orchestra" }));
+  });
+
+  it("keeps diagnostic messages valid at the schema-valid checkpoint text boundary", () => {
+    const boundary = "x".repeat(CHECKPOINT_TEXT_MAX_LENGTH);
+    const parsed = supervisorCheckpointSchema.parse({
+      ...checkpoint.checkpoint,
+      stage: boundary,
+      nextAction: boundary,
+    });
+    const result = evaluateSupervisorContinuity({
+      orchestra: orchestra({ status: "valid", checkpoint: parsed }), herdr, now,
+    }).find((diagnostic) => diagnostic.code === "supervisor_continuity_stalled");
+    expect(controlPlaneDiagnosticSchema.safeParse(result).success).toBe(true);
+  });
+
+  it.each(["idle", "blocked", "done"] as const)("treats exact Herdr %s evidence as conclusively not working", (status) => {
+    const binding = { source: "herdr" as const, surface: "herdr" as const, sessionId: "exact" };
+    expect(evaluateSupervisorContinuity({ orchestra: orchestra(checkpointFor("implementation", binding)), herdr: herdrWith(session("exact", status)), now })).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_stalled" }));
+  });
+
+  it("requires the exact Herdr session ID rather than actor, provider, or display name", () => {
+    const binding = { source: "herdr" as const, surface: "herdr" as const, sessionId: "new-session" };
+    const diagnostics = evaluateSupervisorContinuity({ orchestra: orchestra(checkpointFor("handoff", binding)), herdr: herdrWith(session("old-session", "working")), now });
+    expect(diagnostics).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_stalled" }));
+    expect(diagnostics).not.toContainEqual(expect.objectContaining({ code: "supervisor_continuity_unproven" }));
+  });
+
+  it.each([
+    { source: "codex-collaboration", surface: "collaboration", sessionId: "c" },
+    { source: "claude-desktop", surface: "desktop", sessionId: "d" },
+    { source: "external", surface: "external", sessionId: "e" },
+  ] as const)("keeps non-Herdr bindings unproven", (binding) => {
+    const diagnostics = evaluateSupervisorContinuity({ orchestra: orchestra(checkpointFor("implementation", binding)), herdr, now });
+    expect(diagnostics).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_unproven" }));
+    expect(diagnostics).not.toContainEqual(expect.objectContaining({ code: "supervisor_continuity_stalled" }));
+  });
+
+  it("keeps unknown, degraded, and missing liveness evidence unproven", () => {
+    const binding = { source: "herdr" as const, surface: "herdr" as const, sessionId: "exact" };
+    const degraded = failedObservation("herdr", "managed-session-runtime", "degraded", "incomplete_observation", "partial", { protocol: 19, version: "0.8", sessions: [] }, ["observe"], { observedAt: now.toISOString(), freshness: "live" });
+    for (const observed of [herdrWith(session("exact", "unknown")), degraded]) {
+      const diagnostics = evaluateSupervisorContinuity({ orchestra: orchestra(checkpointFor("review", binding)), herdr: observed, now });
+      expect(diagnostics).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_unproven" }));
+      expect(diagnostics).not.toContainEqual(expect.objectContaining({ code: "supervisor_continuity_stalled" }));
+    }
+    expect(evaluateSupervisorContinuity({ orchestra: orchestra(checkpointFor("review")), herdr, now })).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_unproven" }));
+  });
+
+  it.each(["paused", "blocked", "complete"] as const)("suppresses all diagnostics for terminal %s checkpoints", (objectiveStatus) => {
+    const terminal = { ...checkpoint, checkpoint: { ...checkpoint.checkpoint, objectiveStatus, pauseReason: objectiveStatus === "paused" ? "Paused" : null, blocker: objectiveStatus === "blocked" ? "Blocked" : null, completedStages: objectiveStatus === "complete" ? 9 : 5 } };
+    expect(evaluateSupervisorContinuity({ orchestra: orchestra(terminal), herdr, now })).toEqual([]);
+  });
+
+  it("reports an owner update overdue while an exact worker is live", () => {
+    const binding = { source: "herdr" as const, surface: "herdr" as const, sessionId: "worker" };
+    const diagnostics = evaluateSupervisorContinuity({ orchestra: orchestra(checkpointFor("implementation", binding)), herdr: herdrWith(session("worker", "working")), now });
+    expect(diagnostics).toContainEqual(expect.objectContaining({ code: "supervisor_owner_update_overdue" }));
+    expect(diagnostics).not.toContainEqual(expect.objectContaining({ code: "supervisor_continuity_stalled" }));
   });
 });

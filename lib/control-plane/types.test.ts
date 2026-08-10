@@ -8,6 +8,7 @@ import {
   observationSchema,
   orchestraSnapshotSchema,
   runtimeManagerSnapshotSchema,
+  supervisorCheckpointSchema,
 } from "./types";
 
 describe("control-plane observation contract", () => {
@@ -199,5 +200,56 @@ describe("control-plane observation contract", () => {
 
     expect(parsed).not.toHaveProperty("commandLine");
     expect(parsed).toMatchObject({ branch: "feature/health", ahead: 2, behind: 1 });
+  });
+
+  it.each(["C:docs\\plan.md", "\\docs\\plan.md", "docs/./plan.md", "docs//plan.md"])(
+    "rejects non-normalized checkpoint plan path %s",
+    (planPath) => {
+      expect(supervisorCheckpointSchema.safeParse({
+        schemaVersion: 1,
+        objectiveStatus: "approved_incomplete",
+        objective: "Complete the plan",
+        planPath,
+        completedStages: 1,
+        totalStages: 2,
+        stage: "Task 7",
+        phase: "transition",
+        supervisorBinding: null,
+        workerBinding: null,
+        reviewerBinding: null,
+        nextAction: "finish the validation",
+        lastTransitionAt: "2026-08-09T20:00:00.000Z",
+        lastOwnerUpdateAt: null,
+        transitionDueAt: "2026-08-09T20:30:00.000Z",
+        ownerUpdateDueAt: "2026-08-09T20:30:00.000Z",
+        pauseReason: null,
+        blocker: null,
+        handoffGeneration: 1,
+      }).success).toBe(false);
+    },
+  );
+
+  it.each([
+    { objectiveStatus: "approved_incomplete", totalStages: 0, completedStages: 0, transitionDueAt: "2026-08-09T20:30:00.000Z", ownerUpdateDueAt: "2026-08-09T20:30:00.000Z" },
+    { objectiveStatus: "approved_incomplete", totalStages: 2, completedStages: 2, transitionDueAt: "2026-08-09T20:30:00.000Z", ownerUpdateDueAt: "2026-08-09T20:30:00.000Z" },
+    { objectiveStatus: "approved_incomplete", totalStages: 2, completedStages: 3, transitionDueAt: "2026-08-09T20:30:00.000Z", ownerUpdateDueAt: "2026-08-09T20:30:00.000Z" },
+    { objectiveStatus: "approved_incomplete", totalStages: 2, completedStages: 1, transitionDueAt: null, ownerUpdateDueAt: "2026-08-09T20:30:00.000Z" },
+    { objectiveStatus: "approved_incomplete", totalStages: 2, completedStages: 1, transitionDueAt: "2026-08-09T20:30:00.000Z", ownerUpdateDueAt: null },
+    { objectiveStatus: "complete", totalStages: 2, completedStages: 1, transitionDueAt: null, ownerUpdateDueAt: null },
+  ])("rejects contradictory checkpoint invariants", (override) => {
+    expect(supervisorCheckpointSchema.safeParse({
+      schemaVersion: 1, objective: "Objective", planPath: "docs/plan.md", stage: "Task", phase: "transition",
+      supervisorBinding: null, workerBinding: null, reviewerBinding: null, nextAction: "Act", lastTransitionAt: "2026-08-09T20:00:00.000Z", lastOwnerUpdateAt: null, pauseReason: null, blocker: null, handoffGeneration: 0,
+      ...override,
+    }).success).toBe(false);
+  });
+
+  it.each([
+    { objectiveStatus: "paused", pauseReason: null, blocker: null },
+    { objectiveStatus: "blocked", pauseReason: null, blocker: null },
+  ])("requires the state-specific checkpoint reason", (override) => {
+    expect(supervisorCheckpointSchema.safeParse({
+      schemaVersion: 1, objective: "Objective", planPath: "docs/plan.md", completedStages: 1, totalStages: 2, stage: "Task", phase: "transition", supervisorBinding: null, workerBinding: null, reviewerBinding: null, nextAction: "Act", lastTransitionAt: "2026-08-09T20:00:00.000Z", lastOwnerUpdateAt: null, transitionDueAt: null, ownerUpdateDueAt: null, handoffGeneration: 0, ...override,
+    }).success).toBe(false);
   });
 });

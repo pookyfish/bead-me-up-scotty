@@ -12,6 +12,7 @@ import {
   type OrchestraSnapshot,
   type SupervisorCheckpointProjection,
   supervisorCheckpointSchema,
+  CHECKPOINT_TEXT_MAX_LENGTH,
 } from "./types";
 
 const HISTORY_LIMIT = 50;
@@ -45,7 +46,7 @@ const rawSupervisorSchema = z.object({
   channel_of_record: z.string().nullish(),
 }).passthrough();
 const rawActiveWorkSchema = z.object({
-  bead_id: z.string().nullish(),
+  bead_id: z.string().min(1).max(CHECKPOINT_TEXT_MAX_LENGTH).regex(/^[^\u0000-\u001F\u007F]*$/).nullish(),
   status: z.string().nullish(),
   repo: z.string().nullish(),
   branch: z.string().nullish(),
@@ -182,6 +183,10 @@ function boundedList(values: string[] | undefined): string[] {
   return (values ?? []).slice(0, STRING_LIST_LIMIT).map(bounded);
 }
 
+function validActiveWorkKey(value: string): boolean {
+  return value.length > 0 && value.length <= CHECKPOINT_TEXT_MAX_LENGTH && !/[\u0000-\u001F\u007F]/.test(value);
+}
+
 const legacyCheckpointKeys = new Set([
   "supervisor_session_id", "worker_session_id", "reviewer_session_id",
   "supervisorSessionId", "workerSessionId", "reviewerSessionId",
@@ -276,7 +281,13 @@ function parseSnapshot(raw: Record<string, unknown>): {
     }
   }
 
-  const activeWorkSection = parseMapSection(raw.active_work, rawActiveWorkSchema);
+  const parsedActiveWorkSection = parseMapSection(raw.active_work, rawActiveWorkSchema);
+  const invalidActiveWorkKeys = parsedActiveWorkSection.entries.filter(([key]) => !validActiveWorkKey(key));
+  const activeWorkSection = {
+    ...parsedActiveWorkSection,
+    rejected: parsedActiveWorkSection.rejected + invalidActiveWorkKeys.length,
+    entries: parsedActiveWorkSection.entries.filter(([key]) => validActiveWorkKey(key)),
+  };
   let invalidCheckpoints = 0;
   const activeWorkEntries = activeWorkSection.entries.map(([key, record]) => {
     const supervision = projectSupervision(record.supervision);
