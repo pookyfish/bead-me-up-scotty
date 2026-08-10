@@ -1,13 +1,12 @@
 import { subscribeBeadsChange } from "@/lib/beads-watch";
-import { registerSseStream } from "@/lib/sse-registry";
+import { fail } from "@/lib/api";
+import { ConfigError, getProject } from "@/lib/config";
+import { createSignalSseResponse } from "@/lib/signal-sse";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 type Ctx = { params: Promise<{ projectId: string }> };
-
-/** Keep the connection alive and let the server notice dead sockets. */
-const HEARTBEAT_MS = 25_000;
 
 /**
  * Server-Sent Events stream of beads changes for a project.
@@ -18,54 +17,15 @@ const HEARTBEAT_MS = 25_000;
  * carries no bead data of its own.
  */
 export async function GET(req: Request, { params }: Ctx) {
-  const { projectId } = await params;
-  const encoder = new TextEncoder();
-
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      let closed = false;
-      const send = (chunk: string) => {
-        if (closed) return;
-        try {
-          controller.enqueue(encoder.encode(chunk));
-        } catch {
-          closed = true;
-        }
-      };
-
-      send(": connected\n\n");
-      const unsub = subscribeBeadsChange(projectId, () =>
-        send("event: change\ndata: 1\n\n"),
-      );
-      const heartbeat = setInterval(() => send(": ping\n\n"), HEARTBEAT_MS);
-
-      let unregister = () => {};
-      const close = () => {
-        if (closed) return;
-        closed = true;
-        clearInterval(heartbeat);
-        unsub();
-        unregister();
-        try {
-          controller.close();
-        } catch {
-          /* already closed */
-        }
-      };
-
-      // Let shutdown close this stream: `next start` drains in-flight requests
-      // before exiting, and this one would otherwise never finish.
-      unregister = registerSseStream(close);
-
-      req.signal.addEventListener("abort", close);
-    },
-  });
-
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-    },
-  });
+  try {
+    const { projectId } = await params;
+    const project = getProject(projectId);
+    if (!project) throw new ConfigError(`Unknown project: ${projectId}`, "unknown_project");
+    if (project.path === null) return new Response(null, { status: 204 });
+    return createSignalSseResponse(req, (emit) =>
+      subscribeBeadsChange(projectId, () => emit("1")),
+    );
+  } catch (error) {
+    return fail(error);
+  }
 }
