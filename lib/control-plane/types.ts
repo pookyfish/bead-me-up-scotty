@@ -204,7 +204,7 @@ export const coordinationIdentitySchema = z.string().min(1).max(CHECKPOINT_TEXT_
 const checkpointTextSchema = coordinationIdentitySchema;
 const diagnosticTextSchema = z.string().min(1).max(CONTROL_PLANE_DIAGNOSTIC_TEXT_MAX_LENGTH).regex(/^[^\u0000-\u001F\u007F]*$/);
 const planPathSchema = checkpointTextSchema.refine((value) =>
-  !/^[A-Za-z]:/.test(value) && !value.startsWith("/") && !value.startsWith("\\") && !/[\\/]{2,}/.test(value) && value.split(/[\\/]/).every((segment) => segment !== "" && segment !== "." && segment !== ".."),
+  !/^[A-Za-z]:/.test(value) && !value.startsWith("/") && !value.startsWith("\\") && !value.includes("\\") && !/\/{2,}/.test(value) && value.split("/").every((segment) => segment !== "" && segment !== "." && segment !== ".."),
   "planPath must be project-relative",
 );
 const exactSessionBindingSchema: z.ZodType<ExactSessionBinding> = z.discriminatedUnion("source", [

@@ -46,7 +46,7 @@ const rawSupervisorSchema = z.object({
   channel_of_record: z.string().nullish(),
 }).passthrough();
 const rawActiveWorkSchema = z.object({
-  bead_id: z.string().min(1).max(CHECKPOINT_TEXT_MAX_LENGTH).regex(/^[^\u0000-\u001F\u007F]*$/).nullish(),
+  bead_id: z.unknown().optional(),
   status: z.string().nullish(),
   repo: z.string().nullish(),
   branch: z.string().nullish(),
@@ -183,8 +183,8 @@ function boundedList(values: string[] | undefined): string[] {
   return (values ?? []).slice(0, STRING_LIST_LIMIT).map(bounded);
 }
 
-function validActiveWorkKey(value: string): boolean {
-  return value.length > 0 && value.length <= CHECKPOINT_TEXT_MAX_LENGTH && !/[\u0000-\u001F\u007F]/.test(value);
+function safeActiveWorkText(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= CHECKPOINT_TEXT_MAX_LENGTH && !/[\u0000-\u001F\u007F]/.test(value);
 }
 
 const legacyCheckpointKeys = new Set([
@@ -282,18 +282,24 @@ function parseSnapshot(raw: Record<string, unknown>): {
   }
 
   const parsedActiveWorkSection = parseMapSection(raw.active_work, rawActiveWorkSchema);
-  const invalidActiveWorkKeys = parsedActiveWorkSection.entries.filter(([key]) => !validActiveWorkKey(key));
-  const activeWorkSection = {
-    ...parsedActiveWorkSection,
-    rejected: parsedActiveWorkSection.rejected + invalidActiveWorkKeys.length,
-    entries: parsedActiveWorkSection.entries.filter(([key]) => validActiveWorkKey(key)),
-  };
+  const unsafeActiveWorkEntries = parsedActiveWorkSection.entries.filter(([key, record]) =>
+    !safeActiveWorkText(key) || (record.bead_id !== undefined && record.bead_id !== null && !safeActiveWorkText(record.bead_id)),
+  );
+  const activeWorkSection = { ...parsedActiveWorkSection, rejected: parsedActiveWorkSection.rejected + unsafeActiveWorkEntries.length };
   let invalidCheckpoints = 0;
-  const activeWorkEntries = activeWorkSection.entries.map(([key, record]) => {
-    const supervision = projectSupervision(record.supervision);
+  const safeKeys = new Set(activeWorkSection.entries.filter(([key]) => safeActiveWorkText(key)).map(([key]) => key));
+  let unsafeEntryIndex = 0;
+  const activeWorkEntries = activeWorkSection.entries.map(([rawKey, record]) => {
+    const unsafe = !safeActiveWorkText(rawKey) || (record.bead_id !== undefined && record.bead_id !== null && !safeActiveWorkText(record.bead_id));
+    let key = rawKey;
+    if (!safeActiveWorkText(key)) {
+      do { unsafeEntryIndex += 1; key = `invalid-active-work-${unsafeEntryIndex}`; } while (safeKeys.has(key));
+      safeKeys.add(key);
+    }
+    const supervision = unsafe ? { status: "invalid" as const, code: "invalid_checkpoint" as const } : projectSupervision(record.supervision);
     if (supervision?.status === "invalid") invalidCheckpoints += 1;
     return [key, {
-      beadId: nullable(record.bead_id),
+      beadId: safeActiveWorkText(record.bead_id) ? record.bead_id : null,
       status: nullable(record.status),
       repo: nullable(record.repo),
       branch: nullable(record.branch),

@@ -202,7 +202,7 @@ describe("control-plane observation contract", () => {
     expect(parsed).toMatchObject({ branch: "feature/health", ahead: 2, behind: 1 });
   });
 
-  it.each(["C:docs\\plan.md", "\\docs\\plan.md", "docs/./plan.md", "docs//plan.md"])(
+  it.each(["C:docs\\plan.md", "\\docs\\plan.md", "docs/./plan.md", "docs//plan.md", "docs\\sub/plan.md", "docs/sub\\plan.md"])(
     "rejects non-normalized checkpoint plan path %s",
     (planPath) => {
       expect(supervisorCheckpointSchema.safeParse({
