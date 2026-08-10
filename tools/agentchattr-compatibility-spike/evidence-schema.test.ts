@@ -4,6 +4,7 @@ import {
   beadsPromotionSchema,
   caseIdSchema,
   collaborationIntentSchema,
+  configurationBoundarySchema,
   desktopCapabilitySchema,
   evidenceArtifactSchema,
   evidenceProvenanceSchema,
@@ -11,13 +12,16 @@ import {
   identityFixtureSchema,
   loopGuardTransitionSchema,
   mcpExchangeSchema,
+  monitorIntervalSchema,
   messageFixtureSchema,
   messageObservationSchema,
   readStateSchema,
   safeExtensionsSchema,
   safeRefSchema,
   sha256Schema,
+  teardownSchema,
   transportStateSchema,
+  runtimeObservationSchema,
   withEvidenceBase,
 } from "./evidence-schema";
 import { z } from "zod";
@@ -408,5 +412,220 @@ describe("typed conversation evidence records", () => {
     expect(identityFixtureSchema.safeParse(fixture).success).toBe(true);
     expect(identityFixtureSchema.safeParse({ ...fixture, records: [validIdentityBinding()], sessionBeadLinks: fixture.sessionBeadLinks }).success).toBe(true);
     expect(identityFixtureSchema.safeParse({ ...fixture, sessionBeadLinks: [{ ...fixture.sessionBeadLinks[0], actorId: "actor-1" }] }).success).toBe(false);
+  });
+});
+
+function validConfigurationBoundary() {
+  return {
+    ...validRecord("configuration_boundary"),
+    lifecycleOwner: "runtime-manager",
+    invocation: "direct_server",
+    bindHost: "127.0.0.1",
+    authentication: "enabled",
+    disposableRootLabel: "agentchattr-spike-1",
+    argvTemplateHash: digest,
+    reviewedArgvTemplate: ["agentchattr-server", "<data-dir>", "<port>", "<secret>"],
+    launcherState: "not_run",
+    wrapperState: "disabled",
+    triggerConsumerState: "disabled",
+    terminalInjectionState: "disabled",
+    autoWakeState: "disabled",
+    jobsState: "not_run",
+    persistentRulesState: "disabled",
+  };
+}
+
+function validMonitorInterval(monitorKind = "process") {
+  return {
+    ...validRecord("monitor_interval"),
+    monitorKind,
+    intervalMs: 250,
+    eventCount: 0,
+    baselineEvidenceHash: digest,
+    finalEvidenceHash: digest,
+    gapState: "no_gap",
+    finalCaptureState: "captured",
+  };
+}
+
+function validAgentSnapshot() {
+  return {
+    ...validRecord("runtime_observation"),
+    runtimeProvider: "herdr",
+    adapter: "direct_herdr",
+    measurementQuality: "direct",
+    freshness: "live",
+    nativeContract: { versionKind: "herdr_protocol", protocol: 2 },
+    nativeEventId: "event-1",
+    observation: {
+      observationKind: "agent_snapshot",
+      workspaceId: "workspace-1",
+      tabId: "tab-1",
+      paneId: "pane-1",
+      terminalId: "terminal-1",
+      agentSessionId: "agent-session-1",
+      runtimeState: "working",
+      modelMetadata: { reportingState: "reported", provider: "anthropic", model: "claude-4" },
+      project: { projectKind: "configured_id", projectId: "scotty", relation: "root" },
+    },
+  };
+}
+
+function validLifecycleEvent() {
+  return {
+    ...validRecord("runtime_observation"),
+    runtimeProvider: "herdr",
+    adapter: "herdr_telemetry_bridge",
+    measurementQuality: "derived",
+    freshness: "cached",
+    nativeContract: { versionKind: "named", name: "herdr-telemetry", version: "v1" },
+    nativeEventId: null,
+    observation: {
+      observationKind: "lifecycle_event",
+      event: "pane_created",
+      target: { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" },
+      nativeSequence: 14,
+      eventAt: "2026-08-10T08:00:01.000Z",
+    },
+  };
+}
+
+function validTraceSummary() {
+  return {
+    ...validRecord("runtime_observation"),
+    runtimeProvider: "herdr",
+    adapter: "direct_herdr",
+    measurementQuality: "direct",
+    freshness: "live",
+    nativeContract: { versionKind: "herdr_protocol", protocol: 2 },
+    nativeEventId: "trace-event-1",
+    observation: {
+      observationKind: "trace_summary",
+      agentSessionId: "agent-session-1",
+      messageCount: 14,
+      toolCallCount: 6,
+      tokenCount: 1200,
+      tokenCountQuality: "reported",
+      summaryArtifactHash: digest,
+    },
+  };
+}
+
+function validTeardown() {
+  return {
+    ...validRecord("teardown"),
+    serviceDeregistration: { serviceName: "agentchattr-spike", state: "deregistered", evidenceHash: digest },
+    baselineInventoryRestoration: { state: "restored_exact", baselineEvidenceHash: digest, finalEvidenceHash: digest },
+    desktopProfileConfigRestoration: { state: "restored", evidenceHash: digest },
+    credentialRemoval: { state: "removed", evidenceHash: digest },
+    listenerRemoval: { state: "removed", evidenceHash: digest },
+    finalMonitorCapture: { state: "captured", evidenceHash: digest },
+    disposableRoot: { state: "deleted", ownership: "owned" },
+  };
+}
+
+const forbiddenRuntimeFields = [
+  "transcript", "paneOutput", "thinking", "commandLine", "toolInput",
+  "toolOutput", "cwd", "repositoryPath", "sessionPath", "rawHostEvent",
+  "queueContent", "token", "credential",
+] as const;
+
+describe("operational boundaries and Herdr observations", () => {
+  it("accepts the reviewed loopback configuration boundary and rejects unsafe template changes", () => {
+    const valid = validConfigurationBoundary();
+
+    expect(configurationBoundarySchema.safeParse(valid).success).toBe(true);
+    expect(configurationBoundarySchema.safeParse({ ...valid, lifecycleOwner: "operator" }).success).toBe(false);
+    expect(configurationBoundarySchema.safeParse({ ...valid, bindHost: "0.0.0.0" }).success).toBe(false);
+    expect(configurationBoundarySchema.safeParse({ ...valid, disposableRootLabel: "C:/temp/spike" }).success).toBe(false);
+    expect(configurationBoundarySchema.safeParse({ ...valid, reviewedArgvTemplate: ["C:/tools/server.exe", "<data-dir>", "<port>", "<secret>"] }).success).toBe(false);
+    expect(configurationBoundarySchema.safeParse({ ...valid, reviewedArgvTemplate: ["agentchattr-server", "--port", "<port>", "<secret>"] }).success).toBe(false);
+  });
+
+  it("accepts every closed monitor kind and bounded hash-only interval evidence", () => {
+    for (const monitorKind of ["process", "child_process", "trigger_queue", "herdr_pane", "input_control", "runtime_manager_inventory"]) {
+      expect(monitorIntervalSchema.safeParse(validMonitorInterval(monitorKind)).success).toBe(true);
+    }
+    expect(monitorIntervalSchema.safeParse({ ...validMonitorInterval(), intervalMs: 0 }).success).toBe(false);
+    expect(monitorIntervalSchema.safeParse({ ...validMonitorInterval(), intervalMs: 2001 }).success).toBe(false);
+    expect(monitorIntervalSchema.safeParse({ ...validMonitorInterval(), eventCount: -1 }).success).toBe(false);
+    expect(monitorIntervalSchema.safeParse({ ...validMonitorInterval(), baselineEvidenceHash: "process-output" }).success).toBe(false);
+  });
+
+  it("parses direct snapshots, telemetry lifecycle evidence, and direct trace summaries without authority", () => {
+    expect(runtimeObservationSchema.safeParse(validAgentSnapshot()).success).toBe(true);
+    expect(runtimeObservationSchema.safeParse({ ...validAgentSnapshot(), observation: { ...validAgentSnapshot().observation, modelMetadata: { reportingState: "unknown" }, project: { projectKind: "salted_sha256", projectHash: digest, relation: "descendant" } } }).success).toBe(true);
+    expect(runtimeObservationSchema.safeParse(validLifecycleEvent()).success).toBe(true);
+    expect(runtimeObservationSchema.safeParse(validTraceSummary()).success).toBe(true);
+    expect(runtimeObservationSchema.safeParse({ ...validAgentSnapshot(), runtimeProvider: "desktop" }).success).toBe(false);
+    expect(runtimeObservationSchema.safeParse({ ...validAgentSnapshot(), adapter: "herdr_mesh" }).success).toBe(false);
+    expect(runtimeObservationSchema.safeParse({ ...validAgentSnapshot(), workspaceId: "workspace-1" }).success).toBe(false);
+    expect(runtimeObservationSchema.safeParse({ ...validAgentSnapshot(), observation: { ...validAgentSnapshot().observation, project: { projectKind: "configured_id", projectId: "C:/repo", relation: "root" } } }).success).toBe(false);
+    expect(runtimeObservationSchema.safeParse({ ...validLifecycleEvent(), observation: { ...validLifecycleEvent().observation, taskAuthority: "assigned" } }).success).toBe(false);
+    expect(runtimeObservationSchema.safeParse({ ...validLifecycleEvent(), observation: { ...validLifecycleEvent().observation, controlAuthority: "granted" } }).success).toBe(false);
+    for (const field of ["modelProvider", "actorId", "taskId", "leaseState", "authority"]) {
+      expect(runtimeObservationSchema.safeParse({ ...validAgentSnapshot(), [field]: "conflated" }).success).toBe(false);
+    }
+  });
+
+  it("keeps Herdr targets, native contracts, and token quality closed", () => {
+    const lifecycle = validLifecycleEvent();
+    const trace = validTraceSummary();
+
+    expect(runtimeObservationSchema.safeParse({ ...lifecycle, nativeContract: { versionKind: "herdr_protocol", protocol: 0 } }).success).toBe(false);
+    expect(runtimeObservationSchema.safeParse({ ...lifecycle, nativeContract: { versionKind: "named", name: "herdr-telemetry", version: "v1", protocol: 1 } }).success).toBe(false);
+    expect(runtimeObservationSchema.safeParse({ ...lifecycle, observation: { ...lifecycle.observation, target: { targetKind: "pane", workspaceId: "workspace-1", paneId: "pane-1" } } }).success).toBe(false);
+    expect(runtimeObservationSchema.safeParse({ ...trace, observation: { ...trace.observation, tokenCount: null, tokenCountQuality: "reported" } }).success).toBe(false);
+    expect(runtimeObservationSchema.safeParse({ ...trace, observation: { ...trace.observation, tokenCount: 12, tokenCountQuality: "unknown" } }).success).toBe(false);
+  });
+
+  it("rejects raw runtime fields at every strict runtime boundary", () => {
+    const snapshot = validAgentSnapshot();
+    const lifecycle = validLifecycleEvent();
+    const trace = validTraceSummary();
+    const configuration = validConfigurationBoundary();
+    const monitor = validMonitorInterval();
+    const teardown = validTeardown();
+    const runtimeMutations: Array<(field: string) => unknown> = [
+      (field) => ({ ...snapshot, [field]: "raw" }),
+      (field) => ({ ...snapshot, provenance: { ...snapshot.provenance, [field]: "raw" } }),
+      (field) => ({ ...snapshot, artifacts: [{ ...snapshot.artifacts[0], [field]: "raw" }] }),
+      (field) => ({ ...snapshot, nativeContract: { ...snapshot.nativeContract, [field]: "raw" } }),
+      (field) => ({ ...snapshot, observation: { ...snapshot.observation, [field]: "raw" } }),
+      (field) => ({ ...snapshot, observation: { ...snapshot.observation, modelMetadata: { ...snapshot.observation.modelMetadata, [field]: "raw" } } }),
+      (field) => ({ ...snapshot, observation: { ...snapshot.observation, project: { ...snapshot.observation.project, [field]: "raw" } } }),
+      (field) => ({ ...lifecycle, observation: { ...lifecycle.observation, target: { ...lifecycle.observation.target, [field]: "raw" } } }),
+      (field) => ({ ...trace, observation: { ...trace.observation, [field]: "raw" } }),
+    ];
+    const teardownMutations: Array<(field: string) => unknown> = [
+      (field) => ({ ...teardown, [field]: "raw" }),
+      (field) => ({ ...teardown, serviceDeregistration: { ...teardown.serviceDeregistration, [field]: "raw" } }),
+      (field) => ({ ...teardown, baselineInventoryRestoration: { ...teardown.baselineInventoryRestoration, [field]: "raw" } }),
+      (field) => ({ ...teardown, desktopProfileConfigRestoration: { ...teardown.desktopProfileConfigRestoration, [field]: "raw" } }),
+      (field) => ({ ...teardown, credentialRemoval: { ...teardown.credentialRemoval, [field]: "raw" } }),
+      (field) => ({ ...teardown, listenerRemoval: { ...teardown.listenerRemoval, [field]: "raw" } }),
+      (field) => ({ ...teardown, finalMonitorCapture: { ...teardown.finalMonitorCapture, [field]: "raw" } }),
+      (field) => ({ ...teardown, disposableRoot: { ...teardown.disposableRoot, [field]: "raw" } }),
+    ];
+
+    for (const field of forbiddenRuntimeFields) {
+      expect(configurationBoundarySchema.safeParse({ ...configuration, [field]: "raw" }).success).toBe(false);
+      expect(monitorIntervalSchema.safeParse({ ...monitor, [field]: "raw" }).success).toBe(false);
+      for (const mutation of runtimeMutations) {
+        expect(runtimeObservationSchema.safeParse(mutation(field)).success).toBe(false);
+      }
+      for (const mutation of teardownMutations) {
+        expect(teardownSchema.safeParse(mutation(field)).success).toBe(false);
+      }
+    }
+  });
+
+  it("requires complete teardown proof and cannot call uncertainty a pass", () => {
+    const valid = validTeardown();
+
+    expect(teardownSchema.safeParse(valid).success).toBe(true);
+    expect(teardownSchema.safeParse({ ...valid, classification: "pass", observedResult: "unknown", disposableRoot: { state: "unknown", ownership: "unknown" } }).success).toBe(false);
+    expect(teardownSchema.safeParse({ ...valid, desktopProfileConfigRestoration: { state: "unknown", evidenceHash: digest }, classification: "pass", observedResult: "pass" }).success).toBe(false);
+    expect(teardownSchema.safeParse({ ...valid, listenerRemoval: { state: "removed", evidenceHash: digest, commandLine: "netstat" } }).success).toBe(false);
   });
 });

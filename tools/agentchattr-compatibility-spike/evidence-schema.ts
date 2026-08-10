@@ -356,3 +356,206 @@ export type LoopGuardTransition = z.infer<typeof loopGuardTransitionSchema>;
 export type BeadsPromotion = z.infer<typeof beadsPromotionSchema>;
 export type McpExchange = z.infer<typeof mcpExchangeSchema>;
 export type DesktopCapability = z.infer<typeof desktopCapabilitySchema>;
+
+const operationalStateSchema = z.enum(["not_run", "disabled", "enabled", "unknown"]);
+const reviewedArgvTemplateSchema = z.tuple([
+  safeRefSchema,
+  z.literal("<data-dir>"),
+  z.literal("<port>"),
+  z.literal("<secret>"),
+]);
+
+export const configurationBoundarySchema = withEvidenceBase("configuration_boundary", {
+  lifecycleOwner: z.literal("runtime-manager"),
+  invocation: z.literal("direct_server"),
+  bindHost: z.literal("127.0.0.1"),
+  authentication: z.literal("enabled"),
+  disposableRootLabel: safeRefSchema,
+  argvTemplateHash: sha256Schema,
+  reviewedArgvTemplate: reviewedArgvTemplateSchema,
+  launcherState: operationalStateSchema,
+  wrapperState: operationalStateSchema,
+  triggerConsumerState: operationalStateSchema,
+  terminalInjectionState: operationalStateSchema,
+  autoWakeState: operationalStateSchema,
+  jobsState: operationalStateSchema,
+  persistentRulesState: operationalStateSchema,
+});
+
+export const monitorIntervalSchema = withEvidenceBase("monitor_interval", {
+  monitorKind: z.enum([
+    "process",
+    "child_process",
+    "trigger_queue",
+    "herdr_pane",
+    "input_control",
+    "runtime_manager_inventory",
+  ]),
+  intervalMs: z.int().min(1).max(2_000),
+  eventCount: z.int().nonnegative(),
+  baselineEvidenceHash: sha256Schema,
+  finalEvidenceHash: sha256Schema,
+  gapState: z.enum(["no_gap", "gap_detected", "unknown"]),
+  finalCaptureState: z.enum(["captured", "missing", "unknown"]),
+});
+
+const teardownProofSchema = z.strictObject({
+  state: z.enum(["restored", "not_restored", "not_applicable", "unknown"]),
+  evidenceHash: sha256Schema,
+});
+
+export const teardownSchema = withEvidenceBase("teardown", {
+  serviceDeregistration: z.strictObject({
+    serviceName: safeRefSchema,
+    state: z.enum(["deregistered", "not_registered", "failed", "unknown"]),
+    evidenceHash: sha256Schema,
+  }),
+  baselineInventoryRestoration: z.strictObject({
+    state: z.enum(["restored_exact", "not_restored", "unknown"]),
+    baselineEvidenceHash: sha256Schema,
+    finalEvidenceHash: sha256Schema,
+  }),
+  desktopProfileConfigRestoration: teardownProofSchema,
+  credentialRemoval: z.strictObject({
+    state: z.enum(["removed", "not_present", "failed", "unknown"]),
+    evidenceHash: sha256Schema,
+  }),
+  listenerRemoval: z.strictObject({
+    state: z.enum(["removed", "not_present", "failed", "unknown"]),
+    evidenceHash: sha256Schema,
+  }),
+  finalMonitorCapture: z.strictObject({
+    state: z.enum(["captured", "missing", "unknown"]),
+    evidenceHash: sha256Schema,
+  }),
+  disposableRoot: z.strictObject({
+    state: z.enum(["deleted", "retained", "unknown"]),
+    ownership: z.enum(["owned", "not_owned", "unknown"]),
+  }),
+}).superRefine((record, context) => {
+  const hasUnknownResult = [
+    record.serviceDeregistration.state,
+    record.baselineInventoryRestoration.state,
+    record.desktopProfileConfigRestoration.state,
+    record.credentialRemoval.state,
+    record.listenerRemoval.state,
+    record.finalMonitorCapture.state,
+    record.disposableRoot.state,
+    record.disposableRoot.ownership,
+  ].includes("unknown");
+  if (hasUnknownResult && (record.observedResult === "pass" || record.classification === "pass")) {
+    context.addIssue({
+      code: "custom",
+      message: "Uncertain teardown evidence cannot be represented as pass.",
+      path: ["classification"],
+    });
+  }
+});
+
+export const nativeContractSchema = z.discriminatedUnion("versionKind", [
+  z.strictObject({
+    versionKind: z.literal("named"),
+    name: safeRefSchema,
+    version: safeRefSchema,
+  }),
+  z.strictObject({
+    versionKind: z.literal("herdr_protocol"),
+    protocol: z.int().positive(),
+  }),
+]);
+
+export const herdrTargetSchema = z.discriminatedUnion("targetKind", [
+  z.strictObject({ targetKind: z.literal("workspace"), workspaceId: safeRefSchema }),
+  z.strictObject({ targetKind: z.literal("tab"), workspaceId: safeRefSchema, tabId: safeRefSchema }),
+  z.strictObject({ targetKind: z.literal("pane"), workspaceId: safeRefSchema, tabId: safeRefSchema, paneId: safeRefSchema }),
+  z.strictObject({ targetKind: z.literal("terminal"), workspaceId: safeRefSchema, tabId: safeRefSchema, paneId: safeRefSchema, terminalId: safeRefSchema }),
+  z.strictObject({ targetKind: z.literal("agent_session"), agentSessionId: safeRefSchema }),
+]);
+
+const projectReferenceSchema = z.discriminatedUnion("projectKind", [
+  z.strictObject({
+    projectKind: z.literal("configured_id"),
+    projectId: safeRefSchema,
+    relation: z.enum(["root", "descendant", "outside", "unknown"]),
+  }),
+  z.strictObject({
+    projectKind: z.literal("salted_sha256"),
+    projectHash: sha256Schema,
+    relation: z.enum(["root", "descendant", "outside", "unknown"]),
+  }),
+]);
+
+const modelMetadataSchema = z.discriminatedUnion("reportingState", [
+  z.strictObject({
+    reportingState: z.literal("reported"),
+    provider: safeRefSchema,
+    model: safeRefSchema,
+  }),
+  z.strictObject({ reportingState: z.literal("unknown") }),
+]);
+
+export const runtimeObservationPayloadSchema = z.discriminatedUnion("observationKind", [
+  z.strictObject({
+    observationKind: z.literal("agent_snapshot"),
+    workspaceId: safeRefSchema,
+    tabId: safeRefSchema,
+    paneId: safeRefSchema,
+    terminalId: safeRefSchema,
+    agentSessionId: safeRefSchema,
+    runtimeState: z.enum(["working", "waiting", "idle", "blocked", "stopped", "disconnected", "unknown"]),
+    modelMetadata: modelMetadataSchema,
+    project: projectReferenceSchema,
+  }),
+  z.strictObject({
+    observationKind: z.literal("lifecycle_event"),
+    event: z.enum([
+      "session_started",
+      "session_updated",
+      "session_stopped",
+      "pane_created",
+      "pane_closed",
+      "tab_created",
+      "tab_closed",
+      "workspace_created",
+      "workspace_closed",
+      "agent_state_changed",
+    ]),
+    target: herdrTargetSchema,
+    nativeSequence: z.int().nonnegative().optional(),
+    eventAt: utcTimestampSchema,
+  }),
+  z.strictObject({
+    observationKind: z.literal("trace_summary"),
+    agentSessionId: safeRefSchema,
+    messageCount: z.int().nonnegative().max(1_000_000),
+    toolCallCount: z.int().nonnegative().max(1_000_000),
+    tokenCount: z.int().nonnegative().max(1_000_000_000).nullable(),
+    tokenCountQuality: z.enum(["reported", "estimated", "unknown"]),
+    summaryArtifactHash: sha256Schema,
+  }).superRefine((record, context) => {
+    if ((record.tokenCountQuality === "unknown") !== (record.tokenCount === null)) {
+      context.addIssue({
+        code: "custom",
+        message: "Unknown token quality requires an absent token count.",
+        path: ["tokenCount"],
+      });
+    }
+  }),
+]);
+
+export const runtimeObservationSchema = withEvidenceBase("runtime_observation", {
+  runtimeProvider: z.literal("herdr"),
+  adapter: z.enum(["direct_herdr", "herdr_telemetry_bridge"]),
+  measurementQuality: z.enum(["direct", "derived", "estimated", "unknown"]),
+  freshness: z.enum(["live", "cached", "stale", "unknown"]),
+  nativeContract: nativeContractSchema,
+  nativeEventId: safeRefSchema.nullable(),
+  observation: runtimeObservationPayloadSchema,
+});
+
+export type ConfigurationBoundary = z.infer<typeof configurationBoundarySchema>;
+export type MonitorInterval = z.infer<typeof monitorIntervalSchema>;
+export type Teardown = z.infer<typeof teardownSchema>;
+export type NativeContract = z.infer<typeof nativeContractSchema>;
+export type HerdrTarget = z.infer<typeof herdrTargetSchema>;
+export type RuntimeObservation = z.infer<typeof runtimeObservationSchema>;
