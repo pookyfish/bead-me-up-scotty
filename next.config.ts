@@ -33,7 +33,7 @@ const nextConfig: NextConfig = {
     // dev console. Suppress those high-frequency poll/stream request logs only —
     // every other request and all errors are still reported.
     incomingRequests: {
-      ignore: [/\/api\/p\/[^/]+\/beads(\/stream)?(\?|$)/],
+      ignore: [/\/api\/p\/[^/]+\/(?:beads(?:\/stream)?|control-plane(?:\/stream)?)(\?|$)/],
     },
   },
 };

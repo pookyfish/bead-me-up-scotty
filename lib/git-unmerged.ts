@@ -1,7 +1,7 @@
 import "server-only";
-import { execFile } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { runGitCommand } from "./git-command";
 import type { Bead } from "./schema";
 import type {
   ChangedFile,
@@ -15,14 +15,11 @@ import type {
 /**
  * Unmerged-work analysis for a beads project that is also a git repo.
  *
- * Everything here is READ-ONLY git: for-each-ref, rev-list, log, diff, and
- * `merge-tree --write-tree`, which trial-merges entirely in the object
- * database — it never touches the working tree, the index, or any ref. That
- * matters because the repos this points at have live agent sessions working
- * in the same checkout.
+ * This analysis leaves refs, the index, and working tree alone. Its
+ * `merge-tree --write-tree` trial merge does write object-database entries, so
+ * the shared Git runner is intentionally neutral rather than read-only.
  */
 
-const GIT_TIMEOUT_MS = 15000;
 const MAX_DETAILED_BRANCHES = 40;
 const MAX_FILES_PER_BRANCH = 400;
 const MAX_PAIRWISE = 60;
@@ -41,33 +38,9 @@ const STOPWORDS = new Set([
   "wip", "work", "update", "updates",
 ]);
 
-interface GitResult {
-  code: number;
-  stdout: string;
-}
-
-function runGit(repo: string, args: string[]): Promise<GitResult> {
-  return new Promise((resolve, reject) => {
-    execFile(
-      "git",
-      ["-C", repo, ...args],
-      { timeout: GIT_TIMEOUT_MS, maxBuffer: 16 * 1024 * 1024, windowsHide: true },
-      (err, stdout) => {
-        if (err && typeof (err as NodeJS.ErrnoException & { code?: unknown }).code !== "number") {
-          // Spawn failure (git missing) or timeout — not a normal nonzero exit.
-          reject(err instanceof Error ? err : new Error(String(err)));
-          return;
-        }
-        const code = err ? ((err as unknown as { code: number }).code ?? 1) : 0;
-        resolve({ code, stdout: String(stdout) });
-      },
-    );
-  });
-}
-
 async function detectBaseRef(repo: string): Promise<string | null> {
   for (const ref of ["origin/master", "origin/main", "master", "main"]) {
-    const r = await runGit(repo, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+    const r = await runGitCommand(repo, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
     if (r.code === 0) return ref;
   }
   return null;
@@ -79,7 +52,7 @@ async function trialMerge(
   a: string,
   b: string,
 ): Promise<{ state: ConflictState; files: string[] }> {
-  const r = await runGit(repo, [
+  const r = await runGitCommand(repo, [
     "merge-tree", "--write-tree", "--name-only", "--no-messages", a, b,
   ]);
   if (r.code === 0) return { state: "clean", files: [] };
@@ -257,7 +230,7 @@ export async function analyzeUnmerged(repoPath: string, beads: Bead[]): Promise<
     return empty("No master/main base ref found (tried origin/master, origin/main, master, main).");
   }
 
-  const list = await runGit(repoPath, [
+  const list = await runGitCommand(repoPath, [
     "for-each-ref", "refs/heads", "--no-merged", baseRef, "--sort=-committerdate",
     "--format=%(refname:short)%09%(objectname:short)%09%(committerdate:iso8601-strict)%09%(contents:subject)",
   ]);
@@ -282,9 +255,9 @@ export async function analyzeUnmerged(repoPath: string, beads: Bead[]): Promise<
   const fileSets = new Map<string, Set<string>>();
   for (const raw of detailed) {
     const [ahead, subjects, diff, conflict] = await Promise.all([
-      runGit(repoPath, ["rev-list", "--count", `${baseRef}..${raw.name}`]),
-      runGit(repoPath, ["log", "--format=%s", "-n", "30", `${baseRef}..${raw.name}`]),
-      runGit(repoPath, ["diff", "--name-status", `${baseRef}...${raw.name}`]),
+      runGitCommand(repoPath, ["rev-list", "--count", `${baseRef}..${raw.name}`]),
+      runGitCommand(repoPath, ["log", "--format=%s", "-n", "30", `${baseRef}..${raw.name}`]),
+      runGitCommand(repoPath, ["diff", "--name-status", `${baseRef}...${raw.name}`]),
       trialMerge(repoPath, baseRef, raw.name),
     ]);
 
