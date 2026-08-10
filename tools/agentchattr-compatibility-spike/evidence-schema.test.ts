@@ -21,6 +21,7 @@ import {
   sha256Schema,
   teardownSchema,
   transportStateSchema,
+  utcTimestampSchema,
   runtimeActionSchema,
   runtimeControlActionSchema,
   runtimeObservationSchema,
@@ -103,22 +104,36 @@ describe("strict evidence schema primitives", () => {
     expect(evidenceArtifactSchema.safeParse({ ...validEvidence().artifacts[0], unexpected: true }).success).toBe(false);
   });
 
-  it("compares evidence timestamps chronologically across fractional precision", () => {
-    expect(syntheticEvidenceSchema.safeParse(validEvidence()).success).toBe(true);
-    expect(
-      syntheticEvidenceSchema.safeParse({
-        ...validEvidence(),
-        startedAt: "2026-08-10T08:00:00Z",
-        observedAt: "2026-08-10T08:00:00.1Z",
-      }).success,
-    ).toBe(true);
-    expect(
-      syntheticEvidenceSchema.safeParse({
-        ...validEvidence(),
-        startedAt: "2026-08-10T08:00:00.1Z",
-        observedAt: "2026-08-10T08:00:00Z",
-      }).success,
-    ).toBe(false);
+  it("accepts the complete approved UTC timestamp precision grammar", () => {
+    for (const timestamp of [
+      "2026-08-10T08:00Z",
+      "2026-08-10T08:00:00Z",
+      "2026-08-10T08:00:00.1Z",
+      "2026-08-10T08:00:00.000000000000000001Z",
+    ]) {
+      expect(utcTimestampSchema.safeParse(timestamp).success).toBe(true);
+    }
+  });
+
+  it("allows nondecreasing evidence timestamps across every admitted precision", () => {
+    const validPairs = [
+      ["2026-08-10T08:00Z", "2026-08-10T08:00Z"],
+      ["2026-08-10T08:00Z", "2026-08-10T08:00:00Z"],
+      ["2026-08-10T08:00:00Z", "2026-08-10T08:00Z"],
+      ["2026-08-10T08:00:00Z", "2026-08-10T08:00:00.000000000000000000Z"],
+      ["2026-08-10T08:00:00.000000000000000001Z", "2026-08-10T08:00:00.000000000000000002Z"],
+    ] as const;
+    const reversedPairs = [
+      ["2026-08-10T08:00:00.000000000000000002Z", "2026-08-10T08:00:00.000000000000000001Z"],
+      ["2026-08-10T08:01Z", "2026-08-10T08:00:59.999999999999999999Z"],
+    ] as const;
+
+    for (const [startedAt, observedAt] of validPairs) {
+      expect(syntheticEvidenceSchema.safeParse({ ...validEvidence(), startedAt, observedAt }).success).toBe(true);
+    }
+    for (const [startedAt, observedAt] of reversedPairs) {
+      expect(syntheticEvidenceSchema.safeParse({ ...validEvidence(), startedAt, observedAt }).success).toBe(false);
+    }
   });
 
   it("keeps the evidence kind literal when a record shape defines kind", () => {
@@ -287,16 +302,20 @@ describe("typed conversation evidence records", () => {
     const valid = validIdentityBinding();
 
     expect(identityBindingSchema.safeParse(valid).success).toBe(true);
-    expect(identityBindingSchema.safeParse({
-      ...valid,
-      validFrom: "2026-08-10T08:00:00Z",
-      validUntil: "2026-08-10T08:00:00.1Z",
-    }).success).toBe(true);
-    expect(identityBindingSchema.safeParse({
-      ...valid,
-      validFrom: "2026-08-10T08:00:00.1Z",
-      validUntil: "2026-08-10T08:00:00Z",
-    }).success).toBe(false);
+    for (const [validFrom, validUntil] of [
+      ["2026-08-10T08:00Z", "2026-08-10T08:00:00.000000000000000001Z"],
+      ["2026-08-10T08:00:00.000000000000000001Z", "2026-08-10T08:00:00.000000000000000002Z"],
+    ]) {
+      expect(identityBindingSchema.safeParse({ ...valid, validFrom, validUntil }).success).toBe(true);
+    }
+    for (const [validFrom, validUntil] of [
+      ["2026-08-10T08:00Z", "2026-08-10T08:00Z"],
+      ["2026-08-10T08:00Z", "2026-08-10T08:00:00Z"],
+      ["2026-08-10T08:00:00Z", "2026-08-10T08:00:00.000000000000000000Z"],
+      ["2026-08-10T08:00:00.000000000000000002Z", "2026-08-10T08:00:00.000000000000000001Z"],
+    ]) {
+      expect(identityBindingSchema.safeParse({ ...valid, validFrom, validUntil }).success).toBe(false);
+    }
     expect(identityBindingSchema.safeParse({ ...valid, validFrom: "2026-08-10T10:00:00.000Z" }).success).toBe(false);
     expect(identityBindingSchema.safeParse({ ...valid, validUntil: null }).success).toBe(false);
     expect(identityBindingSchema.safeParse({ ...valid, bindingState: "unverified", validUntil: null }).success).toBe(true);
@@ -384,7 +403,20 @@ describe("typed conversation evidence records", () => {
     expect(beadsPromotionSchema.safeParse({ ...durable, beadsArtifactId: null }).success).toBe(false);
     expect(beadsPromotionSchema.safeParse({ ...durable, acknowledgedAt: null }).success).toBe(false);
     expect(beadsPromotionSchema.safeParse({ ...durable, verifiedAt: null }).success).toBe(false);
-    expect(beadsPromotionSchema.safeParse({ ...durable, acknowledgedAt: "2026-08-10T08:00:04.000Z" }).success).toBe(false);
+    for (const [acknowledgedAt, verifiedAt] of [
+      ["2026-08-10T08:00Z", "2026-08-10T08:00Z"],
+      ["2026-08-10T08:00Z", "2026-08-10T08:00:00Z"],
+      ["2026-08-10T08:00:00Z", "2026-08-10T08:00:00.000000000000000000Z"],
+      ["2026-08-10T08:00:00.000000000000000001Z", "2026-08-10T08:00:00.000000000000000002Z"],
+    ]) {
+      expect(beadsPromotionSchema.safeParse({ ...durable, acknowledgedAt, verifiedAt }).success).toBe(true);
+    }
+    for (const [acknowledgedAt, verifiedAt] of [
+      ["2026-08-10T08:00:00.000000000000000002Z", "2026-08-10T08:00:00.000000000000000001Z"],
+      ["2026-08-10T08:01Z", "2026-08-10T08:00:59.999999999999999999Z"],
+    ]) {
+      expect(beadsPromotionSchema.safeParse({ ...durable, acknowledgedAt, verifiedAt }).success).toBe(false);
+    }
   });
 
   it("requires successful authenticated chat exchanges to carry a UID and leaves sequences scoped by session", () => {
@@ -757,25 +789,29 @@ describe("append-only Herdr runtime control evidence", () => {
     }
   });
 
-  it("compares authorization validity chronologically across fractional precision", () => {
+  it("requires authorization validity to increase across every admitted precision", () => {
     const authorization = validRuntimeControlAuthorization();
 
-    expect(runtimeControlActionSchema.safeParse({
-      ...authorization,
-      event: {
-        ...authorization.event,
-        validFrom: "2026-08-10T08:00:00Z",
-        validUntil: "2026-08-10T08:00:00.1Z",
-      },
-    }).success).toBe(true);
-    expect(runtimeControlActionSchema.safeParse({
-      ...authorization,
-      event: {
-        ...authorization.event,
-        validFrom: "2026-08-10T08:00:00.1Z",
-        validUntil: "2026-08-10T08:00:00Z",
-      },
-    }).success).toBe(false);
+    for (const [validFrom, validUntil] of [
+      ["2026-08-10T08:00Z", "2026-08-10T08:00:00.000000000000000001Z"],
+      ["2026-08-10T08:00:00.000000000000000001Z", "2026-08-10T08:00:00.000000000000000002Z"],
+    ]) {
+      expect(runtimeControlActionSchema.safeParse({
+        ...authorization,
+        event: { ...authorization.event, validFrom, validUntil },
+      }).success).toBe(true);
+    }
+    for (const [validFrom, validUntil] of [
+      ["2026-08-10T08:00Z", "2026-08-10T08:00Z"],
+      ["2026-08-10T08:00Z", "2026-08-10T08:00:00Z"],
+      ["2026-08-10T08:00:00Z", "2026-08-10T08:00:00.000000000000000000Z"],
+      ["2026-08-10T08:00:00.000000000000000002Z", "2026-08-10T08:00:00.000000000000000001Z"],
+    ]) {
+      expect(runtimeControlActionSchema.safeParse({
+        ...authorization,
+        event: { ...authorization.event, validFrom, validUntil },
+      }).success).toBe(false);
+    }
   });
 
   it("rejects labels, focus, CWD, and pane numbers as control targets", () => {

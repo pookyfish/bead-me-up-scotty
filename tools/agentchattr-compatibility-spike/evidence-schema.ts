@@ -111,15 +111,32 @@ export type EvidenceBase<K extends string = string> = {
   extensions?: z.infer<typeof safeExtensionsSchema>;
 };
 
-function isEarlierUtcTimestamp(left: string, right: string) {
-  const [leftSecond, leftFraction = ""] = left.slice(0, -1).split(".");
-  const [rightSecond, rightFraction = ""] = right.slice(0, -1).split(".");
-  if (leftSecond !== rightSecond) {
-    return leftSecond < rightSecond;
+function utcTimestampParts(timestamp: string) {
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::(\d{2})(?:\.(\d+))?)?Z$/.exec(timestamp);
+  return {
+    minute: match?.[1] ?? "",
+    second: match?.[2] ?? "00",
+    fraction: match?.[3] ?? "",
+  };
+}
+
+function compareUtcTimestamps(left: string, right: string) {
+  const leftParts = utcTimestampParts(left);
+  const rightParts = utcTimestampParts(right);
+  if (leftParts.minute !== rightParts.minute) {
+    return leftParts.minute < rightParts.minute ? -1 : 1;
+  }
+  if (leftParts.second !== rightParts.second) {
+    return leftParts.second < rightParts.second ? -1 : 1;
   }
 
-  const precision = Math.max(leftFraction.length, rightFraction.length);
-  return leftFraction.padEnd(precision, "0") < rightFraction.padEnd(precision, "0");
+  const precision = Math.max(leftParts.fraction.length, rightParts.fraction.length);
+  const leftFraction = leftParts.fraction.padEnd(precision, "0");
+  const rightFraction = rightParts.fraction.padEnd(precision, "0");
+  if (leftFraction === rightFraction) {
+    return 0;
+  }
+  return leftFraction < rightFraction ? -1 : 1;
 }
 
 export function withEvidenceBase<K extends string, Shape extends z.ZodRawShape>(kind: K, shape: Shape) {
@@ -131,7 +148,7 @@ export function withEvidenceBase<K extends string, Shape extends z.ZodRawShape>(
     })
     .refine((record) => {
       const timestamps = record as EvidenceBase;
-      return isEarlierUtcTimestamp(timestamps.startedAt, timestamps.observedAt);
+      return compareUtcTimestamps(timestamps.startedAt, timestamps.observedAt) <= 0;
     }, {
       message: "Evidence timestamps must be monotonic.",
       path: ["observedAt"],
@@ -215,7 +232,7 @@ export const identityBindingSchema = withEvidenceBase("identity_binding", {
   if (record.executionSurface !== "herdr" && record.herdrSessionRef !== null) {
     context.addIssue({ code: "custom", message: "Only Herdr bindings may carry a Herdr session reference.", path: ["herdrSessionRef"] });
   }
-  if (record.validUntil !== null && !isEarlierUtcTimestamp(record.validFrom, record.validUntil)) {
+  if (record.validUntil !== null && compareUtcTimestamps(record.validFrom, record.validUntil) >= 0) {
     context.addIssue({ code: "custom", message: "Identity validity interval must be increasing.", path: ["validUntil"] });
   }
 });
@@ -299,7 +316,8 @@ export const beadsPromotionSchema = withEvidenceBase("beads_promotion", {
   if (record.state === "durable" && (record.beadsArtifactId === null || record.acknowledgedAt === null || record.verifiedAt === null)) {
     context.addIssue({ code: "custom", message: "Durable promotions require an artifact and acknowledgement timestamps." });
   }
-  if (record.acknowledgedAt !== null && record.verifiedAt !== null && record.acknowledgedAt > record.verifiedAt) {
+  if (record.acknowledgedAt !== null && record.verifiedAt !== null
+    && compareUtcTimestamps(record.acknowledgedAt, record.verifiedAt) > 0) {
     context.addIssue({ code: "custom", message: "Promotion acknowledgement must not follow verification.", path: ["verifiedAt"] });
   }
 });
@@ -711,7 +729,7 @@ export const runtimeAuthorizationEventSchema = z.strictObject({
   validFrom: utcTimestampSchema,
   validUntil: utcTimestampSchema,
   evidenceHash: sha256Schema,
-}).refine((event) => isEarlierUtcTimestamp(event.validFrom, event.validUntil), {
+}).refine((event) => compareUtcTimestamps(event.validFrom, event.validUntil) < 0, {
   message: "Authorization validity interval must be increasing.",
   path: ["validUntil"],
 });
