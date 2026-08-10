@@ -195,6 +195,9 @@ export const identityBindingSchema = withEvidenceBase("identity_binding", {
   validUntil: utcTimestampSchema.nullable(),
   bindingState: bindingStateSchema,
 }).superRefine((record, context) => {
+  if (record.bindingState === "verified" && record.validUntil === null) {
+    context.addIssue({ code: "custom", message: "Verified bindings require a complete validity interval.", path: ["validUntil"] });
+  }
   if (record.executionSurface === "herdr" && record.herdrSessionRef === null) {
     context.addIssue({ code: "custom", message: "Herdr bindings require a Herdr session reference.", path: ["herdrSessionRef"] });
   }

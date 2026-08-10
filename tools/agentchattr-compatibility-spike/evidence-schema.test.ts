@@ -274,6 +274,8 @@ describe("typed conversation evidence records", () => {
 
     expect(identityBindingSchema.safeParse(valid).success).toBe(true);
     expect(identityBindingSchema.safeParse({ ...valid, validFrom: "2026-08-10T10:00:00.000Z" }).success).toBe(false);
+    expect(identityBindingSchema.safeParse({ ...valid, validUntil: null }).success).toBe(false);
+    expect(identityBindingSchema.safeParse({ ...valid, bindingState: "unverified", validUntil: null }).success).toBe(true);
     for (const field of ["displayName", "channelId", "mentionId", "replyToUid", "role", "beadId"]) {
       expect(identityBindingSchema.safeParse({ ...valid, [field]: "not-a-binding-key" }).success).toBe(false);
     }
@@ -290,6 +292,13 @@ describe("typed conversation evidence records", () => {
   });
 
   it("admits only the four structural loop-guard transitions", () => {
+    const ordinaryTransitions = [
+      ["active(0)", "active(1)"],
+      ["active(1)", "active(2)"],
+      ["active(2)", "active(3)"],
+      ["active(3)", "active(4)"],
+      ["active(4)", "active(5)"],
+    ] as const;
     const sixth = {
       ...validLoopGuardTransition(),
       fromState: "active(5)",
@@ -313,11 +322,15 @@ describe("typed conversation evidence records", () => {
       authenticatedHumanProofHash: digest,
     };
 
+    for (const [fromState, toState] of ordinaryTransitions) {
+      expect(loopGuardTransitionSchema.safeParse({ ...validLoopGuardTransition(), fromState, toState }).success).toBe(true);
+    }
     expect(loopGuardTransitionSchema.safeParse(sixth).success).toBe(true);
     expect(loopGuardTransitionSchema.safeParse(seventh).success).toBe(true);
     expect(loopGuardTransitionSchema.safeParse(reset).success).toBe(true);
     expect(loopGuardTransitionSchema.safeParse({ ...seventh, mcpInvoked: true }).success).toBe(false);
     expect(loopGuardTransitionSchema.safeParse({ ...reset, authenticatedHumanProofHash: null }).success).toBe(false);
+    expect(loopGuardTransitionSchema.safeParse({ ...validLoopGuardTransition(), fromState: "active(2)", toState: "active(4)" }).success).toBe(false);
   });
 
   it("keeps Beads durability separate and makes runtime promotion source correlation structural", () => {
@@ -335,6 +348,19 @@ describe("typed conversation evidence records", () => {
     expect(beadsPromotionSchema.safeParse(runtimePromotion).success).toBe(true);
     expect(beadsPromotionSchema.safeParse({ ...runtimePromotion, promotionSource: { kind: "runtime_control" } }).success).toBe(false);
     expect(beadsPromotionSchema.safeParse({ ...runtimePromotion, promotionSource: { ...runtimePromotion.promotionSource, actionIds: [] } }).success).toBe(false);
+    expect(beadsPromotionSchema.safeParse({ ...runtimePromotion, promotionSource: { ...runtimePromotion.promotionSource, actionIds: ["6e47daf6-b252-4e26-845a-1292d134a082", "6e47daf6-b252-4e26-845a-1292d134a082"] } }).success).toBe(false);
+    expect(beadsPromotionSchema.safeParse({ ...runtimePromotion, promotionSource: { ...runtimePromotion.promotionSource, correlationId: "not-a-uuid" } }).success).toBe(false);
+    expect(beadsPromotionSchema.safeParse({ ...runtimePromotion, promotionSource: { ...runtimePromotion.promotionSource, actionIds: ["not-a-uuid"] } }).success).toBe(false);
+    expect(beadsPromotionSchema.safeParse({ ...runtimePromotion, promotionSource: { ...runtimePromotion.promotionSource, unexpected: true } }).success).toBe(false);
+  });
+
+  it("requires complete, chronologically ordered durable promotion evidence", () => {
+    const durable = validBeadsPromotion();
+
+    expect(beadsPromotionSchema.safeParse({ ...durable, beadsArtifactId: null }).success).toBe(false);
+    expect(beadsPromotionSchema.safeParse({ ...durable, acknowledgedAt: null }).success).toBe(false);
+    expect(beadsPromotionSchema.safeParse({ ...durable, verifiedAt: null }).success).toBe(false);
+    expect(beadsPromotionSchema.safeParse({ ...durable, acknowledgedAt: "2026-08-10T08:00:04.000Z" }).success).toBe(false);
   });
 
   it("requires successful authenticated chat exchanges to carry a UID and leaves sequences scoped by session", () => {
@@ -351,10 +377,20 @@ describe("typed conversation evidence records", () => {
   it("verifies Claude Code Desktop and Codex Desktop capabilities independently", () => {
     const claude = validDesktopCapability("claude_code_desktop");
     const codex = validDesktopCapability("codex_desktop");
+    const mixed = {
+      ...validDesktopCapability("codex_desktop"),
+      readClassification: "pass",
+      sendClassification: "unsupported",
+      storedMessageUid: null,
+      storedMessageEvidenceHash: null,
+    };
 
     expect(desktopCapabilitySchema.safeParse(claude).success).toBe(true);
     expect(desktopCapabilitySchema.safeParse(codex).success).toBe(true);
+    expect(desktopCapabilitySchema.safeParse(mixed).success).toBe(true);
     expect(desktopCapabilitySchema.safeParse({ ...claude, sendClassification: "pass", storedMessageUid: null, storedMessageEvidenceHash: null }).success).toBe(false);
+    expect(desktopCapabilitySchema.safeParse({ ...claude, storedMessageUid: null }).success).toBe(false);
+    expect(desktopCapabilitySchema.safeParse({ ...claude, storedMessageEvidenceHash: null }).success).toBe(false);
   });
 
   it("uses version-2 fixture envelopes without making session Bead links bindings", () => {
@@ -362,10 +398,15 @@ describe("typed conversation evidence records", () => {
       schemaVersion: 2,
       fixture: "identity_bindings",
       records: [validIdentityBinding()],
-      sessionBeadLinks: [{ logicalSessionId: "logical-session-1", beadId: "bead-1" }],
+      sessionBeadLinks: [
+        { logicalSessionId: "logical-session-1", beadId: "bead-1" },
+        { logicalSessionId: "logical-session-1", beadId: "bead-2" },
+        { logicalSessionId: "logical-session-2", beadId: "bead-1" },
+      ],
     };
 
     expect(identityFixtureSchema.safeParse(fixture).success).toBe(true);
+    expect(identityFixtureSchema.safeParse({ ...fixture, records: [validIdentityBinding()], sessionBeadLinks: fixture.sessionBeadLinks }).success).toBe(true);
     expect(identityFixtureSchema.safeParse({ ...fixture, sessionBeadLinks: [{ ...fixture.sessionBeadLinks[0], actorId: "actor-1" }] }).success).toBe(false);
   });
 });
