@@ -1,756 +1,1130 @@
 import { describe, expect, it } from "vitest";
 
-import identityFixture from "./fixtures/identity-bindings.json";
-import messageFixture from "./fixtures/message-contract.json";
 import {
   APPROVED_UPSTREAM_PIN,
   createLoopGuardState,
   recordAuthenticatedHumanOrigin,
   requestAutonomousSend,
-  validateDesktopResults,
   validateEvidenceManifest,
-  validateIdentityFixture,
-  validateMessageContract,
-  validateMessagePages,
-  validatePromotionResult,
 } from "./spike-contract";
 
-const validManifest = () => ({
-  schemaVersion: 1,
-  upstream: { ...APPROVED_UPSTREAM_PIN },
-  endpoint: { host: "127.0.0.1", port: 43123 },
-  resourceAdmission: {
-    availablePhysicalMemoryGiB: 8,
-    aggregateWorkingSetPercent: 35,
-    otherResourceHeavyJobActive: false,
-    runtimeManagerCorrelationToken: "admission-correlation-1",
-    admitted: true,
-  },
-  safety: {
-    lifecycleOwner: "runtime-manager",
-    wrappersDisabled: true,
-    triggerQueueConsumerDisabled: true,
-    terminalInjectionDisabled: true,
-    autoWakeDisabled: true,
-    jobsIgnored: true,
-    persistentRulesUnused: true,
-  },
-  evidence: [
-    {
-      caseId: "contract-smoke",
-      upstreamPin: APPROVED_UPSTREAM_PIN.commit,
-      hostVersion: "Windows test host",
-      toolVersions: { node: "24.16.0", vitest: "4.1.10" },
-      sourceArtifactHashes: { source: "sha256:source" },
-      resultArtifactHashes: { result: "sha256:result" },
-      expectedResult: "validator accepts sanitized contract evidence",
-      observedResult: "validator accepted sanitized contract evidence",
-      classification: "pass",
-      provenance: "docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/provenance.md",
-      startedAtUtc: "2026-08-10T08:00:00.000Z",
-      endedAtUtc: "2026-08-10T08:00:01.000Z",
-      processRecords: [
-        {
-          pid: 4210,
-          executable: "agentchattr.exe",
-          startedAtUtc: "2026-08-10T08:00:00.000Z",
-        },
-      ],
-      teardownState: "confirmed",
+const hashes = {
+  a: `sha256:${"a".repeat(64)}`,
+  b: `sha256:${"b".repeat(64)}`,
+  c: `sha256:${"c".repeat(64)}`,
+  d: `sha256:${"d".repeat(64)}`,
+  e: `sha256:${"e".repeat(64)}`,
+  f: `sha256:${"f".repeat(64)}`,
+};
+
+const times = {
+  before: "2026-08-10T07:59:59.000Z",
+  start: "2026-08-10T08:00:00.000Z",
+  one: "2026-08-10T08:00:01.000Z",
+  two: "2026-08-10T08:00:02.000Z",
+  three: "2026-08-10T08:00:03.000Z",
+  four: "2026-08-10T08:00:04.000Z",
+  five: "2026-08-10T08:00:05.000Z",
+  six: "2026-08-10T08:00:06.000Z",
+  seven: "2026-08-10T08:00:07.000Z",
+  eight: "2026-08-10T08:00:08.000Z",
+  after: "2026-08-10T08:00:09.000Z",
+  later: "2026-08-10T09:00:00.000Z",
+};
+
+type JsonRecord = Record<string, unknown>;
+
+function evidenceBase(kind: string, caseId: string, observedAt = times.four) {
+  return {
+    caseId,
+    kind,
+    expectedResult: "pass",
+    observedResult: "pass",
+    classification: "pass",
+    startedAt: times.start,
+    observedAt,
+    provenance: {
+      sourceKind: "synthetic_fixture",
+      sourceRef: `${caseId}-source`,
+      digest: hashes.a,
     },
-  ],
-});
+    artifacts: [{ kind: "synthetic_fixture", digest: hashes.a }],
+  };
+}
 
-const validMessage = () => ({
-  providerInstanceId: "spike-instance-1",
-  channelId: "channel-disposable",
-  stableMessageUid: "message-0001",
-  cursorId: 7,
-  parentUid: null,
-  threadId: null,
-  senderExternalId: "external-operator-1",
-  delivery: "queued",
-  directUpstreamEvidence: "sha256:queued-response",
-  contentChecksum: "sha256:content",
-  workState: "not_started",
-  leaseState: "none",
-});
+function configurationBoundary() {
+  return {
+    ...evidenceBase("configuration_boundary", "configuration-boundary", times.one),
+    lifecycleOwner: "runtime-manager",
+    invocation: "direct_server",
+    bindHost: "127.0.0.1",
+    authentication: "enabled",
+    disposableRootLabel: "agentchattr-spike",
+    argvTemplateHash: hashes.a,
+    reviewedArgvTemplate: ["agentchattr-server", "<data-dir>", "<port>", "<secret>"],
+    launcherState: "disabled",
+    wrapperState: "disabled",
+    triggerConsumerState: "disabled",
+    terminalInjectionState: "disabled",
+    autoWakeState: "disabled",
+    jobsState: "disabled",
+    persistentRulesState: "disabled",
+  };
+}
 
-describe("AgentChattr compatibility spike evidence contract", () => {
-  it("accepts the synthetic many-to-many identity fixture and its permitted message vocabulary", () => {
-    expect(validateIdentityFixture(identityFixture).issues).toEqual([]);
-    for (const message of messageFixture.cases) {
-      expect(validateMessageContract(message).issues).toEqual([]);
+const monitorKinds = [
+  "process",
+  "child_process",
+  "trigger_queue",
+  "herdr_pane",
+  "input_control",
+  "runtime_manager_inventory",
+] as const;
+
+function monitorInterval(monitorKind: (typeof monitorKinds)[number]) {
+  return {
+    ...evidenceBase("monitor_interval", `monitor-${monitorKind.replaceAll("_", "-")}`, times.after),
+    startedAt: times.before,
+    intervalMs: 250,
+    eventCount: 0,
+    baselineEvidenceHash: hashes.b,
+    finalEvidenceHash: hashes.c,
+    gapState: "no_gap",
+    finalCaptureState: "captured",
+    monitorKind,
+  };
+}
+
+function teardown() {
+  return {
+    ...evidenceBase("teardown", "teardown-complete", times.eight),
+    startedAt: times.seven,
+    serviceDeregistration: {
+      serviceName: "agentchattr-spike",
+      state: "deregistered",
+      evidenceHash: hashes.d,
+    },
+    baselineInventoryRestoration: {
+      state: "restored_exact",
+      baselineEvidenceHash: hashes.b,
+      finalEvidenceHash: hashes.c,
+    },
+    desktopProfileConfigRestoration: { state: "restored", evidenceHash: hashes.d },
+    credentialRemoval: { state: "removed", evidenceHash: hashes.d },
+    listenerRemoval: { state: "removed", evidenceHash: hashes.d },
+    finalMonitorCapture: { state: "captured", evidenceHash: hashes.c },
+    disposableRoot: { state: "deleted", ownership: "owned" },
+  };
+}
+
+function validManifestV2(records: JsonRecord[] = []) {
+  return {
+    schemaVersion: 2,
+    spike: "agentchattr-compatibility",
+    stage: "1.5",
+    manifestId: "agentchattr-contract-manifest",
+    runId: "contract-run",
+    executionState: "completed",
+    upstream: { ...APPROVED_UPSTREAM_PIN },
+    endpoint: { host: "127.0.0.1", port: 43123, state: "stopped" },
+    resourceAdmission: {
+      measurementState: "measured",
+      availablePhysicalMemoryGiB: 16,
+      aggregateWorkingSetPercent: 35,
+      otherResourceHeavyJobActive: false,
+      runtimeManagerCorrelationId: "runtime-manager-correlation",
+      admissionResult: "admitted",
+    },
+    safety: {
+      lifecycleOwner: "runtime-manager",
+      launcher: "disabled",
+      wrapper: "disabled",
+      triggerQueueConsumer: "disabled",
+      terminalInjection: "disabled",
+      autoWake: "disabled",
+      jobsAuthority: "disabled",
+      persistentRules: "disabled",
+    },
+    evidence: [
+      configurationBoundary(),
+      ...monitorKinds.map(monitorInterval),
+      ...records,
+      teardown(),
+    ],
+  };
+}
+
+function validNotRunManifestV2() {
+  return {
+    schemaVersion: 2,
+    spike: "agentchattr-compatibility",
+    stage: "1.5",
+    manifestId: "agentchattr-not-run-manifest",
+    runId: "not-run",
+    executionState: "not_run",
+    upstream: { ...APPROVED_UPSTREAM_PIN },
+    endpoint: { host: "127.0.0.1", port: 43123, state: "candidate_only_not_bound" },
+    resourceAdmission: {
+      measurementState: "not_run",
+      availablePhysicalMemoryGiB: null,
+      aggregateWorkingSetPercent: null,
+      otherResourceHeavyJobActive: null,
+      runtimeManagerCorrelationId: null,
+      admissionResult: "not_run",
+    },
+    safety: {
+      lifecycleOwner: "runtime-manager",
+      launcher: "not_run",
+      wrapper: "not_run",
+      triggerQueueConsumer: "not_run",
+      terminalInjection: "not_run",
+      autoWake: "not_run",
+      jobsAuthority: "not_run",
+      persistentRules: "not_run",
+    },
+    evidence: [],
+  };
+}
+
+function expectIssue(value: unknown, code: string, classification: "fail" | "unsupported" | "unknown") {
+  expect(validateEvidenceManifest(value).issues).toContainEqual({
+    code,
+    classification,
+    path: expect.any(String),
+  });
+}
+
+function identityBinding(suffix = "one", overrides: JsonRecord = {}) {
+  return {
+    ...evidenceBase("identity_binding", `identity-${suffix}`, times.three),
+    actorId: "actor-one",
+    logicalSessionId: "logical-session-one",
+    executionSurface: "herdr",
+    orchestrationRole: "worker",
+    modelProvider: "anthropic",
+    modelId: "claude-sonnet",
+    herdrSessionRef: "herdr-session-one",
+    agentChattrInstanceId: "agentchattr-instance",
+    agentChattrSessionId: "agentchattr-session-one",
+    agentChattrExternalId: "external-agent-one",
+    beadsActorId: "beads-actor-one",
+    validFrom: times.start,
+    validUntil: times.later,
+    bindingState: "verified",
+    ...overrides,
+  };
+}
+
+function messageObservation(suffix: string, overrides: JsonRecord = {}) {
+  return {
+    ...evidenceBase("message_observation", `message-${suffix}`, times.four),
+    providerInstanceId: "agentchattr-instance",
+    channelId: "channel-one",
+    stableMessageUid: `message-${suffix}`,
+    cursorId: 10,
+    parentUid: null,
+    threadId: null,
+    senderExternalId: "external-agent-one",
+    contentChecksum: hashes.a,
+    directEvidenceArtifactHash: hashes.b,
+    transportState: "server_accepted",
+    receiverAcknowledgementState: "pending",
+    readState: "unread",
+    observationContext: "initial_page",
+    messageState: "present",
+    ...overrides,
+  };
+}
+
+function loopTransition(
+  suffix: string,
+  fromState: string,
+  toState: string,
+  overrides: JsonRecord = {},
+) {
+  const isHuman = overrides.origin === "human";
+  const rejected = fromState === "paused(6)" && toState === "paused(6)";
+  return {
+    ...evidenceBase("loop_guard_transition", `loop-${suffix}`, times.four),
+    channelId: "channel-one",
+    origin: isHuman ? "human" : "agent",
+    fromState,
+    toState,
+    mcpInvoked: !isHuman && !rejected,
+    stableMessageUid: !isHuman && !rejected ? `loop-message-${suffix}` : null,
+    authenticatedHumanProofHash: isHuman ? hashes.a : null,
+    ...overrides,
+  };
+}
+
+function beadsPromotion(suffix = "one", overrides: JsonRecord = {}) {
+  return {
+    ...evidenceBase("beads_promotion", `promotion-${suffix}`, times.six),
+    beadId: "bead-one",
+    scottyDecisionId: "decision-one",
+    artifactType: "decision",
+    selectedValueChecksum: hashes.a,
+    agentChattrIdempotencyKey: "agentchattr:agentchattr-instance:message-one:selected",
+    promotionSource: { kind: "agentchattr_message" },
+    beadsArtifactId: "beads-comment-one",
+    acknowledgedAt: times.five,
+    verifiedAt: times.six,
+    state: "durable",
+    ...overrides,
+  };
+}
+
+function desktopCapability(client: "claude_code_desktop" | "codex_desktop", overrides: JsonRecord = {}) {
+  const suffix = client === "claude_code_desktop" ? "claude" : "codex";
+  return {
+    ...evidenceBase("desktop_capability", `desktop-${suffix}`, times.four),
+    client,
+    clientVersion: "v1",
+    readClassification: "pass",
+    sendClassification: "pass",
+    authenticationEvidenceHash: hashes.a,
+    storedMessageUid: `desktop-message-${suffix}`,
+    storedMessageEvidenceHash: hashes.b,
+    ...overrides,
+  };
+}
+
+function runtimeSnapshot(adapter: "direct_herdr" | "herdr_telemetry_bridge", suffix: string, overrides: JsonRecord = {}) {
+  return {
+    ...evidenceBase("runtime_observation", `runtime-snapshot-${suffix}`, times.four),
+    runtimeProvider: "herdr",
+    adapter,
+    measurementQuality: adapter === "direct_herdr" ? "direct" : "derived",
+    freshness: "live",
+    nativeContract: adapter === "direct_herdr"
+      ? { versionKind: "herdr_protocol", protocol: 2 }
+      : { versionKind: "named", name: "herdr-telemetry", version: "v1" },
+    nativeEventId: `${suffix}-event`,
+    observation: {
+      observationKind: "agent_snapshot",
+      workspaceId: "workspace-1",
+      tabId: "tab-1",
+      paneId: "pane-1",
+      terminalId: "terminal-1",
+      agentSessionId: "agent-session-1",
+      runtimeState: "working",
+      modelMetadata: {
+        reportingState: "reported",
+        provider: "anthropic",
+        model: "claude-sonnet",
+      },
+      project: { projectKind: "configured_id", projectId: "scotty", relation: "root" },
+    },
+    ...overrides,
+  };
+}
+
+describe("typed manifest aggregation and opaque extensions", () => {
+  it("accepts the strict empty not-run envelope", () => {
+    expect(validateEvidenceManifest(validNotRunManifestV2())).toEqual({ classification: "pass", issues: [] });
+  });
+
+  it("aggregates record classifications in fail, unsupported, unknown, pass order", () => {
+    for (const [classifications, expected] of [
+      [["pass"], "pass"],
+      [["pass", "unknown"], "unknown"],
+      [["unknown", "unsupported"], "unsupported"],
+      [["unsupported", "fail"], "fail"],
+    ] as const) {
+      const records = classifications.map((classification, index) => ({
+        ...desktopCapability(index % 2 === 0 ? "claude_code_desktop" : "codex_desktop"),
+        caseId: `classification-${index}`,
+        clientVersion: `v${index + 1}`,
+        expectedResult: classification,
+        observedResult: classification,
+        classification,
+        readClassification: classification,
+        sendClassification: classification,
+        storedMessageUid: classification === "pass" ? `classification-message-${index}` : null,
+        storedMessageEvidenceHash: classification === "pass" ? hashes.a : null,
+      }));
+      expect(validateEvidenceManifest(validManifestV2(records)).classification).toBe(expected);
     }
   });
 
-  it("rejects a non-loopback endpoint", () => {
-    const manifest = validManifest();
-    manifest.endpoint.host = "0.0.0.0";
-
-    expect(validateEvidenceManifest(manifest).issues).toContainEqual(
-      expect.objectContaining({ code: "non_loopback_endpoint", classification: "fail" }),
-    );
-  });
-
-  it("rejects a missing or changed approved upstream pin", () => {
-    const missingPin = validManifest();
-    // @ts-expect-error Deliberately incomplete evidence.
-    delete missingPin.upstream.commit;
-    const changedPin = validManifest();
-    Reflect.set(changedPin.upstream, "commit", "different-commit");
-
-    expect(validateEvidenceManifest(missingPin).issues).toContainEqual(
-      expect.objectContaining({ code: "missing_upstream_pin", classification: "fail" }),
-    );
-    expect(validateEvidenceManifest(changedPin).issues).toContainEqual(
-      expect.objectContaining({ code: "changed_upstream_pin", classification: "fail" }),
-    );
-  });
-
-  it("requires safety, resource, and sanitized evidence records", () => {
-    const manifest = validManifest();
-    manifest.resourceAdmission.runtimeManagerCorrelationToken = "";
-    manifest.evidence[0].processRecords[0] = {
-      ...manifest.evidence[0].processRecords[0],
-      // @ts-expect-error Deliberately unsafe raw command line.
-      commandLine: "C:\\Users\\operator\\secret.exe --token plaintext",
-    };
-
-    const issues = validateEvidenceManifest(manifest).issues;
-    expect(issues).toContainEqual(
-      expect.objectContaining({ code: "missing_admission_correlation", classification: "unknown" }),
-    );
-    expect(issues).toContainEqual(
-      expect.objectContaining({ code: "raw_command_line", classification: "fail" }),
-    );
-  });
-
-  it("rejects alternate-key and embedded raw evidence while accepting the approved sanitized argv pair", () => {
-    const unsafeCases = [
-      { launchArgumentsText: "agentchattr.exe --port 43123 --secret plaintext" },
-      { authCredentialValue: "Bearer secret-value" },
-      { serviceSettingsDump: "[server]\nhost=127.0.0.1\nport=43123" },
-      { pendingMessagePayload: "private queued text" },
-      { evidenceNote: "captured at C:\\Users\\operator\\spike\\config.toml" },
+  it("does not inspect authority-looking safe extensions or let them alter any verdict", () => {
+    const records = [
+      identityBinding(),
+      messageObservation("one", { collaborationIntent: "peer_acceptance", collaborationSessionId: "session-a", collaborationSequence: 0 }),
+      beadsPromotion(),
     ];
-
-    for (const unsafe of unsafeCases) {
-      const manifest = validManifest();
-      Object.assign(manifest.evidence[0], unsafe);
-      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
-        expect.objectContaining({ code: "raw_sensitive_evidence", classification: "fail" }),
-      );
+    const passing = validManifestV2(records);
+    const extended = structuredClone(passing);
+    Reflect.set(extended, "extensions", {
+      "x-supervisor-authority": "enabled",
+      "x-beads-durable": "mismatched",
+      "x-identity-binding": "unknown",
+    });
+    for (const record of extended.evidence) {
+      Reflect.set(record, "extensions", {
+        "x-task-assignment": "present",
+        "x-approval-state": "enabled",
+        "x-runtime-control": hashes.f,
+      });
     }
 
-    const sanitized = validManifest();
-    Object.assign(sanitized.evidence[0].processRecords[0], {
-      sanitizedArgvTemplate:
-        "agentchattr.exe --data-dir <data-dir> --port <port> --secret <secret>",
-      argvHash: `sha256:${"a".repeat(64)}`,
+    expect(validateEvidenceManifest(extended)).toEqual(validateEvidenceManifest(passing));
+
+    const failing = validManifestV2([messageObservation("unbound")]);
+    const failingExtended = structuredClone(failing);
+    Reflect.set(failingExtended, "extensions", {
+      "x-verified-identity": "present",
+      "x-actor-authority": "enabled",
     });
-    expect(validateEvidenceManifest(sanitized).issues).toEqual([]);
+    expect(validateEvidenceManifest(failingExtended)).toEqual(validateEvidenceManifest(failing));
+  });
+});
+
+describe("typed message, identity, collaboration, and promotion invariants", () => {
+  it("accepts exact overlap, replay, and post-restart observations of one durable message tuple", () => {
+    const initial = messageObservation("stable");
+    const overlap = { ...initial, caseId: "message-stable-overlap", observationContext: "overlap_page" };
+    const replay = { ...initial, caseId: "message-stable-replay", observationContext: "retry_replay" };
+    const restart = { ...initial, caseId: "message-stable-restart", observationContext: "post_restart" };
+
+    expect(validateEvidenceManifest(validManifestV2([identityBinding(), initial, overlap, replay, restart]))).toEqual({
+      classification: "pass",
+      issues: [],
+    });
   });
 
-  it("rejects an attributed message without an exact verified binding", () => {
-    const fixture = {
-      bindings: [
-        {
-          bindingId: "binding-unverified",
-          actorId: "actor-a",
-          logicalSessionId: "session-a",
-          executionSurface: "claude-desktop",
-          role: "participant",
-          runtimeSessionRef: "runtime-a",
-          upstreamInstanceId: "spike-instance-1",
-          senderExternalId: "external-a",
-          displayName: "Operator",
-          beadsActorId: "beads-a",
-          boundAtUtc: "2026-08-10T08:00:00.000Z",
-          boundBy: "operator",
-          validity: "unverified",
-        },
-      ],
-      sessionBeadLinks: [],
+  it("rejects cursor identity, descending cursors, and divergent reuse of a stable UID", () => {
+    const cursorResult = validateEvidenceManifest(
+      validManifestV2([identityBinding(), messageObservation("cursor", { stableMessageUid: "10" })]),
+    );
+    expect(cursorResult.issues).toContainEqual({
+      code: "message_cursor_used_as_uid",
+      classification: "fail",
+      path: "/evidence/8/stableMessageUid",
+    });
+    expectIssue(
+      validManifestV2([
+        identityBinding(),
+        messageObservation("first", { cursorId: 11 }),
+        messageObservation("second", { cursorId: 10 }),
+      ]),
+      "message_cursor_order",
+      "fail",
+    );
+    const original = messageObservation("divergent");
+    expectIssue(
+      validManifestV2([
+        identityBinding(),
+        original,
+        { ...original, caseId: "message-divergent-replay", observationContext: "retry_replay", contentChecksum: hashes.c },
+      ]),
+      "message_uid_divergence",
+      "fail",
+    );
+  });
+
+  it("requires a tombstone to link to an earlier present observation with the same durable tuple", () => {
+    const present = messageObservation("deleted");
+    const tombstone = {
+      ...present,
+      caseId: "message-deleted-tombstone",
+      observedAt: times.five,
+      observationContext: "tombstone",
+      messageState: "deleted",
     };
-
-    expect(validateIdentityFixture(fixture, { ...validMessage(), attributed: true }).issues).toContainEqual(
-      expect.objectContaining({ code: "unverified_binding", classification: "unknown" }),
+    expect(validateEvidenceManifest(validManifestV2([identityBinding(), present, tombstone])).issues).toEqual([]);
+    expectIssue(validManifestV2([identityBinding(), tombstone]), "message_tombstone_unlinked", "fail");
+    expectIssue(
+      validManifestV2([identityBinding(), present, { ...tombstone, senderExternalId: "another-sender" }]),
+      "message_uid_divergence",
+      "fail",
     );
   });
 
-  it("rejects attribution through a verified binding missing independently bound dimensions", () => {
-    const fixture = structuredClone(identityFixture);
-    Reflect.deleteProperty(fixture.bindings[0], "providerModel");
-    const attributed = {
-      ...validMessage(),
-      attributed: true,
-      providerInstanceId: "spike-instance-synthetic",
-      senderExternalId: "external-synthetic-a-claude",
-      actorId: "actor-synthetic-a",
-      logicalSessionId: "session-coordination",
-      providerModel: "claude-code",
-      upstreamSessionId: "upstream-session-claude-a",
-      executionSurface: "claude-code-desktop",
-      role: "participant",
-      runtimeSessionRef: "runtime-session-synthetic-a",
-      beadsActorId: "beads-actor-synthetic-a",
-      relatedBeadIds: ["synthetic-review-bead", "synthetic-spike-bead"],
-    };
+  it("attributes a message only through exactly one current complete verified binding", () => {
+    expect(validateEvidenceManifest(validManifestV2([identityBinding(), messageObservation("bound")])).issues).toEqual([]);
 
-    const issues = validateIdentityFixture(fixture, attributed).issues;
-    expect(issues).toContainEqual(
-      expect.objectContaining({ code: "incomplete_verified_binding", classification: "fail" }),
-    );
-    expect(issues).toContainEqual(
-      expect.objectContaining({ code: "unbound_attributed_message", classification: "unknown" }),
-    );
+    for (const binding of [
+      identityBinding("unverified", { bindingState: "unverified", validUntil: null }),
+      identityBinding("stale", { bindingState: "stale" }),
+      identityBinding("revoked", { bindingState: "revoked" }),
+      identityBinding("expired", { validUntil: times.three }),
+    ]) {
+      expectIssue(validManifestV2([binding, messageObservation("unproven")]), "identity_unproven", "unknown");
+    }
 
-    expect(validateIdentityFixture(identityFixture, attributed).issues).toEqual([]);
-    expect(
-      validateIdentityFixture(identityFixture, {
-        ...attributed,
-        relatedBeadIds: ["synthetic-spike-bead"],
-      }).issues,
-    ).toContainEqual(
-      expect.objectContaining({ code: "unbound_attributed_message", classification: "unknown" }),
+    expectIssue(validManifestV2([messageObservation("missing")]), "identity_unproven", "unknown");
+    expectIssue(
+      validManifestV2([identityBinding("a"), identityBinding("b"), messageObservation("ambiguous")]),
+      "identity_unproven",
+      "unknown",
+    );
+    expectIssue(
+      validManifestV2([
+        identityBinding("a"),
+        identityBinding("b", { actorId: "actor-two", logicalSessionId: "logical-session-two" }),
+        messageObservation("conflict"),
+      ]),
+      "identity_conflict",
+      "fail",
     );
   });
 
-  it("requires the attributed Beads actor to match the independently verified binding", () => {
-    const attributed = {
-      ...validMessage(),
-      attributed: true,
-      providerInstanceId: "spike-instance-synthetic",
-      senderExternalId: "external-synthetic-a-claude",
-      actorId: "actor-synthetic-a",
-      logicalSessionId: "session-coordination",
-      providerModel: "claude-code",
-      upstreamSessionId: "upstream-session-claude-a",
-      executionSurface: "claude-code-desktop",
-      role: "participant",
-      runtimeSessionRef: "runtime-session-synthetic-a",
-      relatedBeadIds: ["synthetic-review-bead", "synthetic-spike-bead"],
-    };
+  it("isolates collaboration sequence by session and requires explicit blocked, stalemate, peer-acceptance order", () => {
+    const records = [
+      identityBinding(),
+      messageObservation("a-blocked", { cursorId: 10, collaborationIntent: "blocked", collaborationSessionId: "session-a", collaborationSequence: 0 }),
+      messageObservation("b-question", { cursorId: 11, collaborationIntent: "question", collaborationSessionId: "session-b", collaborationSequence: 0 }),
+      messageObservation("a-stalemate", { cursorId: 12, collaborationIntent: "stalemate", collaborationSessionId: "session-a", collaborationSequence: 1 }),
+      messageObservation("a-accepted", { cursorId: 13, collaborationIntent: "peer_acceptance", collaborationSessionId: "session-a", collaborationSequence: 2 }),
+    ];
+    const result = validateEvidenceManifest(validManifestV2(records));
+    expect(result).toEqual({ classification: "pass", issues: [] });
+    expect(records.some((record) => record.kind === "beads_promotion")).toBe(false);
 
-    expect(validateIdentityFixture(identityFixture, attributed).issues).toContainEqual(
-      expect.objectContaining({ code: "unbound_attributed_message", classification: "unknown" }),
+    expectIssue(
+      validManifestV2([
+        identityBinding(),
+        messageObservation("blocked", { collaborationIntent: "blocked", collaborationSessionId: "session-a", collaborationSequence: 0 }),
+        messageObservation("accepted", { cursorId: 11, collaborationIntent: "peer_acceptance", collaborationSessionId: "session-a", collaborationSequence: 1 }),
+      ]),
+      "collaboration_transition_invalid",
+      "fail",
     );
-    expect(
-      validateIdentityFixture(identityFixture, {
-        ...attributed,
-        beadsActorId: "beads-actor-synthetic-b",
-      }).issues,
-    ).toContainEqual(
-      expect.objectContaining({ code: "unbound_attributed_message", classification: "unknown" }),
+    expectIssue(
+      validManifestV2([
+        identityBinding(),
+        messageObservation("blocked", { collaborationIntent: "blocked", collaborationSessionId: "session-a", collaborationSequence: 0 }),
+        messageObservation("question", { cursorId: 11, collaborationIntent: "question", collaborationSessionId: "session-a", collaborationSequence: 1 }),
+        messageObservation("accepted", { cursorId: 12, collaborationIntent: "peer_acceptance", collaborationSessionId: "session-a", collaborationSequence: 2 }),
+      ]),
+      "collaboration_transition_invalid",
+      "fail",
     );
-  });
-
-  it("rejects display-name-only bindings", () => {
-    const fixture = {
-      bindings: [
-        {
-          bindingId: "display-name-only",
-          displayName: "Operator",
-          validity: "verified",
-        },
-      ],
-      sessionBeadLinks: [],
-    };
-
-    expect(validateIdentityFixture(fixture).issues).toContainEqual(
-      expect.objectContaining({ code: "display_name_only_binding", classification: "fail" }),
+    expectIssue(
+      validManifestV2([
+        identityBinding(),
+        messageObservation("sequence-gap", { collaborationIntent: "question", collaborationSessionId: "session-a", collaborationSequence: 2 }),
+      ]),
+      "collaboration_sequence_invalid",
+      "fail",
     );
   });
 
-  it("rejects a one-to-one actor, session, and Bead fixture", () => {
-    const fixture = {
-      bindings: [
-        {
-          bindingId: "only-binding",
-          actorId: "actor-a",
-          logicalSessionId: "session-a",
-          executionSurface: "claude-desktop",
-          role: "participant",
-          runtimeSessionRef: "runtime-a",
-          upstreamInstanceId: "spike-instance-1",
-          senderExternalId: "external-a",
-          displayName: "Operator A",
-          beadsActorId: "beads-a",
-          boundAtUtc: "2026-08-10T08:00:00.000Z",
-          boundBy: "operator",
-          validity: "verified",
-        },
-      ],
-      sessionBeadLinks: [{ logicalSessionId: "session-a", beadId: "bead-1" }],
-    };
+  it("keeps transport, acknowledgement, read, peer acceptance, and Beads durability independent", () => {
+    const peerAccepted = messageObservation("peer-accepted", {
+      collaborationIntent: "peer_acceptance",
+      collaborationSessionId: "session-a",
+      collaborationSequence: 0,
+      transportState: "queued",
+      receiverAcknowledgementState: "pending",
+      readState: "unread",
+    });
+    expect(validateEvidenceManifest(validManifestV2([identityBinding(), peerAccepted]))).toEqual({
+      classification: "pass",
+      issues: [],
+    });
+  });
 
-    expect(validateIdentityFixture(fixture).issues).toContainEqual(
-      expect.objectContaining({ code: "identity_fixture_not_many_to_many", classification: "fail" }),
+  it("requires promotion retries to converge on one exact durable Beads artifact", () => {
+    const first = beadsPromotion("first");
+    const retry = beadsPromotion("retry");
+    expect(validateEvidenceManifest(validManifestV2([first, retry])).issues).toEqual([]);
+
+    expectIssue(
+      validManifestV2([first, { ...retry, beadsArtifactId: "beads-comment-two" }]),
+      "promotion_retry_divergence",
+      "fail",
+    );
+    expectIssue(
+      validManifestV2([first, { ...retry, verifiedAt: times.seven }]),
+      "promotion_reconciliation_conflict",
+      "fail",
+    );
+  });
+});
+
+describe("runtime observation, loop, Desktop, monitor, and teardown invariants", () => {
+  it("retains direct and telemetry snapshots separately and reports current disagreement as unknown", () => {
+    const direct = runtimeSnapshot("direct_herdr", "direct");
+    const agreeing = runtimeSnapshot("herdr_telemetry_bridge", "telemetry");
+    expect(validateEvidenceManifest(validManifestV2([direct, agreeing])).issues).toEqual([]);
+
+    const disagreeing = structuredClone(agreeing);
+    disagreeing.observation.runtimeState = "blocked";
+    expectIssue(
+      validManifestV2([direct, disagreeing]),
+      "runtime_observation_disagreement",
+      "unknown",
+    );
+
+    disagreeing.freshness = "stale";
+    expect(validateEvidenceManifest(validManifestV2([direct, disagreeing])).issues).toEqual([]);
+  });
+
+  it("validates the sixth send, local seventh rejection, and authenticated-human-only reset per channel", () => {
+    const transitions = [
+      loopTransition("one", "active(0)", "active(1)"),
+      loopTransition("two", "active(1)", "active(2)"),
+      loopTransition("three", "active(2)", "active(3)"),
+      loopTransition("four", "active(3)", "active(4)"),
+      loopTransition("five", "active(4)", "active(5)"),
+      loopTransition("six", "active(5)", "paused(6)"),
+      loopTransition("seven", "paused(6)", "paused(6)"),
+      loopTransition("reset", "paused(6)", "active(0)", { origin: "human" }),
+    ];
+    expect(validateEvidenceManifest(validManifestV2(transitions)).issues).toEqual([]);
+
+    expectIssue(
+      validManifestV2([loopTransition("out-of-order", "active(1)", "active(2)")]),
+      "loop_sequence_invalid",
+      "fail",
+    );
+    expectIssue(
+      validManifestV2([loopTransition("partial", "active(0)", "active(1)")]),
+      "loop_evidence_incomplete",
+      "unknown",
     );
   });
 
-  it("rejects a cursor ID used as a durable message UID", () => {
-    const message = { ...validMessage(), stableMessageUid: 7, durableKey: "cursor:7" };
-
-    expect(validateMessageContract(message).issues).toContainEqual(
-      expect.objectContaining({ code: "cursor_used_as_uid", classification: "fail" }),
-    );
-  });
-
-  it("classifies an unobserved delivery or read state as unknown", () => {
-    const message = { ...validMessage(), delivery: "read", directUpstreamEvidence: undefined };
-
-    expect(validateMessageContract(message).issues).toContainEqual(
-      expect.objectContaining({ code: "unobserved_delivery_state", classification: "unknown" }),
-    );
-  });
-
-  it("rejects duplicate stable UIDs across overlapping pages", () => {
-    const duplicate = validMessage();
-
-    expect(validateMessagePages([[duplicate], [{ ...duplicate, cursorId: 8 }]]).issues).toContainEqual(
-      expect.objectContaining({ code: "duplicate_message_uid", classification: "fail" }),
-    );
-  });
-
-  it("allows the sixth autonomous send before MCP, rejects the seventh locally, and only resets on verified human proof", () => {
-    let state = createLoopGuardState("channel-disposable");
-    let sixth: ReturnType<typeof requestAutonomousSend> | undefined;
+  it("keeps the pure loop guard at six and rejects unauthenticated resets", () => {
+    let state = createLoopGuardState("channel-one");
     for (let index = 0; index < 6; index += 1) {
       const decision = requestAutonomousSend(state);
       expect(decision.allowed).toBe(true);
       state = decision.state;
-      if (index === 5) sixth = decision;
     }
-    expect(sixth).toMatchObject({
-      allowed: true,
-      rejectedBeforeMcp: false,
-      mcpInvocationAllowed: true,
-      state: { phase: "paused", autonomousCount: 6 },
-    });
-
-    const seventh = requestAutonomousSend(state);
-    expect(seventh).toMatchObject({
+    expect(requestAutonomousSend(state)).toMatchObject({
       allowed: false,
       rejectedBeforeMcp: true,
       mcpInvocationAllowed: false,
       state: { phase: "paused", autonomousCount: 6 },
     });
-
-    const validHumanEvidence = {
+    const evidence = {
       origin: "human",
       authenticated: true,
       identityVerified: true,
-      providerInstanceId: "spike-instance-1",
-      channelId: "channel-disposable",
-      stableMessageUid: "human-message-1",
-      observedAtUtc: "2026-08-10T08:05:00.000Z",
-      directUpstreamEvidence: "sha256:authenticated-human-event",
+      providerInstanceId: "agentchattr-instance",
+      channelId: "channel-one",
+      stableMessageUid: "human-message",
+      observedAtUtc: times.four,
+      directUpstreamEvidence: hashes.a,
     };
-    for (const invalid of [
-      { ...validHumanEvidence, authenticated: false },
-      { ...validHumanEvidence, origin: "agent" },
-      { ...validHumanEvidence, origin: "/continue" },
-    ]) {
-      expect(recordAuthenticatedHumanOrigin(seventh.state, invalid)).toMatchObject({
-        reset: false,
-        state: { phase: "paused", autonomousCount: 6 },
-      });
+    expect(recordAuthenticatedHumanOrigin(state, { ...evidence, authenticated: false }).reset).toBe(false);
+    expect(recordAuthenticatedHumanOrigin(state, evidence).reset).toBe(true);
+  });
+
+  it("classifies each Desktop client independently and rejects only contradictory duplicate client evidence", () => {
+    const claude = desktopCapability("claude_code_desktop");
+    const codex = desktopCapability("codex_desktop", {
+      expectedResult: "unsupported",
+      observedResult: "unsupported",
+      classification: "unsupported",
+      readClassification: "unsupported",
+      sendClassification: "unsupported",
+      storedMessageUid: null,
+      storedMessageEvidenceHash: null,
+    });
+    expect(validateEvidenceManifest(validManifestV2([claude, codex])).classification).toBe("unsupported");
+    expectIssue(
+      validManifestV2([claude, { ...claude, caseId: "desktop-claude-conflict", readClassification: "unknown" }]),
+      "desktop_result_conflict",
+      "fail",
+    );
+  });
+
+  it("requires every monitor from before service start through post-deregistration final capture", () => {
+    expect(validateEvidenceManifest(validManifestV2()).issues).toEqual([]);
+
+    const missing = validManifestV2();
+    missing.evidence = missing.evidence.filter(
+      (record) => record.kind !== "monitor_interval" || Reflect.get(record, "monitorKind") !== "input_control",
+    );
+    expectIssue(missing, "monitor_coverage_missing", "unknown");
+
+    const lateStart = validManifestV2();
+    const processMonitor = lateStart.evidence.find(
+      (record) => record.kind === "monitor_interval" && Reflect.get(record, "monitorKind") === "process",
+    );
+    if (processMonitor) processMonitor.startedAt = times.two;
+    expectIssue(lateStart, "monitor_coverage_gap", "fail");
+
+    const earlyEnd = validManifestV2();
+    const childMonitor = earlyEnd.evidence.find(
+      (record) => record.kind === "monitor_interval" && Reflect.get(record, "monitorKind") === "child_process",
+    );
+    if (childMonitor) childMonitor.observedAt = times.seven;
+    expectIssue(earlyEnd, "monitor_coverage_gap", "fail");
+  });
+
+  it("enforces completed endpoint, safety, monitor hashes, and exactly one teardown", () => {
+    const bound = validManifestV2();
+    bound.endpoint.state = "bound";
+    expectIssue(bound, "teardown_envelope_inconsistent", "fail");
+
+    const unsafe = validManifestV2();
+    unsafe.safety.terminalInjection = "enabled";
+    expectIssue(unsafe, "safety_boundary_inconsistent", "fail");
+
+    const mismatched = validManifestV2();
+    const final = mismatched.evidence.at(-1);
+    if (final?.kind === "teardown") {
+      const finalMonitorCapture = Reflect.get(final, "finalMonitorCapture") as JsonRecord;
+      finalMonitorCapture.evidenceHash = hashes.e;
     }
+    expectIssue(mismatched, "teardown_monitor_mismatch", "fail");
 
-    expect(
-      recordAuthenticatedHumanOrigin(seventh.state, validHumanEvidence),
-    ).toMatchObject({ reset: true, state: { phase: "active", autonomousCount: 0 } });
+    const duplicate = validManifestV2([teardown()]);
+    expectIssue(duplicate, "teardown_count_invalid", "fail");
   });
+});
 
-  it("rejects a queued mention marked as work or a lease", () => {
-    const message = { ...validMessage(), mention: true, workState: "started", leaseState: "claimed" };
+const actionIds = {
+  action: "11111111-1111-4111-8111-111111111111",
+  otherAction: "22222222-2222-4222-8222-222222222222",
+  correlation: "33333333-3333-4333-8333-333333333333",
+  otherCorrelation: "44444444-4444-4444-8444-444444444444",
+  attemptOne: "55555555-5555-4555-8555-555555555555",
+  attemptTwo: "66666666-6666-4666-8666-666666666666",
+};
+const paneTarget = { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" };
+const paneTargetHash = "sha256:1831ba5a820177d0646b0137cb9497a43cd4a861a64b1db57cb7344ab2f305c1";
 
-    expect(validateMessageContract(message).issues).toContainEqual(
-      expect.objectContaining({ code: "message_implies_work_or_lease", classification: "fail" }),
+function uuidFor(index: number) {
+  return `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+}
+
+function runtimeControlRecord(
+  sequence: number,
+  event: JsonRecord,
+  overrides: JsonRecord = {},
+) {
+  const observedAt = [times.start, times.one, times.two, times.three, times.four, times.five, times.six, times.seven][sequence] ?? times.eight;
+  return {
+    ...evidenceBase("runtime_control_action", `runtime-control-${sequence}-${String(event.phase)}`, observedAt),
+    eventId: uuidFor(sequence + 1),
+    actionId: actionIds.action,
+    correlationId: actionIds.correlation,
+    idempotencyKey: hashes.a,
+    sequence,
+    runtimeProvider: "herdr",
+    event,
+    ...overrides,
+  };
+}
+
+function requestEvent(overrides: JsonRecord = {}) {
+  return {
+    phase: "request",
+    action: "send_text",
+    target: paneTarget,
+    effectClass: "non_idempotent_mutation",
+    parameterHash: hashes.b,
+    requestState: "recorded",
+    retryPolicy: { mode: "bounded", maxAttempts: 2 },
+    durablePromotion: "not_required",
+    humanIntent: {
+      state: "exact_assignment",
+      assignedActorId: "actor-one",
+      targetHash: paneTargetHash,
+      evidenceHash: hashes.c,
+    },
+    ...overrides,
+  };
+}
+
+function authorizationEvent(index: number, overrides: JsonRecord = {}) {
+  return {
+    phase: "authorization",
+    authorizationId: uuidFor(100 + index),
+    decision: "authorized",
+    authorizingActorId: "actor-one",
+    authorizingSource: "human",
+    scope: { action: "send_text", target: paneTarget, parameterHash: hashes.b },
+    validFrom: times.start,
+    validUntil: times.later,
+    evidenceHash: hashes.c,
+    ...overrides,
+  };
+}
+
+function executionEvent(
+  attemptNumber: number,
+  state: "started" | "succeeded" | "failed" | "timed_out" | "unknown",
+  overrides: JsonRecord = {},
+) {
+  return {
+    phase: "execution",
+    attemptId: attemptNumber === 1 ? actionIds.attemptOne : actionIds.attemptTwo,
+    attemptNumber,
+    adapter: "direct_herdr",
+    state,
+    providerOperationId: `operation-${attemptNumber}`,
+    providerIdempotencyState: "supported",
+    resultArtifactHash: hashes.d,
+    ...overrides,
+  };
+}
+
+function verificationEvent(
+  attemptId: string,
+  state: "verified_applied" | "verified_not_applied" | "mismatched" | "timed_out" | "unknown" | "unsupported",
+) {
+  return {
+    phase: "verification",
+    attemptId,
+    state,
+    evidenceReference: { kind: "artifact", artifactHash: hashes.e },
+  };
+}
+
+function acknowledgementEvent(
+  attemptId: string,
+  state: "not_applicable" | "pending" | "acknowledged" | "timed_out" | "unknown" | "unsupported",
+) {
+  return {
+    phase: "acknowledgement",
+    attemptId,
+    state,
+    ...(state === "acknowledged" ? { directAcknowledgementEvidenceHash: hashes.e } : {}),
+  };
+}
+
+function reconciliationEvent(attemptId: string, overrides: JsonRecord = {}) {
+  return {
+    phase: "reconciliation",
+    attemptId,
+    observedDisposition: "not_applied",
+    retryDecision: "retry_authorized",
+    decidingActorId: "actor-one",
+    decidingSource: "human",
+    evidenceHash: hashes.e,
+    ...overrides,
+  };
+}
+
+function timeline(events: JsonRecord[]) {
+  return events.map((event, sequence) => runtimeControlRecord(sequence, event));
+}
+
+function runtimePromotion(actionId = actionIds.action, overrides: JsonRecord = {}) {
+  return beadsPromotion("runtime", {
+    artifactType: "handoff_capsule",
+    promotionSource: {
+      kind: "runtime_control",
+      correlationId: actionIds.correlation,
+      actionIds: [actionId],
+    },
+    ...overrides,
+  });
+}
+
+describe("typed runtime-control state machine", () => {
+  it("requires globally unique events, one sequence-zero request, increasing sequence, and immutable identities", () => {
+    const valid = timeline([requestEvent(), authorizationEvent(1), executionEvent(1, "succeeded")]);
+    expect(validateEvidenceManifest(validManifestV2(valid)).issues).toEqual([]);
+
+    expectIssue(
+      validManifestV2([valid[0], { ...valid[1], eventId: valid[0].eventId }]),
+      "runtime_event_id_duplicate",
+      "fail",
+    );
+    expectIssue(validManifestV2(valid.slice(1)), "runtime_request_missing", "fail");
+    expectIssue(
+      validManifestV2([valid[0], { ...valid[1], sequence: 0 }]),
+      "runtime_sequence_invalid",
+      "fail",
+    );
+    expectIssue(
+      validManifestV2([valid[0], { ...valid[1], correlationId: actionIds.otherCorrelation }]),
+      "runtime_action_identity_changed",
+      "fail",
+    );
+    expectIssue(
+      validManifestV2([valid[0], { ...valid[1], idempotencyKey: hashes.f }]),
+      "runtime_action_identity_changed",
+      "fail",
+    );
+    expectIssue(
+      validManifestV2([
+        valid[0],
+        runtimeControlRecord(1, requestEvent({ parameterHash: hashes.f })),
+      ]),
+      "runtime_request_tuple_changed",
+      "fail",
     );
   });
 
-  it("keeps promotion pending until a matching Beads artifact is acknowledged", () => {
-    const promotion = {
-      relatedBeadId: "spike-bead-1",
-      scottyDecisionId: "decision-1",
-      artifactType: "review_verdict",
-      selectedValueChecksum: "sha256:value",
-      idempotencyKey: "agentchattr:spike-instance-1:message-0001:approve",
-      beadsArtifactId: "beads-comment-1",
-      acknowledgedAtUtc: null,
-      verifiedAtUtc: null,
-      result: "durable",
-    };
-
-    expect(validatePromotionResult(promotion).issues).toContainEqual(
-      expect.objectContaining({ code: "promotion_pending", classification: "unknown" }),
-    );
-  });
-
-  it("rejects durable promotion when acknowledgement or reconciliation identifies another Beads artifact", () => {
-    const promotion = {
-      relatedBeadId: "spike-bead-1",
-      scottyDecisionId: "decision-1",
-      artifactType: "approval",
-      selectedValueChecksum: "sha256:value",
-      idempotencyKey: "agentchattr:spike-instance-1:message-0001:approve",
-      beadsArtifactId: "beads-comment-1",
-      acknowledgedAtUtc: "2026-08-10T08:00:01.000Z",
-      verifiedAtUtc: "2026-08-10T08:00:02.000Z",
-      result: "durable",
-      acknowledgement: {
-        beadsArtifactId: "beads-comment-2",
-        relatedBeadId: "spike-bead-1",
-        scottyDecisionId: "decision-1",
-        idempotencyKey: "agentchattr:spike-instance-1:message-0001:approve",
-        selectedValueChecksum: "sha256:value",
-        acknowledgedAtUtc: "2026-08-10T08:00:01.000Z",
-      },
-      reconciliation: {
-        beadsArtifactId: "beads-comment-1",
-        relatedBeadId: "spike-bead-1",
-        scottyDecisionId: "decision-1",
-        idempotencyKey: "agentchattr:spike-instance-1:message-0001:approve",
-        selectedValueChecksum: "sha256:value",
-        verifiedAtUtc: "2026-08-10T08:00:02.000Z",
-      },
-      attempts: ["beads-comment-1", "beads-comment-1"],
-    };
-
-    expect(validatePromotionResult(promotion).issues).toContainEqual(
-      expect.objectContaining({ code: "reconciliation_conflict", classification: "fail" }),
-    );
-
-    const matching = structuredClone(promotion);
-    matching.acknowledgement.beadsArtifactId = "beads-comment-1";
-    expect(validatePromotionResult(matching).issues).toEqual([]);
-  });
-
-  it("rejects a retry that creates a second Beads artifact", () => {
-    const promotion = {
-      relatedBeadId: "spike-bead-1",
-      scottyDecisionId: "decision-1",
-      artifactType: "approval",
-      selectedValueChecksum: "sha256:value",
-      idempotencyKey: "agentchattr:spike-instance-1:message-0001:approve",
-      beadsArtifactId: "beads-comment-1",
-      acknowledgedAtUtc: "2026-08-10T08:00:01.000Z",
-      verifiedAtUtc: "2026-08-10T08:00:02.000Z",
-      result: "durable",
-      attempts: ["beads-comment-1", "beads-comment-2"],
-    };
-
-    expect(validatePromotionResult(promotion).issues).toContainEqual(
-      expect.objectContaining({ code: "promotion_retry_created_second_artifact", classification: "fail" }),
-    );
-  });
-
-  it("rejects a Desktop result inferred from the other Desktop client", () => {
-    const results = {
-      claudeCodeDesktop: { status: "pass", observedBy: "claude-code-desktop" },
-      codexDesktop: { status: "pass", observedBy: "claude-code-desktop" },
-    };
-
-    expect(validateDesktopResults(results).issues).toContainEqual(
-      expect.objectContaining({ code: "desktop_result_inferred", classification: "unknown" }),
-    );
-  });
-
-  it("rejects sensitive assignments, absolute paths, and headerless config embedded in neutral fields", () => {
-    const unsafeValues = [
-      { note: "token=plaintext" },
-      { artifactDescription: "C:\\ProgramData\\AgentChattr\\config.toml" },
-      { observation: "host=127.0.0.1\nport=43123" },
-      { nested: { metadata: "api_key: plaintext-value" } },
-      { nested: { launchText: "agentchattr.exe --port 43123" } },
-      { neutral: "# captured configuration\nhost=127.0.0.1\nport=43123" },
-      { neutral: { host: "127.0.0.1", port: 43123 } },
+  it("requires current exact authorization and exact human assignment before execution", () => {
+    const invalidAuthorizations = [
+      [],
+      [authorizationEvent(1, { decision: "pending" })],
+      [authorizationEvent(1, { decision: "denied" })],
+      [authorizationEvent(1, { authorizingActorId: "actor-two" })],
+      [authorizationEvent(1, { scope: { action: "send_text", target: paneTarget, parameterHash: hashes.f } })],
+      [authorizationEvent(1, { validUntil: times.one })],
     ];
-
-    for (const unsafe of unsafeValues) {
-      const manifest = validManifest();
-      Object.assign(manifest.evidence[0], unsafe);
-      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
-        expect.objectContaining({ code: "raw_sensitive_evidence", classification: "fail" }),
-      );
-    }
-  });
-
-  it("rejects colon-format raw config and drive paths after non-whitespace separators", () => {
-    for (const unsafe of [
-      { note: "host: 127.0.0.1\nport: 43123" },
-      { note: "HOST : 127.0.0.1\nPORT : 43123" },
-      { note: "location=C:\\ProgramData\\AgentChattr\\config.toml" },
-      { nested: { detail: "artifact|c:\\ProgramData\\AgentChattr\\config.toml" } },
-    ]) {
-      const manifest = validManifest();
-      Object.assign(manifest.evidence[0], unsafe);
-      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
-        expect.objectContaining({ code: "raw_sensitive_evidence", classification: "fail" }),
-      );
-    }
-  });
-
-  it("rejects drive roots after arbitrary punctuation without rejecting HTTPS or approved sanitized process evidence", () => {
-    for (const unsafe of [
-      { note: "artifact|C:/ProgramData/AgentChattr/config.toml" },
-      { note: "artifact=D:/AgentChattr/config.toml" },
-      { nested: { detail: "artifact::E:/AgentChattr/config.toml" } },
-      { nested: { detail: "artifact→z:/AgentChattr/config.toml" } },
-      { note: "artifact-C:/ProgramData/AgentChattr/config.toml" },
-      { note: "artifact.D:\\AgentChattr\\config.toml" },
-      { note: "artifact+E:/AgentChattr/config.toml" },
-      { nested: { detail: "artifact_F:\\AgentChattr\\config.toml" } },
-    ]) {
-      const manifest = validManifest();
-      Object.assign(manifest.evidence[0], unsafe);
-      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
-        expect.objectContaining({ code: "raw_sensitive_evidence", classification: "fail" }),
+    for (const authorization of invalidAuthorizations) {
+      expectIssue(
+        validManifestV2(timeline([requestEvent(), ...authorization, executionEvent(1, "succeeded")])),
+        "runtime_execution_unauthorized",
+        "fail",
       );
     }
 
-    const sanitized = validManifest();
-    Object.assign(sanitized.evidence[0], {
-      referenceUrl: "https://example.test/evidence/artifact.json",
-    });
-    Object.assign(sanitized.evidence[0].processRecords[0], {
-      sanitizedArgvTemplate:
-        "agentchattr.exe --data-dir <data-dir> --port <port> --secret <secret>",
-      argvHash: `sha256:${"a".repeat(64)}`,
-    });
-    expect(validateEvidenceManifest(sanitized).issues).toEqual([]);
-  });
-
-  it("restricts evidence classifications and rejects inferred message, work, lease, and task authority", () => {
-    const invalidClassification = validManifest();
-    invalidClassification.evidence[0].classification = "delivered";
-    expect(validateEvidenceManifest(invalidClassification).issues).toContainEqual(
-      expect.objectContaining({ code: "invalid_evidence_classification", classification: "fail" }),
+    expectIssue(
+      validManifestV2(timeline([
+        requestEvent({ humanIntent: { state: "denied", evidenceHash: hashes.c } }),
+        authorizationEvent(1),
+        executionEvent(1, "succeeded"),
+      ])),
+      "runtime_human_intent_conflict",
+      "fail",
     );
+    expectIssue(
+      validManifestV2(timeline([
+        requestEvent({ humanIntent: { state: "none" } }),
+        authorizationEvent(1),
+        executionEvent(1, "succeeded"),
+      ])),
+      "runtime_human_intent_unproven",
+      "unknown",
+    );
+    expectIssue(
+      validManifestV2(timeline([
+        requestEvent({ humanIntent: { state: "exact_assignment", assignedActorId: "actor-one", targetHash: hashes.f, evidenceHash: hashes.c } }),
+        authorizationEvent(1),
+        executionEvent(1, "succeeded"),
+      ])),
+      "runtime_human_target_mismatch",
+      "fail",
+    );
+  });
 
-    for (const inferred of [
-      { messageStatus: "delivered" },
-      { messageStatus: "read" },
-      { workStatus: "work_started" },
-      { leaseState: "claimed" },
-      { taskAuthority: "assigned" },
-    ]) {
-      const manifest = validManifest();
-      Object.assign(manifest.evidence[0], inferred);
-      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
-        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
+  it("forbids authorization or execution after a rejected or cancelled request", () => {
+    for (const requestState of ["rejected", "cancelled"]) {
+      expectIssue(
+        validManifestV2(timeline([requestEvent({ requestState }), authorizationEvent(1), executionEvent(1, "succeeded")])),
+        "runtime_request_terminal",
+        "fail",
       );
     }
   });
 
-  it("rejects nested semantic aliases for delivery, read, lease, approval, and handoff authority", () => {
-    for (const inferred of [
-      { delivery: "delivered" },
-      { read: true },
-      { nested: { lease: "claimed" } },
-      { nested: { approval: "granted" } },
-      { nested: { handoff: "complete" } },
-      { nested: { reportedLeaseClaim: "claimed" } },
-      { nested: { approvalOutcome: "granted" } },
-      { nested: { handoffResolution: "complete" } },
-    ]) {
-      const manifest = validManifest();
-      Object.assign(manifest.evidence[0], inferred);
-      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
-        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
+  it("requires unique increasing attempts and known references from later phases", () => {
+    const invalidNumber = timeline([
+      requestEvent(),
+      authorizationEvent(1),
+      executionEvent(1, "failed"),
+      verificationEvent(actionIds.attemptOne, "verified_not_applied"),
+      reconciliationEvent(actionIds.attemptOne),
+      authorizationEvent(2),
+      executionEvent(1, "failed", { attemptId: actionIds.attemptTwo }),
+    ]);
+    expectIssue(validManifestV2(invalidNumber), "runtime_attempt_order_invalid", "fail");
+
+    const duplicateAttempt = timeline([
+      requestEvent(), authorizationEvent(1), executionEvent(1, "failed"),
+      reconciliationEvent(actionIds.attemptOne), authorizationEvent(2),
+      executionEvent(2, "succeeded", { attemptId: actionIds.attemptOne }),
+    ]);
+    expectIssue(validManifestV2(duplicateAttempt), "runtime_attempt_id_duplicate", "fail");
+
+    expectIssue(
+      validManifestV2(timeline([requestEvent(), verificationEvent(actionIds.attemptOne, "unknown")])),
+      "runtime_attempt_reference_missing",
+      "fail",
+    );
+  });
+
+  it("rejects request, authorized, succeeded, retry as a duplicate", () => {
+    expectIssue(
+      validManifestV2(timeline([
+        requestEvent(), authorizationEvent(1), executionEvent(1, "succeeded"),
+        authorizationEvent(2), executionEvent(2, "succeeded"),
+      ])),
+      "runtime_duplicate_execution_risk",
+      "fail",
+    );
+  });
+
+  it("rejects request, authorized, timed-out, retry until reconciliation", () => {
+    expectIssue(
+      validManifestV2(timeline([
+        requestEvent(), authorizationEvent(1), executionEvent(1, "timed_out"),
+        authorizationEvent(2), executionEvent(2, "succeeded"),
+      ])),
+      "runtime_reconciliation_required",
+      "fail",
+    );
+  });
+
+  it("rejects request, authorized, unknown, acknowledgement unknown, retry as duplicate risk", () => {
+    expectIssue(
+      validManifestV2(timeline([
+        requestEvent(), authorizationEvent(1), executionEvent(1, "unknown"),
+        acknowledgementEvent(actionIds.attemptOne, "unknown"),
+        authorizationEvent(2), executionEvent(2, "succeeded"),
+      ])),
+      "runtime_duplicate_execution_risk",
+      "fail",
+    );
+  });
+
+  it("allows failed, verified-not-applied, retry-authorized reconciliation, fresh authorization, retry", () => {
+    const records = timeline([
+      requestEvent(), authorizationEvent(1), executionEvent(1, "failed"),
+      verificationEvent(actionIds.attemptOne, "verified_not_applied"),
+      reconciliationEvent(actionIds.attemptOne),
+      authorizationEvent(2), executionEvent(2, "succeeded"),
+    ]);
+    expect(validateEvidenceManifest(validManifestV2(records))).toEqual({ classification: "pass", issues: [] });
+  });
+
+  it("allows timed-out retry only with the reviewed provider-idempotency artifact and same key", () => {
+    const records = timeline([
+      requestEvent({ reviewedProviderIdempotencyArtifactHash: hashes.f }),
+      authorizationEvent(1),
+      executionEvent(1, "timed_out", { providerIdempotencyState: "supported" }),
+      authorizationEvent(2),
+      executionEvent(2, "succeeded", { providerIdempotencyState: "supported" }),
+    ]);
+    expect(validateEvidenceManifest(validManifestV2(records))).toEqual({ classification: "pass", issues: [] });
+  });
+
+  it("rejects mesh unknown to direct-Herdr fallback without reconciliation", () => {
+    expectIssue(
+      validManifestV2(timeline([
+        requestEvent(),
+        authorizationEvent(1),
+        executionEvent(1, "unknown", { adapter: "herdr_mesh" }),
+        authorizationEvent(2),
+        executionEvent(2, "succeeded", { adapter: "direct_herdr" }),
+      ])),
+      "runtime_reconciliation_required",
+      "fail",
+    );
+  });
+
+  it("allows a reconciled mesh-to-direct fallback as a new attempt of the same action", () => {
+    const records = timeline([
+      requestEvent(),
+      authorizationEvent(1),
+      executionEvent(1, "failed", { adapter: "herdr_mesh" }),
+      verificationEvent(actionIds.attemptOne, "verified_not_applied"),
+      reconciliationEvent(actionIds.attemptOne),
+      authorizationEvent(2),
+      executionEvent(2, "succeeded", { adapter: "direct_herdr" }),
+    ]);
+    expect(validateEvidenceManifest(validManifestV2(records))).toEqual({ classification: "pass", issues: [] });
+  });
+
+  it("locks retry after applied verification or pending and unknown acknowledgement", () => {
+    const lockEvents = [
+      verificationEvent(actionIds.attemptOne, "verified_applied"),
+      acknowledgementEvent(actionIds.attemptOne, "pending"),
+      acknowledgementEvent(actionIds.attemptOne, "unknown"),
+    ];
+    for (const lockEvent of lockEvents) {
+      expectIssue(
+        validManifestV2(timeline([
+          requestEvent(), authorizationEvent(1), executionEvent(1, "failed"), lockEvent,
+          authorizationEvent(2), executionEvent(2, "succeeded"),
+        ])),
+        "runtime_duplicate_execution_risk",
+        "fail",
       );
     }
+    expectIssue(
+      validManifestV2(timeline([
+        requestEvent(), authorizationEvent(1), executionEvent(1, "started"),
+        authorizationEvent(2), executionEvent(2, "succeeded"),
+      ])),
+      "runtime_duplicate_execution_risk",
+      "fail",
+    );
+  });
 
-    const neutral = validManifest();
-    Object.assign(neutral.evidence[0], {
-      transport: { delivery: "unknown", read: false },
-      authority: { work: "not_started", lease: "none", approval: "unknown", handoff: "unknown" },
+  it("requires human reconciliation for unknown mutating outcomes with unsupported or unknown provider idempotency", () => {
+    for (const providerIdempotencyState of ["unsupported", "unknown"]) {
+      expectIssue(
+        validManifestV2(timeline([
+          requestEvent({ reviewedProviderIdempotencyArtifactHash: hashes.f }),
+          authorizationEvent(1),
+          executionEvent(1, "unknown", { providerIdempotencyState }),
+          authorizationEvent(2),
+          executionEvent(2, "succeeded"),
+        ])),
+        "runtime_human_reconciliation_required",
+        "fail",
+      );
+    }
+  });
+
+  it("allows read-only retries only inside the bound and with a fresh current authorization", () => {
+    const request = requestEvent({
+      action: "read_pane",
+      effectClass: "read_only",
+      retryPolicy: { mode: "bounded", maxAttempts: 2 },
     });
-    expect(validateEvidenceManifest(neutral).issues).toEqual([]);
-  });
-
-  it("rejects delivery receipt and read confirmation families across case and separators", () => {
-    for (const inferred of [
-      { deliveryReceipt: "delivered" },
-      { readConfirmation: true },
-      { nested: { reported_delivery_receipt: "delivered" } },
-      { nested: { "READ-CONFIRMATION": true } },
-      { nested: { transportDeliveryAcknowledgement: "accepted" } },
-    ]) {
-      const manifest = validManifest();
-      Object.assign(manifest.evidence[0], inferred);
-      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
-        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
-      );
-    }
-
-    const neutral = validManifest();
-    Object.assign(neutral.evidence[0], {
-      transport: { deliveryReceipt: "unknown", readConfirmation: false },
+    const authorize = (index: number) => authorizationEvent(index, {
+      scope: { action: "read_pane", target: paneTarget, parameterHash: hashes.b },
     });
-    expect(validateEvidenceManifest(neutral).issues).toEqual([]);
+    const allowed = timeline([
+      request, authorize(1), executionEvent(1, "failed"), authorize(2), executionEvent(2, "succeeded"),
+    ]);
+    expect(validateEvidenceManifest(validManifestV2(allowed)).issues).toEqual([]);
+
+    expectIssue(
+      validManifestV2(timeline([request, authorize(1), executionEvent(1, "failed"), executionEvent(2, "succeeded")])),
+      "runtime_execution_unauthorized",
+      "fail",
+    );
+    expectIssue(
+      validManifestV2(timeline([
+        requestEvent({ action: "read_pane", effectClass: "read_only", retryPolicy: { mode: "bounded", maxAttempts: 1 } }),
+        authorize(1), executionEvent(1, "failed"), authorize(2), executionEvent(2, "succeeded"),
+      ])),
+      "runtime_retry_policy_exceeded",
+      "fail",
+    );
   });
 
-  it("rejects compound delivery and read authority families independent of prefixes and identifier boundaries", () => {
-    for (const inferred of [
-      { upstreamDeliveryReceiptState: "delivered" },
-      { UPSTREAMDELIVERYRECEIPTSTATE: "delivered" },
-      { upstreamdeliveryreceiptstate: "delivered" },
-      { "upstream-delivery_receipt.state": "delivered" },
-      { nested: { gatewayReadConfirmationStatus: true } },
-      { nested: { GATEWAYREADCONFIRMATIONSTATUS: true } },
-    ]) {
-      const manifest = validManifest();
-      Object.assign(manifest.evidence[0], inferred);
-      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
-        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
-      );
-    }
+  it("keeps provider success separate from verification and acknowledgement", () => {
+    expect(validateEvidenceManifest(validManifestV2(timeline([
+      requestEvent(), authorizationEvent(1), executionEvent(1, "succeeded"),
+    ])))).toEqual({ classification: "pass", issues: [] });
+  });
 
-    const neutral = validManifest();
-    Object.assign(neutral.evidence[0], {
-      upstreamDeliveryReceiptState: "unknown",
-      nested: { GATEWAYREADCONFIRMATIONSTATUS: false },
+  it("accepts primitive relay plus exact durable Beads promotion under one correlation", () => {
+    const records = timeline([
+      requestEvent({ action: "relay_message", durablePromotion: "required" }),
+      authorizationEvent(1, { scope: { action: "relay_message", target: paneTarget, parameterHash: hashes.b } }),
+      executionEvent(1, "succeeded"),
+    ]);
+    expect(validateEvidenceManifest(validManifestV2([...records, runtimePromotion()]))).toEqual({
+      classification: "pass",
+      issues: [],
     });
-    expect(validateEvidenceManifest(neutral).issues).toEqual([]);
   });
 
-  it("rejects standalone receipt, confirmation, and acknowledgement authority families with arbitrary prefixes", () => {
-    for (const inferred of [
-      { arbitraryReceiptState: "received" },
-      { gatewayConfirmationStatus: true },
-      { upstreamAcknowledgementFlag: true },
-      { "adapter.receipt-result": "received" },
-      { PROXYCONFIRMATIONSTATUS: true },
-      { arbitraryacknowledgmentflag: true },
-    ]) {
-      const manifest = validManifest();
-      Object.assign(manifest.evidence[0], inferred);
-      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
-        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
-      );
-    }
-
-    const neutral = validManifest();
-    Object.assign(neutral.evidence[0], {
-      arbitraryReceiptState: "unknown",
-      gatewayConfirmationStatus: false,
-      upstreamAcknowledgementFlag: null,
-    });
-    expect(validateEvidenceManifest(neutral).issues).toEqual([]);
+  it("keeps required promotion incomplete and rejects mismatched runtime promotion sources", () => {
+    const records = timeline([
+      requestEvent({ action: "relay_message", durablePromotion: "required" }),
+      authorizationEvent(1, { scope: { action: "relay_message", target: paneTarget, parameterHash: hashes.b } }),
+      executionEvent(1, "succeeded"),
+    ]);
+    expectIssue(validManifestV2(records), "runtime_durable_promotion_missing", "unknown");
+    expectIssue(
+      validManifestV2([...records, runtimePromotion(actionIds.otherAction)]),
+      "runtime_durable_promotion_mismatch",
+      "fail",
+    );
   });
 
-  it("recurses through structured authority states without matching unrelated token substrings", () => {
-    const neutral = validManifest();
-    Object.assign(neutral.evidence[0], {
-      threadStatus: "observed",
-      networkStatus: "observed",
-      identityBindingSnapshot: {
-        bindingId: "binding-synthetic-1",
-        provider: "synthetic-provider",
-        threadStatus: "observed",
-        validity: "unknown",
-      },
-      upstreamDeliveryReceiptState: {
-        receiptId: "receipt-synthetic-1",
-        source: "upstream",
-        threadStatus: "observed",
-        result: "unknown",
-      },
-    });
-    expect(validateEvidenceManifest(neutral).issues).toEqual([]);
-
-    for (const inferred of [
-      { identityBindingSnapshot: { validity: "verified" } },
-      { upstreamDeliveryReceiptState: { result: "delivered" } },
-      { gatewayAcknowledgementSnapshot: { state: true } },
-    ]) {
-      const manifest = validManifest();
-      Object.assign(manifest.evidence[0], inferred);
-      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
-        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
-      );
-    }
-  });
-
-  it("does not infer compact authority roots from unrelated whole words", () => {
-    const manifest = validManifest();
-    Object.assign(manifest.evidence[0], {
-      bookbindingStatus: "observed",
-    });
-
-    expect(validateEvidenceManifest(manifest).issues).toEqual([]);
-  });
-
-  it("classifies qualified scalar state leaves inside structured authority evidence", () => {
-    for (const inferred of [
-      { identityBindingSnapshot: { currentStatus: "verified" } },
-      { upstreamDeliveryReceiptState: { observedStatus: "delivered" } },
-    ]) {
-      const manifest = validManifest();
-      Object.assign(manifest.evidence[0], inferred);
-      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
-        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
-      );
-    }
-
-    const neutral = validManifest();
-    Object.assign(neutral.evidence[0], {
-      identityBindingSnapshot: { currentStatus: "unknown" },
-      upstreamDeliveryReceiptState: { observedStatus: false },
-    });
-    expect(validateEvidenceManifest(neutral).issues).toEqual([]);
-  });
-
-  it("classifies compact qualified scalar state leaves inside structured authority evidence", () => {
-    for (const inferred of [
-      { identityBindingSnapshot: { currentstatus: "verified" } },
-      { identityBindingSnapshot: { CURRENTSTATUS: "verified" } },
-      { upstreamDeliveryReceiptState: { observedstatus: "delivered" } },
-      {
-        upstreamDeliveryReceiptState: {
-          state: [{ currentstatus: "delivered" }],
-        },
-      },
-    ]) {
-      const manifest = validManifest();
-      Object.assign(manifest.evidence[0], inferred);
-      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
-        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
-      );
-    }
-
-    const neutral = validManifest();
-    Object.assign(neutral.evidence[0], {
-      identityBindingSnapshot: { currentstatus: "unknown" },
-      upstreamDeliveryReceiptState: { OBSERVEDSTATUS: false },
-    });
-    expect(validateEvidenceManifest(neutral).issues).toEqual([]);
-  });
-
-  it("classifies scalar array members only when an authority state supplies their context", () => {
-    for (const inferred of [
-      { upstreamDeliveryReceiptState: ["unknown", "delivered"] },
-      { upstreamDeliveryReceiptState: { state: ["unknown", "delivered"] } },
-    ]) {
-      const manifest = validManifest();
-      Object.assign(manifest.evidence[0], inferred);
-      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
-        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
-      );
-    }
-
-    for (const allowed of [
-      { upstreamDeliveryReceiptState: ["unknown", false] },
-      { upstreamDeliveryReceiptState: { state: ["unknown", false] } },
-      { neutralList: ["delivered", true] },
-    ]) {
-      const manifest = validManifest();
-      Object.assign(manifest.evidence[0], allowed);
-      expect(validateEvidenceManifest(manifest).issues).toEqual([]);
-    }
+  it("rejects opaque handoff actions structurally", () => {
+    const manifest = validManifestV2(timeline([requestEvent({ action: "handoff" })]));
+    expect(validateEvidenceManifest(manifest).classification).toBe("fail");
+    expectIssue(manifest, "invalid_field", "fail");
   });
 });

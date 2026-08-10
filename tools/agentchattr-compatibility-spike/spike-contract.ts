@@ -1,28 +1,31 @@
-export const APPROVED_UPSTREAM_PIN = {
-  repository: "https://github.com/bcurts/agentchattr.git",
-  commit: "c24f605c9b24fb7a98003f7930e2d5e7a7f7d297",
-  tag: "v0.5.0",
-  version: "0.5.0",
-  licenseSha256: "a1abc583f6725867ed3564f1bcd201d78603612330665433a733a640721f40f3",
-} as const;
+import { createHash } from "node:crypto";
 
-export const DELIVERY_VOCABULARY = [
-  "accepted",
-  "queued",
-  "delivered",
-  "read",
-  "failed",
-  "unknown",
-  "unsupported",
-] as const;
+import {
+  parseEvidenceManifestV2,
+  type BeadsPromotion,
+  type DesktopCapability,
+  type EvidenceManifestV2,
+  type EvidenceRecord,
+  type HerdrTarget,
+  type IdentityBinding,
+  type LoopGuardTransition,
+  type MessageObservation,
+  type RuntimeControlAction,
+  type RuntimeControlTarget,
+  type RuntimeObservation,
+  type StructuralIssue,
+} from "./evidence-schema";
+
+export { APPROVED_UPSTREAM_PIN } from "./evidence-schema";
 
 export const EVIDENCE_CLASSIFICATIONS = ["pass", "fail", "unsupported", "unknown"] as const;
 
-export type Classification = "pass" | "fail" | "unsupported" | "unknown";
+export type Classification = (typeof EVIDENCE_CLASSIFICATIONS)[number];
 
 export type ContractIssue = {
   code: string;
   classification: Exclude<Classification, "pass">;
+  path: string;
 };
 
 export type ContractResult = {
@@ -30,460 +33,876 @@ export type ContractResult = {
   issues: ContractIssue[];
 };
 
-type UnknownRecord = Record<string, unknown>;
+type EvidenceKind = EvidenceRecord["kind"];
+type EvidenceOf<K extends EvidenceKind> = Extract<EvidenceRecord, { kind: K }>;
 
-function isRecord(value: unknown): value is UnknownRecord {
+const classificationRank: Record<Classification, number> = {
+  pass: 0,
+  unknown: 1,
+  unsupported: 2,
+  fail: 3,
+};
+
+function aggregateClassification(classifications: readonly Classification[]): Classification {
+  return classifications.reduce<Classification>(
+    (highest, classification) => classificationRank[classification] > classificationRank[highest]
+      ? classification
+      : highest,
+    "pass",
+  );
+}
+
+function aggregateIssues(issues: readonly ContractIssue[] | readonly StructuralIssue[]): ContractResult {
+  return {
+    classification: aggregateClassification(issues.map((issue) => issue.classification)),
+    issues: [...issues],
+  };
+}
+
+function aggregateManifestClassification(
+  manifest: EvidenceManifestV2,
+  issues: ContractIssue[],
+): ContractResult {
+  return {
+    classification: aggregateClassification([
+      ...manifest.evidence.map((record) => record.classification),
+      ...issues.map((issue) => issue.classification),
+    ]),
+    issues,
+  };
+}
+
+function addIssue(
+  issues: ContractIssue[],
+  code: string,
+  classification: ContractIssue["classification"],
+  path: string,
+) {
+  if (!issues.some((issue) => issue.code === code && issue.classification === classification && issue.path === path)) {
+    issues.push({ code, classification, path });
+  }
+}
+
+function recordsOf<K extends EvidenceKind>(manifest: EvidenceManifestV2, kind: K): EvidenceOf<K>[] {
+  return manifest.evidence.filter((record): record is EvidenceOf<K> => record.kind === kind);
+}
+
+function timestampParts(timestamp: string) {
+  const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})(?::(\d{2})(?:\.(\d+))?)?Z$/.exec(timestamp);
+  return {
+    minute: match?.[1] ?? "",
+    second: match?.[2] ?? "00",
+    fraction: match?.[3] ?? "",
+  };
+}
+
+function compareTimestamps(left: string, right: string) {
+  const leftParts = timestampParts(left);
+  const rightParts = timestampParts(right);
+  if (leftParts.minute !== rightParts.minute) return leftParts.minute < rightParts.minute ? -1 : 1;
+  if (leftParts.second !== rightParts.second) return leftParts.second < rightParts.second ? -1 : 1;
+  const precision = Math.max(leftParts.fraction.length, rightParts.fraction.length);
+  const leftFraction = leftParts.fraction.padEnd(precision, "0");
+  const rightFraction = rightParts.fraction.padEnd(precision, "0");
+  return leftFraction === rightFraction ? 0 : leftFraction < rightFraction ? -1 : 1;
+}
+
+function sameStringSet(left: readonly string[], right: readonly string[]) {
+  const leftSorted = [...new Set(left)].sort();
+  const rightSorted = [...new Set(right)].sort();
+  return leftSorted.length === rightSorted.length
+    && leftSorted.every((entry, index) => entry === rightSorted[index]);
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function string(value: unknown): value is string {
+function isNonemptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
-function hasUtcTimestamp(value: unknown): value is boolean {
-  return string(value) && !Number.isNaN(Date.parse(value));
+function hasUtcTimestamp(value: unknown): value is string {
+  return isNonemptyString(value) && !Number.isNaN(Date.parse(value));
 }
 
-function result(issues: ContractIssue[]): ContractResult {
-  if (issues.some((issue) => issue.classification === "fail")) {
-    return { classification: "fail", issues };
-  }
-  if (issues.some((issue) => issue.classification === "unsupported")) {
-    return { classification: "unsupported", issues };
-  }
-  if (issues.some((issue) => issue.classification === "unknown")) {
-    return { classification: "unknown", issues };
-  }
-  return { classification: "pass", issues };
-}
-
-function normalizedKey(key: string): string {
-  return key.replace(/[^a-z0-9]/gi, "").toLowerCase();
-}
-
-function semanticKeyTokens(key: string): string[] {
-  return key
-    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
-    .toLowerCase()
-    .split(/[^a-z0-9]+/)
-    .filter(Boolean);
-}
-
-type AuthorityFamily = "transport" | "work" | "lease" | "task" | "approval" | "handoff" | "binding";
-
-const AUTHORITY_FAMILY_ROOTS: Record<AuthorityFamily, readonly string[]> = {
-  transport: [
-    "delivery",
-    "delivered",
-    "read",
-    "acceptance",
-    "accepted",
-    "queued",
-    "receipt",
-    "confirmation",
-    "acknowledgement",
-    "acknowledgment",
-  ],
-  work: ["work"],
-  lease: ["lease"],
-  task: ["task", "assignment"],
-  approval: ["approval", "approved"],
-  handoff: ["handoff", "handedoff"],
-  binding: ["binding"],
-};
-
-const AUTHORITY_NEUTRAL_STATUSES: Record<AuthorityFamily, readonly unknown[]> = {
-  transport: [false, null, "none", "unknown", "unsupported", "unobserved", "not_observed"],
-  work: [false, null, "none", "not_started", "unknown", "unsupported"],
-  lease: [false, null, "none", "unclaimed", "unknown", "unsupported"],
-  task: [false, null, "none", "unassigned", "unknown", "unsupported"],
-  approval: [false, null, "none", "unknown", "unsupported", "not_granted", "not_approved"],
-  handoff: [false, null, "none", "unknown", "unsupported", "pending", "not_complete"],
-  binding: [false, null, "none", "unknown", "unsupported", "unbound", "unverified"],
-};
-
-const AUTHORITY_COMPACT_TERMS: Record<AuthorityFamily, readonly string[]> = {
-  transport: [
-    "delivery",
-    "delivered",
-    "acceptance",
-    "accepted",
-    "queued",
-    "receipt",
-    "confirmation",
-    "acknowledgement",
-    "acknowledgment",
-  ],
-  work: ["workstarted"],
-  lease: ["leaseclaim", "leaseclaimed", "leaseowner"],
-  task: ["taskassignment", "assignment"],
-  approval: ["approval", "approved"],
-  handoff: ["handoff", "handedoff"],
-  binding: ["identitybinding"],
-};
-
-const AUTHORITY_STATE_SUFFIXES = [
-  "observation",
-  "resolution",
-  "assignment",
-  "authority",
-  "evidence",
-  "validity",
-  "snapshot",
-  "complete",
-  "verified",
-  "started",
-  "granted",
-  "claimed",
-  "status",
-  "result",
-  "state",
-  "outcome",
-  "owner",
-  "claim",
-  "flag",
-] as const;
-
-const AUTHORITY_STATE_TOKENS = new Set<string>(AUTHORITY_STATE_SUFFIXES);
-const AUTHORITY_STATE_QUALIFIER_TOKENS = new Set([
-  "actual",
-  "current",
-  "effective",
-  "inferred",
-  "latest",
-  "observed",
-  "recorded",
-  "reported",
-]);
-const AUTHORITY_IDENTIFIER_TOKENS = new Set(["id", "uid", "ref", "reference", "hash", "checksum"]);
-
-function compactAuthorityStems(key: string): string[] {
-  const stems: string[] = [];
-  let stem = normalizedKey(key);
-  while (stem.length > 0) {
-    const suffix = AUTHORITY_STATE_SUFFIXES.find(
-      (candidate) => stem.length > candidate.length && stem.endsWith(candidate),
-    );
-    if (!suffix) break;
-    stem = stem.slice(0, -suffix.length);
-    stems.push(stem);
-  }
-  return stems;
-}
-
-function authorityFamiliesForKey(key: string): AuthorityFamily[] {
-  const keyTokens = semanticKeyTokens(key);
-  const tokens = new Set(keyTokens);
-  const compact = normalizedKey(key);
-  const stems = compactAuthorityStems(key);
-  if (AUTHORITY_IDENTIFIER_TOKENS.has(keyTokens.at(-1) ?? "")) return [];
-  const families = (Object.keys(AUTHORITY_FAMILY_ROOTS) as AuthorityFamily[]).filter((family) => {
-    const roots = AUTHORITY_FAMILY_ROOTS[family];
-    if (roots.some((root) => tokens.has(root) || compact === root)) return true;
-    return stems.some((stem) =>
-      roots.some((root) => stem === root) ||
-      AUTHORITY_COMPACT_TERMS[family].some((term) => stem.endsWith(term)),
-    );
-  });
-  if (compact === "messagestatus" && !families.includes("transport")) {
-    families.push("transport");
-  }
-  return families;
-}
-
-function isAuthorityStateKey(key: string): boolean {
-  const tokens = semanticKeyTokens(key);
-  const tokenizedState =
-    tokens.some((token) => AUTHORITY_STATE_TOKENS.has(token)) &&
-    tokens.every(
-      (token) => AUTHORITY_STATE_TOKENS.has(token) || AUTHORITY_STATE_QUALIFIER_TOKENS.has(token),
-    );
-  if (tokenizedState) return true;
-
-  let compact = normalizedKey(key);
-  let consumedQualifier = false;
-  while (compact.length > 0) {
-    const qualifier = [...AUTHORITY_STATE_QUALIFIER_TOKENS].find(
-      (candidate) => compact.length > candidate.length && compact.startsWith(candidate),
-    );
-    if (!qualifier) break;
-    compact = compact.slice(qualifier.length);
-    consumedQualifier = true;
-  }
-  return consumedQualifier && AUTHORITY_STATE_TOKENS.has(compact);
-}
-
-function normalizedAuthorityStatus(value: unknown): unknown {
-  return typeof value === "string"
-    ? value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")
-    : value;
-}
-
-function isNeutralAuthorityStatus(family: AuthorityFamily, value: unknown): boolean {
-  const normalized = normalizedAuthorityStatus(value);
-  return AUTHORITY_NEUTRAL_STATUSES[family].some((candidate) => candidate === normalized);
-}
-
-function isApprovedArgvTemplate(value: unknown, container: UnknownRecord): boolean {
-  return (
-    string(value) &&
-    /^[a-z0-9_.-]+(?: --[a-z0-9-]+ <(?:data-dir|port|secret)>)+$/i.test(value) &&
-    value.includes("<data-dir>") &&
-    value.includes("<port>") &&
-    value.includes("<secret>") &&
-    string(container.argvHash) &&
-    /^sha256:[a-f0-9]{64}$/i.test(container.argvHash)
-  );
-}
-
-function hasRawCommandEvidence(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(hasRawCommandEvidence);
-  if (!isRecord(value)) return false;
-  return Object.entries(value).some(([key, nested]) => {
-    const normalized = normalizedKey(key);
-    if (normalized === "sanitizedargvtemplate" || normalized === "argvhash") return false;
-    return /(commandline|cmdline|rawcommand|launcharguments|launchparams|processargs|argv|invocation)/.test(normalized) || hasRawCommandEvidence(nested);
+function validateCaseIds(manifest: EvidenceManifestV2, issues: ContractIssue[]) {
+  const seen = new Set<string>();
+  manifest.evidence.forEach((record, index) => {
+    if (seen.has(record.caseId)) {
+      addIssue(issues, "duplicate_case_id", "fail", `/evidence/${index}/caseId`);
+    }
+    seen.add(record.caseId);
   });
 }
 
-function containsRawSensitiveEvidence(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(containsRawSensitiveEvidence);
-  if (!isRecord(value)) return false;
-
-  const rawConfigKeys = new Set(["host", "port", "bindhost", "datadir", "datafolder", "authenabled"]);
-  if (Object.keys(value).map(normalizedKey).filter((key) => rawConfigKeys.has(key)).length >= 2) {
-    return true;
-  }
-
-  return Object.entries(value).some(([key, nested]) => {
-    const normalized = normalizedKey(key);
-    if (normalized === "sanitizedargvtemplate") {
-      return !isApprovedArgvTemplate(nested, value);
-    }
-    if (normalized === "argvhash") {
-      return !string(nested) || !/^sha256:[a-f0-9]{64}$/i.test(nested) || !isApprovedArgvTemplate(value.sanitizedArgvTemplate, value);
-    }
-    const sensitiveKey =
-      /(commandline|cmdline|rawcommand|launch(?:arguments|params|text)|processargs|argv|invocation)/.test(normalized) ||
-      /(token|secret|credential|password|authorization|apikey|accesskey|authkey)/.test(normalized) ||
-      /(config|configuration|settings|preferences)/.test(normalized) ||
-      /(queue|pendingmessage|messagepayload)/.test(normalized) ||
-      /(absolutepath|userpath|filepath|directory)/.test(normalized);
-    if (sensitiveKey) return true;
-    if (string(nested)) {
-      const nonemptyLines = nested
-        .split(/\r?\n/)
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0 && !/^[#;]/.test(line));
-      const isHeaderlessConfig =
-        nonemptyLines.length >= 2 &&
-        nonemptyLines.every((line) => /^[a-z_][a-z0-9_.-]*\s*[:=]\s*[^\r\n]+$/i.test(line));
-      const sensitiveValue =
-        /(?:^|\s)--(?:token|secret|password)(?:=|\s+)(?!<(?:secret)>)/i.test(nested) ||
-        /\b(?:token|secret|password|api[_-]?key|access[_-]?key|auth[_-]?key)\s*[:=]\s*(?!<secret>)[^\s,;}\]]+/i.test(nested) ||
-        /\bBearer\s+[A-Za-z0-9._~+/=-]+/i.test(nested) ||
-        /(?:^|[^a-z0-9])[a-z]:[\\/]|\\\\[^\\]+\\|\/(?:home|users|var|opt|etc|tmp)\//i.test(nested) ||
-        /\b[a-z0-9_.-]+\.(?:exe|cmd|bat|ps1|py)\s+(?:--|-|\/)/i.test(nested) ||
-        /\b(?:python|node|pwsh|powershell)\s+[^\r\n]+/i.test(nested) ||
-        /^\s*\[[^\]]+\]\s*[\r\n]+[a-z0-9_.-]+\s*=/i.test(nested) ||
-        isHeaderlessConfig;
-      if (sensitiveValue) return true;
-    }
-    return containsRawSensitiveEvidence(nested);
-  });
+function messageIdentityKey(message: MessageObservation) {
+  return `${message.providerInstanceId}|${message.stableMessageUid}`;
 }
 
-function containsInferredAuthorityStatus(
-  value: unknown,
-  inheritedFamilies: readonly AuthorityFamily[] = [],
-  scalarArrayHasAuthority = false,
-): boolean {
-  if (Array.isArray(value)) {
-    return value.some((entry) => {
-      if (isRecord(entry) || Array.isArray(entry)) {
-        return containsInferredAuthorityStatus(entry, inheritedFamilies, scalarArrayHasAuthority);
+function messageDurableSignature(message: MessageObservation) {
+  return JSON.stringify([
+    message.providerInstanceId,
+    message.channelId,
+    message.stableMessageUid,
+    message.senderExternalId,
+    message.contentChecksum,
+    message.parentUid,
+    message.threadId,
+  ]);
+}
+
+function messageStateSignature(message: MessageObservation) {
+  return JSON.stringify([
+    messageDurableSignature(message),
+    message.transportState,
+    message.receiverAcknowledgementState,
+    message.readState,
+    message.collaborationIntent ?? null,
+    message.collaborationSessionId ?? null,
+    message.collaborationSequence ?? null,
+    message.directEvidenceArtifactHash,
+  ]);
+}
+
+function evidencePath(manifest: EvidenceManifestV2, record: EvidenceRecord) {
+  return `/evidence/${manifest.evidence.indexOf(record)}`;
+}
+
+function validateMessages(
+  manifest: EvidenceManifestV2,
+  messages: MessageObservation[],
+  issues: ContractIssue[],
+) {
+  const seenByUid = new Map<string, MessageObservation[]>();
+  const lastCursorByChannel = new Map<string, number>();
+  const knownUids = new Set<string>();
+
+  messages.forEach((message) => {
+    const path = evidencePath(manifest, message);
+    const channelKey = `${message.providerInstanceId}|${message.channelId}`;
+    const previousCursor = lastCursorByChannel.get(channelKey);
+    const uidKey = messageIdentityKey(message);
+    if (String(message.cursorId) === message.stableMessageUid) {
+      addIssue(issues, "message_cursor_used_as_uid", "fail", `${path}/stableMessageUid`);
+    }
+    if (!knownUids.has(uidKey) && previousCursor !== undefined && message.cursorId < previousCursor) {
+      addIssue(issues, "message_cursor_order", "fail", `${path}/cursorId`);
+    }
+    lastCursorByChannel.set(channelKey, Math.max(previousCursor ?? message.cursorId, message.cursorId));
+
+    const previous = seenByUid.get(uidKey) ?? [];
+    if (message.observationContext === "tombstone") {
+      const linked = previous.find((candidate) => candidate.messageState === "present");
+      if (!linked) {
+        addIssue(issues, "message_tombstone_unlinked", "fail", `${path}/stableMessageUid`);
+      } else if (messageDurableSignature(linked) !== messageDurableSignature(message)
+        || messageStateSignature(linked) !== messageStateSignature(message)) {
+        addIssue(issues, "message_uid_divergence", "fail", `${path}/stableMessageUid`);
       }
-      return (
-        scalarArrayHasAuthority &&
-        inheritedFamilies.some((family) => !isNeutralAuthorityStatus(family, entry))
-      );
+    } else if (message.messageState === "deleted") {
+      addIssue(issues, "message_tombstone_unlinked", "fail", `${path}/messageState`);
+    } else if (previous.length > 0) {
+      const replayContext = message.observationContext === "overlap_page"
+        || message.observationContext === "retry_replay"
+        || message.observationContext === "post_restart";
+      if (!replayContext || previous.some((candidate) => candidate.messageState !== message.messageState
+        || messageStateSignature(candidate) !== messageStateSignature(message))) {
+        addIssue(issues, "message_uid_divergence", "fail", `${path}/stableMessageUid`);
+      }
+    }
+
+    previous.push(message);
+    seenByUid.set(uidKey, previous);
+    knownUids.add(uidKey);
+  });
+}
+
+function bindingSignature(binding: IdentityBinding) {
+  return JSON.stringify([
+    binding.actorId,
+    binding.logicalSessionId,
+    binding.executionSurface,
+    binding.orchestrationRole,
+    binding.modelProvider,
+    binding.modelId,
+    binding.herdrSessionRef,
+    binding.agentChattrSessionId,
+    binding.beadsActorId,
+  ]);
+}
+
+function bindingCovers(binding: IdentityBinding, timestamp: string) {
+  return binding.bindingState === "verified"
+    && binding.validUntil !== null
+    && compareTimestamps(binding.validFrom, timestamp) <= 0
+    && compareTimestamps(timestamp, binding.validUntil) <= 0;
+}
+
+function validateIdentityAttribution(
+  manifest: EvidenceManifestV2,
+  messages: MessageObservation[],
+  bindings: IdentityBinding[],
+  issues: ContractIssue[],
+) {
+  messages.forEach((message) => {
+    const path = evidencePath(manifest, message);
+    const candidates = bindings.filter((binding) => binding.agentChattrInstanceId === message.providerInstanceId
+      && binding.agentChattrExternalId === message.senderExternalId
+      && bindingCovers(binding, message.observedAt));
+    if (candidates.length === 1) return;
+    if (candidates.length > 1 && new Set(candidates.map(bindingSignature)).size > 1) {
+      addIssue(issues, "identity_conflict", "fail", path);
+      return;
+    }
+    addIssue(issues, "identity_unproven", "unknown", path);
+  });
+}
+
+function validateCollaborationSequences(messages: MessageObservation[], issues: ContractIssue[]) {
+  const sessions = new Map<string, MessageObservation[]>();
+  for (const message of messages) {
+    if (message.collaborationSessionId === undefined) continue;
+    const records = sessions.get(message.collaborationSessionId) ?? [];
+    records.push(message);
+    sessions.set(message.collaborationSessionId, records);
+  }
+
+  for (const records of sessions.values()) {
+    let requiredNext: "stalemate" | "peer_acceptance" | null = null;
+    records.forEach((record, index) => {
+      if (record.collaborationSequence !== index) {
+        addIssue(issues, "collaboration_sequence_invalid", "fail", "/evidence");
+      }
+      const priorIntent = records[index - 1]?.collaborationIntent;
+      const priorPriorIntent = records[index - 2]?.collaborationIntent;
+      if (requiredNext !== null && record.collaborationIntent !== requiredNext) {
+        addIssue(issues, "collaboration_transition_invalid", "fail", "/evidence");
+      }
+      if (record.collaborationIntent === "stalemate" && priorIntent !== "blocked") {
+        addIssue(issues, "collaboration_transition_invalid", "fail", "/evidence");
+      }
+      if (record.collaborationIntent === "peer_acceptance"
+        && (priorIntent === "blocked" || priorIntent === "stalemate")
+        && !(priorPriorIntent === "blocked" && priorIntent === "stalemate")) {
+        addIssue(issues, "collaboration_transition_invalid", "fail", "/evidence");
+      }
+      if (record.collaborationIntent === "blocked") {
+        requiredNext = "stalemate";
+      } else if (record.collaborationIntent === "stalemate" && priorIntent === "blocked") {
+        requiredNext = "peer_acceptance";
+      } else if (record.collaborationIntent === "peer_acceptance" && priorIntent === "stalemate") {
+        requiredNext = null;
+      }
     });
   }
-  if (!isRecord(value)) return false;
-  return Object.entries(value).some(([key, nested]) => {
-    const directFamilies = authorityFamiliesForKey(key);
-    if (isRecord(nested) || Array.isArray(nested)) {
-      const nestedFamilies = directFamilies.length > 0 ? directFamilies : inheritedFamilies;
-      const nestedArrayHasAuthority =
-        directFamilies.length > 0 ||
-        (inheritedFamilies.length > 0 && isAuthorityStateKey(key));
-      return containsInferredAuthorityStatus(nested, nestedFamilies, nestedArrayHasAuthority);
-    }
-    const scalarFamilies = directFamilies.length > 0
-      ? directFamilies
-      : isAuthorityStateKey(key)
-        ? inheritedFamilies
-        : [];
-    return scalarFamilies.some((family) => !isNeutralAuthorityStatus(family, nested));
-  });
 }
 
-function hasExactPin(value: unknown): value is typeof APPROVED_UPSTREAM_PIN {
-  return (
-    isRecord(value) &&
-    value.repository === APPROVED_UPSTREAM_PIN.repository &&
-    value.commit === APPROVED_UPSTREAM_PIN.commit &&
-    value.tag === APPROVED_UPSTREAM_PIN.tag &&
-    value.version === APPROVED_UPSTREAM_PIN.version &&
-    value.licenseSha256 === APPROVED_UPSTREAM_PIN.licenseSha256
-  );
+function promotionSourceSignature(promotion: BeadsPromotion) {
+  return promotion.promotionSource.kind === "agentchattr_message"
+    ? "agentchattr_message"
+    : JSON.stringify([
+      "runtime_control",
+      promotion.promotionSource.correlationId,
+      [...promotion.promotionSource.actionIds].sort(),
+    ]);
+}
+
+function promotionCoreSignature(promotion: BeadsPromotion) {
+  return JSON.stringify([
+    promotion.beadId,
+    promotion.scottyDecisionId,
+    promotion.artifactType,
+    promotion.selectedValueChecksum,
+    promotion.agentChattrIdempotencyKey,
+    promotionSourceSignature(promotion),
+  ]);
+}
+
+function validatePromotions(promotions: BeadsPromotion[], issues: ContractIssue[]) {
+  const byKey = new Map<string, BeadsPromotion[]>();
+  for (const promotion of promotions) {
+    const records = byKey.get(promotion.agentChattrIdempotencyKey) ?? [];
+    records.push(promotion);
+    byKey.set(promotion.agentChattrIdempotencyKey, records);
+  }
+
+  for (const records of byKey.values()) {
+    if (new Set(records.map(promotionCoreSignature)).size > 1) {
+      addIssue(issues, "promotion_reconciliation_conflict", "fail", "/evidence");
+    }
+    const artifacts = records.flatMap((record) => record.beadsArtifactId === null ? [] : [record.beadsArtifactId]);
+    if (new Set(artifacts).size > 1) {
+      addIssue(issues, "promotion_retry_divergence", "fail", "/evidence");
+    }
+    const durable = records.filter((record) => record.state === "durable");
+    const durableSignatures = durable.map((record) => JSON.stringify([
+      record.beadsArtifactId,
+      record.acknowledgedAt,
+      record.verifiedAt,
+    ]));
+    if (new Set(durableSignatures).size > 1) {
+      addIssue(issues, "promotion_reconciliation_conflict", "fail", "/evidence");
+    }
+  }
+}
+
+function observationTargetKey(observation: RuntimeObservation) {
+  const payload = observation.observation;
+  switch (payload.observationKind) {
+    case "agent_snapshot":
+      return JSON.stringify([payload.observationKind, payload.workspaceId, payload.tabId, payload.paneId, payload.terminalId]);
+    case "lifecycle_event":
+      return JSON.stringify([payload.observationKind, runtimeTargetSignature(payload.target)]);
+    case "trace_summary":
+      return JSON.stringify([payload.observationKind, payload.agentSessionId]);
+  }
+}
+
+function observationValueSignature(observation: RuntimeObservation) {
+  const payload = observation.observation;
+  switch (payload.observationKind) {
+    case "agent_snapshot":
+      return JSON.stringify([
+        payload.agentSessionId,
+        payload.runtimeState,
+        payload.modelMetadata,
+        payload.project,
+      ]);
+    case "lifecycle_event":
+      return JSON.stringify([payload.event, payload.nativeSequence ?? null, payload.eventAt]);
+    case "trace_summary":
+      return JSON.stringify([
+        payload.messageCount,
+        payload.toolCallCount,
+        payload.tokenCount,
+        payload.tokenCountQuality,
+        payload.summaryArtifactHash,
+      ]);
+  }
+}
+
+function intervalsOverlap(left: RuntimeObservation, right: RuntimeObservation) {
+  return compareTimestamps(left.startedAt, right.observedAt) <= 0
+    && compareTimestamps(right.startedAt, left.observedAt) <= 0;
+}
+
+function validateRuntimeObservations(observations: RuntimeObservation[], issues: ContractIssue[]) {
+  const groups = new Map<string, RuntimeObservation[]>();
+  for (const observation of observations) {
+    const records = groups.get(observationTargetKey(observation)) ?? [];
+    records.push(observation);
+    groups.set(observationTargetKey(observation), records);
+  }
+
+  for (const records of groups.values()) {
+    const direct = records.filter((record) => record.adapter === "direct_herdr");
+    const telemetry = records.filter((record) => record.adapter === "herdr_telemetry_bridge");
+    const disagrees = direct.some((left) => telemetry.some((right) => left.freshness !== "stale"
+      && left.freshness !== "unknown"
+      && right.freshness !== "stale"
+      && right.freshness !== "unknown"
+      && intervalsOverlap(left, right)
+      && observationValueSignature(left) !== observationValueSignature(right)));
+    if (disagrees) {
+      addIssue(issues, "runtime_observation_disagreement", "unknown", "/evidence");
+    }
+  }
+}
+
+function validateLoopTransitions(transitions: LoopGuardTransition[], issues: ContractIssue[]) {
+  const stateByChannel = new Map<string, LoopGuardTransition["fromState"]>();
+  const byChannel = new Map<string, LoopGuardTransition[]>();
+  for (const transition of transitions) {
+    const expected = stateByChannel.get(transition.channelId) ?? "active(0)";
+    if (transition.fromState !== expected) {
+      addIssue(issues, "loop_sequence_invalid", "fail", "/evidence");
+    }
+    stateByChannel.set(transition.channelId, transition.toState);
+    const channelTransitions = byChannel.get(transition.channelId) ?? [];
+    channelTransitions.push(transition);
+    byChannel.set(transition.channelId, channelTransitions);
+  }
+  for (const channelTransitions of byChannel.values()) {
+    const hasSixth = channelTransitions.some((transition) => transition.origin === "agent"
+      && transition.fromState === "active(5)"
+      && transition.toState === "paused(6)"
+      && transition.mcpInvoked
+      && transition.stableMessageUid !== null);
+    const hasSeventhRejection = channelTransitions.some((transition) => transition.origin === "agent"
+      && transition.fromState === "paused(6)"
+      && transition.toState === "paused(6)"
+      && !transition.mcpInvoked
+      && transition.stableMessageUid === null);
+    const hasHumanReset = channelTransitions.some((transition) => transition.origin === "human"
+      && transition.fromState === "paused(6)"
+      && transition.toState === "active(0)"
+      && transition.authenticatedHumanProofHash !== null);
+    if (!hasSixth || !hasSeventhRejection || !hasHumanReset) {
+      addIssue(issues, "loop_evidence_incomplete", "unknown", "/evidence");
+    }
+  }
+}
+
+function desktopSignature(record: DesktopCapability) {
+  return JSON.stringify([
+    record.clientVersion,
+    record.readClassification,
+    record.sendClassification,
+    record.authenticationEvidenceHash,
+    record.storedMessageUid,
+    record.storedMessageEvidenceHash,
+  ]);
+}
+
+function validateDesktop(records: DesktopCapability[], issues: ContractIssue[]) {
+  for (const client of ["claude_code_desktop", "codex_desktop"] as const) {
+    const clientRecords = records.filter((record) => record.client === client);
+    if (new Set(clientRecords.map(desktopSignature)).size > 1) {
+      addIssue(issues, "desktop_result_conflict", "fail", "/evidence");
+    }
+  }
+}
+
+function validateMonitorAndTeardown(manifest: EvidenceManifestV2, issues: ContractIssue[]) {
+  if (manifest.executionState === "not_run") return;
+
+  const configurations = recordsOf(manifest, "configuration_boundary");
+  const monitors = recordsOf(manifest, "monitor_interval");
+  const teardowns = recordsOf(manifest, "teardown");
+  const configuration = configurations[0];
+  const teardownRecord = teardowns[0];
+
+  if (configurations.length !== 1) {
+    addIssue(issues, "configuration_boundary_count_invalid", configurations.length === 0 ? "unknown" : "fail", "/evidence");
+  }
+  if (manifest.executionState === "completed" && teardowns.length !== 1) {
+    addIssue(issues, "teardown_count_invalid", "fail", "/evidence");
+  }
+
+  const expectedEndpointState = manifest.executionState === "running" ? "bound" : "stopped";
+  if (manifest.endpoint.state !== expectedEndpointState) {
+    addIssue(issues, "teardown_envelope_inconsistent", "fail", "/endpoint/state");
+  }
+  if (manifest.resourceAdmission.measurementState === "measured"
+    && manifest.resourceAdmission.admissionResult !== "admitted") {
+    addIssue(
+      issues,
+      "resource_admission_inconsistent",
+      manifest.resourceAdmission.admissionResult === "denied" ? "fail" : "unknown",
+      "/resourceAdmission/admissionResult",
+    );
+  }
+
+  const safetyStates = [
+    manifest.safety.launcher,
+    manifest.safety.wrapper,
+    manifest.safety.triggerQueueConsumer,
+    manifest.safety.terminalInjection,
+    manifest.safety.autoWake,
+    manifest.safety.jobsAuthority,
+    manifest.safety.persistentRules,
+  ];
+  if (safetyStates.some((state) => state !== "disabled")) {
+    addIssue(
+      issues,
+      "safety_boundary_inconsistent",
+      safetyStates.some((state) => state === "enabled") ? "fail" : "unknown",
+      "/safety",
+    );
+  }
+
+  if (configuration) {
+    const configurationStates = [
+      configuration.launcherState,
+      configuration.wrapperState,
+      configuration.triggerConsumerState,
+      configuration.terminalInjectionState,
+      configuration.autoWakeState,
+      configuration.jobsState,
+      configuration.persistentRulesState,
+    ];
+    if (configurationStates.some((state) => state !== "disabled")) {
+      addIssue(
+        issues,
+        "configuration_boundary_inconsistent",
+        configurationStates.some((state) => state === "enabled") ? "fail" : "unknown",
+        "/evidence",
+      );
+    }
+  }
+
+  for (const monitorKind of [
+    "process",
+    "child_process",
+    "trigger_queue",
+    "herdr_pane",
+    "input_control",
+    "runtime_manager_inventory",
+  ] as const) {
+    const candidates = monitors.filter((monitor) => monitor.monitorKind === monitorKind);
+    if (candidates.length === 0) {
+      addIssue(issues, "monitor_coverage_missing", "unknown", "/evidence");
+      continue;
+    }
+    if (configuration && teardownRecord && !candidates.some((monitor) => compareTimestamps(monitor.startedAt, configuration.startedAt) <= 0
+      && compareTimestamps(monitor.observedAt, teardownRecord.observedAt) >= 0)) {
+      addIssue(issues, "monitor_coverage_gap", "fail", "/evidence");
+    }
+  }
+
+  for (const monitor of monitors) {
+    if (monitor.gapState !== "no_gap" || monitor.finalCaptureState !== "captured") {
+      addIssue(
+        issues,
+        "monitor_capture_incomplete",
+        monitor.gapState === "gap_detected" || monitor.finalCaptureState === "missing" ? "fail" : "unknown",
+        "/evidence",
+      );
+    }
+  }
+
+  if (teardownRecord) {
+    const inventory = monitors.filter((monitor) => monitor.monitorKind === "runtime_manager_inventory");
+    const inventoryMatches = inventory.some((monitor) => monitor.baselineEvidenceHash
+      === teardownRecord.baselineInventoryRestoration.baselineEvidenceHash
+      && monitor.finalEvidenceHash === teardownRecord.baselineInventoryRestoration.finalEvidenceHash);
+    const finalCaptureMatches = monitors.some((monitor) => monitor.finalEvidenceHash
+      === teardownRecord.finalMonitorCapture.evidenceHash);
+    if (!inventoryMatches || !finalCaptureMatches) {
+      addIssue(issues, "teardown_monitor_mismatch", "fail", "/evidence");
+    }
+  }
+}
+
+function runtimeTargetSignature(target: RuntimeControlTarget | HerdrTarget) {
+  switch (target.targetKind) {
+    case "workspace":
+      return JSON.stringify({ targetKind: target.targetKind, workspaceId: target.workspaceId });
+    case "agent_session":
+      return JSON.stringify({ targetKind: target.targetKind, agentSessionId: target.agentSessionId });
+    case "pane":
+      return JSON.stringify({
+        targetKind: target.targetKind,
+        workspaceId: target.workspaceId,
+        tabId: target.tabId,
+        paneId: target.paneId,
+      });
+    case "tab":
+      return JSON.stringify({ targetKind: target.targetKind, workspaceId: target.workspaceId, tabId: target.tabId });
+    case "terminal":
+      return JSON.stringify({
+        targetKind: target.targetKind,
+        workspaceId: target.workspaceId,
+        tabId: target.tabId,
+        paneId: target.paneId,
+        terminalId: target.terminalId,
+      });
+    case "runtime_manager_project":
+      return JSON.stringify({ targetKind: target.targetKind, projectId: target.projectId });
+  }
+}
+
+function runtimeTargetHash(target: RuntimeControlTarget) {
+  return `sha256:${createHash("sha256").update(runtimeTargetSignature(target)).digest("hex")}`;
+}
+
+function runtimeScopeSignature(scope: Extract<RuntimeControlAction["event"], { phase: "authorization" }>["scope"]) {
+  return JSON.stringify([scope.action, runtimeTargetSignature(scope.target), scope.parameterHash]);
+}
+
+function runtimeRequestSignature(record: RuntimeControlAction) {
+  if (record.event.phase !== "request") return "";
+  return JSON.stringify([
+    record.runtimeProvider,
+    record.actionId,
+    record.event.action,
+    runtimeTargetSignature(record.event.target),
+    record.event.parameterHash,
+    record.event.effectClass,
+    record.event.durablePromotion,
+    record.idempotencyKey,
+  ]);
+}
+
+function validateRuntimeActionGroup(
+  records: RuntimeControlAction[],
+  caseIndex: ReadonlyMap<string, EvidenceRecord>,
+  issues: ContractIssue[],
+) {
+  const requests = records.filter((record) => record.event.phase === "request");
+  if (requests.length === 0) {
+    addIssue(issues, "runtime_request_missing", "fail", "/evidence");
+    return;
+  }
+  if (requests.length !== 1) {
+    addIssue(issues, "runtime_request_count_invalid", "fail", "/evidence");
+    if (new Set(requests.map(runtimeRequestSignature)).size > 1) {
+      addIssue(issues, "runtime_request_tuple_changed", "fail", "/evidence");
+    }
+  }
+  const requestRecord = requests[0];
+  if (requestRecord.sequence !== 0) {
+    addIssue(issues, "runtime_sequence_invalid", "fail", "/evidence");
+  }
+
+  const identities = new Set(records.map((record) => JSON.stringify([
+    record.runtimeProvider,
+    record.correlationId,
+    record.idempotencyKey,
+  ])));
+  if (identities.size > 1) {
+    addIssue(issues, "runtime_action_identity_changed", "fail", "/evidence");
+  }
+  for (let index = 1; index < records.length; index += 1) {
+    if (records[index].sequence <= records[index - 1].sequence
+      || compareTimestamps(records[index].observedAt, records[index - 1].observedAt) < 0) {
+      addIssue(issues, "runtime_sequence_invalid", "fail", "/evidence");
+    }
+  }
+
+  if (requestRecord.event.phase !== "request") return;
+  const request = requestRecord.event;
+  const laterAuthorityOrExecution = records.some((record) => record.sequence > requestRecord.sequence
+    && (record.event.phase === "authorization" || record.event.phase === "execution"));
+  if (request.requestState !== "recorded" && laterAuthorityOrExecution) {
+    addIssue(issues, "runtime_request_terminal", "fail", "/evidence");
+  }
+
+  const executions = records.filter((record): record is RuntimeControlAction & {
+    event: Extract<RuntimeControlAction["event"], { phase: "execution" }>;
+  } => record.event.phase === "execution");
+  const executionByAttempt = new Map(executions.map((record) => [record.event.attemptId, record]));
+
+  for (const record of records) {
+    if (record.event.phase !== "verification"
+      && record.event.phase !== "acknowledgement"
+      && record.event.phase !== "reconciliation") continue;
+    const execution = executionByAttempt.get(record.event.attemptId);
+    if (!execution || execution.sequence >= record.sequence) {
+      addIssue(issues, "runtime_attempt_reference_missing", "fail", "/evidence");
+    }
+    if (record.event.phase === "verification"
+      && record.event.evidenceReference.kind === "runtime_observation"
+      && caseIndex.get(record.event.evidenceReference.caseId)?.kind !== "runtime_observation") {
+      addIssue(issues, "runtime_verification_evidence_missing", "unknown", "/evidence");
+    }
+  }
+
+  let previousAttemptNumber = 0;
+  const seenAttemptIds = new Set<string>();
+  for (const execution of executions) {
+    if (seenAttemptIds.has(execution.event.attemptId)) {
+      addIssue(issues, "runtime_attempt_id_duplicate", "fail", "/evidence");
+    }
+    if (execution.event.attemptNumber <= previousAttemptNumber) {
+      addIssue(issues, "runtime_attempt_order_invalid", "fail", "/evidence");
+    }
+    seenAttemptIds.add(execution.event.attemptId);
+    previousAttemptNumber = execution.event.attemptNumber;
+
+    const recordIndex = records.indexOf(execution);
+    const previousExecution = executions[executions.indexOf(execution) - 1];
+    const authorizations = records.slice(0, recordIndex).filter((record): record is RuntimeControlAction & {
+      event: Extract<RuntimeControlAction["event"], { phase: "authorization" }>;
+    } => record.event.phase === "authorization");
+    const authorization = authorizations.at(-1);
+    const expectedScope = JSON.stringify([
+      request.action,
+      runtimeTargetSignature(request.target),
+      request.parameterHash,
+    ]);
+    const authorizationIsCurrent = authorization !== undefined
+      && authorization.event.decision === "authorized"
+      && runtimeScopeSignature(authorization.event.scope) === expectedScope
+      && compareTimestamps(authorization.event.validFrom, execution.observedAt) <= 0
+      && compareTimestamps(execution.observedAt, authorization.event.validUntil) <= 0
+      && (previousExecution === undefined || authorization.sequence > previousExecution.sequence);
+    if (!authorizationIsCurrent) {
+      addIssue(issues, "runtime_execution_unauthorized", "fail", "/evidence");
+    }
+
+    if (request.humanIntent.state === "denied") {
+      addIssue(issues, "runtime_human_intent_conflict", "fail", "/evidence");
+      addIssue(issues, "runtime_execution_unauthorized", "fail", "/evidence");
+    } else if (request.humanIntent.state === "none") {
+      addIssue(issues, "runtime_human_intent_unproven", "unknown", "/evidence");
+      addIssue(issues, "runtime_execution_unauthorized", "fail", "/evidence");
+    } else {
+      if (authorization?.event.authorizingActorId !== request.humanIntent.assignedActorId) {
+        addIssue(issues, "runtime_human_intent_conflict", "fail", "/evidence");
+        addIssue(issues, "runtime_execution_unauthorized", "fail", "/evidence");
+      }
+      if (runtimeTargetHash(request.target) !== request.humanIntent.targetHash) {
+        addIssue(issues, "runtime_human_target_mismatch", "fail", "/evidence");
+        addIssue(issues, "runtime_execution_unauthorized", "fail", "/evidence");
+      }
+    }
+  }
+
+  validateRuntimeRetries(records, request, executions, issues);
+}
+
+function validateRuntimeRetries(
+  records: RuntimeControlAction[],
+  request: Extract<RuntimeControlAction["event"], { phase: "request" }>,
+  executions: Array<RuntimeControlAction & {
+    event: Extract<RuntimeControlAction["event"], { phase: "execution" }>;
+  }>,
+  issues: ContractIssue[],
+) {
+  for (let index = 1; index < executions.length; index += 1) {
+    const previous = executions[index - 1];
+    const current = executions[index];
+    const maxAttempts = request.retryPolicy.mode === "bounded" ? request.retryPolicy.maxAttempts : 1;
+    if (current.event.attemptNumber > maxAttempts) {
+      addIssue(issues, "runtime_retry_policy_exceeded", "fail", "/evidence");
+    }
+    if (request.effectClass === "read_only") continue;
+
+    const between = records.filter((record) => record.sequence > previous.sequence
+      && record.sequence < current.sequence);
+    const verifications = between.filter((record) => record.event.phase === "verification"
+      && record.event.attemptId === previous.event.attemptId);
+    const acknowledgements = between.filter((record) => record.event.phase === "acknowledgement"
+      && record.event.attemptId === previous.event.attemptId);
+    const reconciliations = between.filter((record) => record.event.phase === "reconciliation"
+      && record.event.attemptId === previous.event.attemptId);
+    const hardDuplicateRisk = previous.event.state === "succeeded"
+      || previous.event.state === "started"
+      || verifications.some((record) => record.event.phase === "verification" && record.event.state === "verified_applied")
+      || acknowledgements.some((record) => record.event.phase === "acknowledgement"
+        && (record.event.state === "acknowledged" || record.event.state === "pending" || record.event.state === "unknown"));
+    if (hardDuplicateRisk) {
+      addIssue(issues, "runtime_duplicate_execution_risk", "fail", "/evidence");
+      continue;
+    }
+
+    const reconciliation = reconciliations.find((record) => record.event.phase === "reconciliation"
+      && record.event.observedDisposition === "not_applied"
+      && record.event.retryDecision === "retry_authorized");
+    const uncertainUnsupported = previous.event.state === "unknown"
+      && previous.event.providerIdempotencyState !== "supported";
+    if (uncertainUnsupported && (reconciliation?.event.phase !== "reconciliation"
+      || reconciliation.event.decidingSource !== "human")) {
+      addIssue(issues, "runtime_human_reconciliation_required", "fail", "/evidence");
+      continue;
+    }
+    if (reconciliation) continue;
+
+    const reviewedProviderIdempotency = request.reviewedProviderIdempotencyArtifactHash !== undefined
+      && previous.event.providerIdempotencyState === "supported";
+    if (reviewedProviderIdempotency) continue;
+
+    addIssue(issues, "runtime_reconciliation_required", "fail", "/evidence");
+  }
+}
+
+function validateRuntimeControl(
+  manifest: EvidenceManifestV2,
+  actions: RuntimeControlAction[],
+  promotions: BeadsPromotion[],
+  issues: ContractIssue[],
+) {
+  const caseIndex = new Map(manifest.evidence.map((record) => [record.caseId, record]));
+  const eventIds = new Set<string>();
+  const authorizationIds = new Set<string>();
+  const attemptIds = new Set<string>();
+  const byAction = new Map<string, RuntimeControlAction[]>();
+
+  for (const action of actions) {
+    if (eventIds.has(action.eventId)) {
+      addIssue(issues, "runtime_event_id_duplicate", "fail", "/evidence");
+    }
+    eventIds.add(action.eventId);
+    if (action.event.phase === "authorization") {
+      if (authorizationIds.has(action.event.authorizationId)) {
+        addIssue(issues, "runtime_authorization_id_duplicate", "fail", "/evidence");
+      }
+      authorizationIds.add(action.event.authorizationId);
+    }
+    if (action.event.phase === "execution") {
+      if (attemptIds.has(action.event.attemptId)) {
+        addIssue(issues, "runtime_attempt_id_duplicate", "fail", "/evidence");
+      }
+      attemptIds.add(action.event.attemptId);
+    }
+    const records = byAction.get(action.actionId) ?? [];
+    records.push(action);
+    byAction.set(action.actionId, records);
+  }
+
+  for (const records of byAction.values()) {
+    validateRuntimeActionGroup(records, caseIndex, issues);
+  }
+  validateRuntimePromotions(actions, promotions, issues);
+}
+
+function validateRuntimePromotions(
+  actions: RuntimeControlAction[],
+  promotions: BeadsPromotion[],
+  issues: ContractIssue[],
+) {
+  const requiredByCorrelation = new Map<string, string[]>();
+  for (const action of actions) {
+    if (action.event.phase !== "request" || action.event.durablePromotion !== "required") continue;
+    const ids = requiredByCorrelation.get(action.correlationId) ?? [];
+    ids.push(action.actionId);
+    requiredByCorrelation.set(action.correlationId, ids);
+  }
+  const actionsById = new Map(actions.map((action) => [action.actionId, action]));
+  const runtimePromotions = promotions.filter((promotion) => promotion.promotionSource.kind === "runtime_control");
+
+  for (const promotion of runtimePromotions) {
+    const source = promotion.promotionSource;
+    if (source.kind !== "runtime_control") continue;
+    const sourceActions = source.actionIds.map((actionId) => actionsById.get(actionId));
+    if (sourceActions.some((action) => action === undefined
+      || action.correlationId !== source.correlationId)) {
+      addIssue(issues, "runtime_durable_promotion_mismatch", "fail", "/evidence");
+    }
+  }
+
+  for (const [correlationId, requiredActionIds] of requiredByCorrelation) {
+    const candidates = runtimePromotions.filter((promotion) => promotion.state === "durable"
+      && promotion.promotionSource.kind === "runtime_control"
+      && promotion.promotionSource.correlationId === correlationId);
+    if (candidates.length === 0) {
+      addIssue(issues, "runtime_durable_promotion_missing", "unknown", "/evidence");
+      continue;
+    }
+    if (!candidates.some((promotion) => promotion.promotionSource.kind === "runtime_control"
+      && sameStringSet(promotion.promotionSource.actionIds, requiredActionIds))) {
+      addIssue(issues, "runtime_durable_promotion_mismatch", "fail", "/evidence");
+    }
+  }
+}
+
+function validateCrossRecordInvariants(manifest: EvidenceManifestV2): ContractIssue[] {
+  const issues: ContractIssue[] = [];
+  validateCaseIds(manifest, issues);
+  const messages = recordsOf(manifest, "message_observation");
+  const bindings = recordsOf(manifest, "identity_binding");
+  const promotions = recordsOf(manifest, "beads_promotion");
+  validateMessages(manifest, messages, issues);
+  validateIdentityAttribution(manifest, messages, bindings, issues);
+  validateCollaborationSequences(messages, issues);
+  validatePromotions(promotions, issues);
+  validateRuntimeObservations(recordsOf(manifest, "runtime_observation"), issues);
+  validateLoopTransitions(recordsOf(manifest, "loop_guard_transition"), issues);
+  validateDesktop(recordsOf(manifest, "desktop_capability"), issues);
+  validateMonitorAndTeardown(manifest, issues);
+  validateRuntimeControl(manifest, recordsOf(manifest, "runtime_control_action"), promotions, issues);
+  return issues;
 }
 
 export function validateEvidenceManifest(value: unknown): ContractResult {
-  const issues: ContractIssue[] = [];
-  if (!isRecord(value)) {
-    return result([{ code: "invalid_manifest", classification: "fail" }]);
+  const parsed = parseEvidenceManifestV2(value);
+  if (!parsed.ok) {
+    return aggregateIssues(parsed.issues);
   }
-
-  const upstream = value.upstream;
-  if (!isRecord(upstream) || !string(upstream.commit)) {
-    issues.push({ code: "missing_upstream_pin", classification: "fail" });
-  } else if (!hasExactPin(upstream)) {
-    issues.push({ code: "changed_upstream_pin", classification: "fail" });
-  }
-
-  const endpoint = value.endpoint;
-  if (!isRecord(endpoint) || endpoint.host !== "127.0.0.1") {
-    issues.push({ code: "non_loopback_endpoint", classification: "fail" });
-  }
-  if (!isRecord(endpoint) || !Number.isInteger(endpoint.port) || (endpoint.port as number) < 1 || (endpoint.port as number) > 65535) {
-    issues.push({ code: "invalid_endpoint_port", classification: "unknown" });
-  }
-
-  const admission = value.resourceAdmission;
-  if (!isRecord(admission) || !string(admission.runtimeManagerCorrelationToken)) {
-    issues.push({ code: "missing_admission_correlation", classification: "unknown" });
-  }
-  if (!isRecord(admission) || admission.admitted !== true) {
-    issues.push({ code: "admission_not_confirmed", classification: "unknown" });
-  }
-  if (!isRecord(admission) || typeof admission.availablePhysicalMemoryGiB !== "number" || admission.availablePhysicalMemoryGiB < 4) {
-    issues.push({ code: "insufficient_available_memory", classification: "fail" });
-  }
-  if (!isRecord(admission) || typeof admission.aggregateWorkingSetPercent !== "number" || admission.aggregateWorkingSetPercent > 70) {
-    issues.push({ code: "working_set_limit_exceeded", classification: "fail" });
-  }
-  if (!isRecord(admission) || admission.otherResourceHeavyJobActive !== false) {
-    issues.push({ code: "resource_heavy_job_active", classification: "fail" });
-  }
-
-  const safety = value.safety;
-  const requiredSafety = [
-    "wrappersDisabled",
-    "triggerQueueConsumerDisabled",
-    "terminalInjectionDisabled",
-    "autoWakeDisabled",
-    "jobsIgnored",
-    "persistentRulesUnused",
-  ];
-  if (!isRecord(safety) || safety.lifecycleOwner !== "runtime-manager" || requiredSafety.some((key) => safety?.[key] !== true)) {
-    issues.push({ code: "unsafe_service_boundary", classification: "fail" });
-  }
-
-  if (!Array.isArray(value.evidence) || value.evidence.length === 0) {
-    issues.push({ code: "missing_evidence_records", classification: "unknown" });
-  } else {
-    for (const evidence of value.evidence) {
-      if (!isRecord(evidence)) {
-        issues.push({ code: "invalid_evidence_record", classification: "fail" });
-        continue;
-      }
-      const requiredFields = [
-        "caseId",
-        "upstreamPin",
-        "hostVersion",
-        "toolVersions",
-        "sourceArtifactHashes",
-        "resultArtifactHashes",
-        "expectedResult",
-        "observedResult",
-        "classification",
-        "provenance",
-        "startedAtUtc",
-        "endedAtUtc",
-        "processRecords",
-        "teardownState",
-      ];
-      if (requiredFields.some((field) => evidence[field] === undefined)) {
-        issues.push({ code: "incomplete_evidence_record", classification: "unknown" });
-      }
-      if (evidence.upstreamPin !== APPROVED_UPSTREAM_PIN.commit) {
-        issues.push({ code: "evidence_pin_mismatch", classification: "fail" });
-      }
-      if (!hasUtcTimestamp(evidence.startedAtUtc) || !hasUtcTimestamp(evidence.endedAtUtc)) {
-        issues.push({ code: "invalid_evidence_timestamp", classification: "unknown" });
-      }
-      if (evidence.teardownState !== "confirmed") {
-        issues.push({ code: "teardown_not_confirmed", classification: "unknown" });
-      }
-      if (!EVIDENCE_CLASSIFICATIONS.includes(evidence.classification as (typeof EVIDENCE_CLASSIFICATIONS)[number])) {
-        issues.push({ code: "invalid_evidence_classification", classification: "fail" });
-      }
-      if (containsInferredAuthorityStatus(evidence)) {
-        issues.push({ code: "inferred_authority_status", classification: "fail" });
-      }
-      if (!Array.isArray(evidence.processRecords) || evidence.processRecords.some((record) => !isRecord(record) || !Number.isInteger(record.pid) || !string(record.executable) || /[\\/]/.test(record.executable) || !hasUtcTimestamp(record.startedAtUtc))) {
-        issues.push({ code: "invalid_sanitized_process_record", classification: "fail" });
-      }
-      if (hasRawCommandEvidence(evidence)) {
-        issues.push({ code: "raw_command_line", classification: "fail" });
-      }
-      if (containsRawSensitiveEvidence(evidence)) {
-        issues.push({ code: "raw_sensitive_evidence", classification: "fail" });
-      }
-    }
-  }
-
-  return result(issues);
-}
-
-export function validateMessageContract(value: unknown): ContractResult {
-  const issues: ContractIssue[] = [];
-  if (!isRecord(value)) {
-    return result([{ code: "invalid_message_contract", classification: "fail" }]);
-  }
-
-  const required = [
-    "providerInstanceId",
-    "channelId",
-    "stableMessageUid",
-    "senderExternalId",
-    "contentChecksum",
-  ];
-  if (required.some((field) => !string(value[field]))) {
-    issues.push({ code: "missing_message_identity", classification: "fail" });
-  }
-  if (!Number.isInteger(value.cursorId)) {
-    issues.push({ code: "invalid_cursor_id", classification: "fail" });
-  }
-  if (typeof value.stableMessageUid !== "string" || value.stableMessageUid === String(value.cursorId) || value.durableKey === `cursor:${value.cursorId}`) {
-    issues.push({ code: "cursor_used_as_uid", classification: "fail" });
-  }
-  if (value.parentUid !== null && !string(value.parentUid)) {
-    issues.push({ code: "invalid_parent_uid", classification: "fail" });
-  }
-  if (value.threadId !== null && !string(value.threadId)) {
-    issues.push({ code: "invalid_thread_id", classification: "fail" });
-  }
-  if (!DELIVERY_VOCABULARY.includes(value.delivery as (typeof DELIVERY_VOCABULARY)[number])) {
-    issues.push({ code: "unknown_delivery_vocabulary", classification: "unsupported" });
-  } else if (["accepted", "queued", "delivered", "read"].includes(value.delivery as string) && !string(value.directUpstreamEvidence)) {
-    issues.push({ code: "unobserved_delivery_state", classification: "unknown" });
-  }
-  if (value.workState !== "not_started" || value.leaseState !== "none") {
-    issues.push({ code: "message_implies_work_or_lease", classification: "fail" });
-  }
-  return result(issues);
+  const issues = validateCrossRecordInvariants(parsed.manifest);
+  return aggregateManifestClassification(parsed.manifest, issues);
 }
 
 export type LoopGuardState = {
@@ -501,7 +920,7 @@ export type AutonomousSendDecision = {
 };
 
 export function createLoopGuardState(channelId: string): LoopGuardState {
-  if (!string(channelId)) throw new Error("A loop guard requires a channel ID.");
+  if (!isNonemptyString(channelId)) throw new Error("A loop guard requires a channel ID.");
   return { channelId, phase: "active", autonomousCount: 0 };
 }
 
@@ -515,7 +934,6 @@ export function requestAutonomousSend(state: LoopGuardState): AutonomousSendDeci
       state: { ...state, phase: "paused", autonomousCount: 6 },
     };
   }
-
   const autonomousCount = state.autonomousCount + 1;
   return {
     allowed: true,
@@ -534,229 +952,17 @@ export function recordAuthenticatedHumanOrigin(
   state: LoopGuardState,
   evidence: unknown,
 ): { reset: boolean; state: LoopGuardState } {
-  if (
-    state.phase !== "paused" ||
-    !isRecord(evidence) ||
-    evidence.origin !== "human" ||
-    evidence.authenticated !== true ||
-    evidence.identityVerified !== true ||
-    evidence.channelId !== state.channelId ||
-    !string(evidence.providerInstanceId) ||
-    !string(evidence.stableMessageUid) ||
-    !hasUtcTimestamp(evidence.observedAtUtc) ||
-    !string(evidence.directUpstreamEvidence)
-  ) {
+  if (state.phase !== "paused"
+    || !isObject(evidence)
+    || evidence.origin !== "human"
+    || evidence.authenticated !== true
+    || evidence.identityVerified !== true
+    || evidence.channelId !== state.channelId
+    || !isNonemptyString(evidence.providerInstanceId)
+    || !isNonemptyString(evidence.stableMessageUid)
+    || !hasUtcTimestamp(evidence.observedAtUtc)
+    || !isNonemptyString(evidence.directUpstreamEvidence)) {
     return { reset: false, state };
   }
   return { reset: true, state: createLoopGuardState(state.channelId) };
-}
-
-export function validateMessagePages(pages: unknown): ContractResult {
-  const issues: ContractIssue[] = [];
-  if (!Array.isArray(pages)) {
-    return result([{ code: "invalid_message_pages", classification: "fail" }]);
-  }
-  const seen = new Set<string>();
-  for (const page of pages) {
-    if (!Array.isArray(page)) {
-      issues.push({ code: "invalid_message_page", classification: "fail" });
-      continue;
-    }
-    for (const message of page) {
-      const contract = validateMessageContract(message);
-      issues.push(...contract.issues);
-      if (isRecord(message) && string(message.stableMessageUid)) {
-        if (seen.has(message.stableMessageUid)) {
-          issues.push({ code: "duplicate_message_uid", classification: "fail" });
-        }
-        seen.add(message.stableMessageUid);
-      }
-    }
-  }
-  return result(issues);
-}
-
-const REQUIRED_BINDING_FIELDS = [
-  "bindingId",
-  "actorId",
-  "logicalSessionId",
-  "providerModel",
-  "executionSurface",
-  "role",
-  "runtimeSessionRef",
-  "upstreamInstanceId",
-  "upstreamSessionId",
-  "senderExternalId",
-  "displayName",
-  "beadsActorId",
-  "boundAtUtc",
-  "boundBy",
-] as const;
-
-function isCompleteVerifiedBinding(binding: UnknownRecord): boolean {
-  return (
-    binding.validity === "verified" &&
-    REQUIRED_BINDING_FIELDS.every((field) => string(binding[field])) &&
-    hasUtcTimestamp(binding.boundAtUtc) &&
-    (!String(binding.executionSurface).includes("herdr") || string(binding.herdrPaneRef))
-  );
-}
-
-function exactStringSet(value: unknown, expected: string[]): boolean {
-  if (!Array.isArray(value) || value.some((entry) => !string(entry))) return false;
-  const actual = [...new Set(value as string[])].sort();
-  return actual.length === expected.length && actual.every((entry, index) => entry === expected[index]);
-}
-
-export function validateIdentityFixture(value: unknown, attributedMessage?: unknown): ContractResult {
-  const issues: ContractIssue[] = [];
-  if (!isRecord(value) || !Array.isArray(value.bindings) || !Array.isArray(value.sessionBeadLinks)) {
-    return result([{ code: "invalid_identity_fixture", classification: "fail" }]);
-  }
-  const bindings = value.bindings.filter(isRecord);
-  if (bindings.length !== value.bindings.length) {
-    issues.push({ code: "invalid_identity_binding", classification: "fail" });
-  }
-  for (const binding of bindings) {
-    if (string(binding.displayName) && !string(binding.actorId) && !string(binding.senderExternalId) && !string(binding.upstreamInstanceId)) {
-      issues.push({ code: "display_name_only_binding", classification: "fail" });
-    }
-    if (binding.validity === "verified" && !isCompleteVerifiedBinding(binding)) {
-      issues.push({ code: "incomplete_verified_binding", classification: "fail" });
-    }
-  }
-
-  const verified = bindings.filter((binding) => binding.validity === "verified");
-  const actorSessions = new Map<string, Set<string>>();
-  const sessionRoles = new Map<string, Set<string>>();
-  for (const binding of verified) {
-    if (string(binding.actorId) && string(binding.logicalSessionId) && string(binding.executionSurface)) {
-      const values = actorSessions.get(binding.actorId) ?? new Set<string>();
-      values.add(`${binding.logicalSessionId}:${binding.executionSurface}`);
-      actorSessions.set(binding.actorId, values);
-    }
-    if (string(binding.logicalSessionId) && string(binding.role)) {
-      const values = sessionRoles.get(binding.logicalSessionId) ?? new Set<string>();
-      values.add(binding.role);
-      sessionRoles.set(binding.logicalSessionId, values);
-    }
-  }
-  const hasMultiSurfaceActor = [...actorSessions.values()].some((sessions) => sessions.size >= 2);
-  const hasMultiRoleSession = [...sessionRoles.values()].some((roles) => roles.size >= 2);
-  const beadActors = new Map<string, Set<string>>();
-  for (const link of value.sessionBeadLinks.filter(isRecord)) {
-    if (!string(link.logicalSessionId) || !string(link.beadId)) {
-      continue;
-    }
-    for (const binding of verified.filter((candidate) => candidate.logicalSessionId === link.logicalSessionId && string(candidate.actorId))) {
-      const actors = beadActors.get(link.beadId) ?? new Set<string>();
-      actors.add(binding.actorId as string);
-      beadActors.set(link.beadId, actors);
-    }
-  }
-  const hasMultiActorBead = [...beadActors.values()].some((actors) => actors.size >= 2);
-  if (!hasMultiSurfaceActor || !hasMultiRoleSession || !hasMultiActorBead) {
-    issues.push({ code: "identity_fixture_not_many_to_many", classification: "fail" });
-  }
-
-  if (isRecord(attributedMessage) && attributedMessage.attributed === true) {
-    const externalCandidate = bindings.find(
-      (binding) =>
-        binding.upstreamInstanceId === attributedMessage.providerInstanceId &&
-        binding.senderExternalId === attributedMessage.senderExternalId,
-    );
-    if (!externalCandidate || externalCandidate.validity !== "verified") {
-      issues.push({ code: "unverified_binding", classification: "unknown" });
-    }
-    const expectedBeads = value.sessionBeadLinks
-      .filter(isRecord)
-      .filter((link) => link.logicalSessionId === attributedMessage.logicalSessionId && string(link.beadId))
-      .map((link) => link.beadId as string)
-      .filter((beadId, index, all) => all.indexOf(beadId) === index)
-      .sort();
-    const exactCandidate = bindings.find(
-      (binding) =>
-        isCompleteVerifiedBinding(binding) &&
-        binding.upstreamInstanceId === attributedMessage.providerInstanceId &&
-        binding.upstreamSessionId === attributedMessage.upstreamSessionId &&
-        binding.senderExternalId === attributedMessage.senderExternalId &&
-        binding.actorId === attributedMessage.actorId &&
-        binding.logicalSessionId === attributedMessage.logicalSessionId &&
-        binding.providerModel === attributedMessage.providerModel &&
-        binding.executionSurface === attributedMessage.executionSurface &&
-        binding.role === attributedMessage.role &&
-        binding.runtimeSessionRef === attributedMessage.runtimeSessionRef &&
-        binding.beadsActorId === attributedMessage.beadsActorId,
-    );
-    if (!exactCandidate || !exactStringSet(attributedMessage.relatedBeadIds, expectedBeads)) {
-      issues.push({ code: "unbound_attributed_message", classification: "unknown" });
-    }
-  }
-  return result(issues);
-}
-
-function matchingPromotionEvidence(
-  promotion: UnknownRecord,
-  evidence: unknown,
-  timestampField: "acknowledgedAtUtc" | "verifiedAtUtc",
-): boolean {
-  return (
-    isRecord(evidence) &&
-    evidence.beadsArtifactId === promotion.beadsArtifactId &&
-    evidence.relatedBeadId === promotion.relatedBeadId &&
-    evidence.scottyDecisionId === promotion.scottyDecisionId &&
-    evidence.idempotencyKey === promotion.idempotencyKey &&
-    evidence.selectedValueChecksum === promotion.selectedValueChecksum &&
-    evidence[timestampField] === promotion[timestampField] &&
-    hasUtcTimestamp(evidence[timestampField])
-  );
-}
-
-export function validatePromotionResult(value: unknown): ContractResult {
-  const issues: ContractIssue[] = [];
-  if (!isRecord(value)) {
-    return result([{ code: "invalid_promotion_record", classification: "fail" }]);
-  }
-  const required = ["relatedBeadId", "scottyDecisionId", "artifactType", "selectedValueChecksum", "beadsArtifactId"];
-  if (required.some((field) => !string(value[field]))) {
-    issues.push({ code: "incomplete_promotion_record", classification: "fail" });
-  }
-  if (!string(value.idempotencyKey) || !/^agentchattr:[^:]+:[^:]+:[^:]+$/.test(value.idempotencyKey)) {
-    issues.push({ code: "invalid_promotion_idempotency_key", classification: "fail" });
-  }
-  if (value.result === "durable") {
-    const hasTopLevelTimestamps = hasUtcTimestamp(value.acknowledgedAtUtc) && hasUtcTimestamp(value.verifiedAtUtc);
-    if (!hasTopLevelTimestamps || !isRecord(value.acknowledgement) || !isRecord(value.reconciliation)) {
-      issues.push({ code: "promotion_pending", classification: "unknown" });
-    } else if (
-      !matchingPromotionEvidence(value, value.acknowledgement, "acknowledgedAtUtc") ||
-      !matchingPromotionEvidence(value, value.reconciliation, "verifiedAtUtc")
-    ) {
-      issues.push({ code: "reconciliation_conflict", classification: "fail" });
-    }
-  }
-  if (Array.isArray(value.attempts) && new Set(value.attempts.filter(string)).size > 1) {
-    issues.push({ code: "promotion_retry_created_second_artifact", classification: "fail" });
-  }
-  return result(issues);
-}
-
-export function validateDesktopResults(value: unknown): ContractResult {
-  const issues: ContractIssue[] = [];
-  if (!isRecord(value)) {
-    return result([{ code: "invalid_desktop_results", classification: "fail" }]);
-  }
-  const expectedClients = {
-    claudeCodeDesktop: "claude-code-desktop",
-    codexDesktop: "codex-desktop",
-  } as const;
-  for (const [field, client] of Object.entries(expectedClients)) {
-    const record = value[field];
-    if (!isRecord(record) || !string(record.status)) {
-      issues.push({ code: "missing_desktop_result", classification: "unsupported" });
-    } else if (record.observedBy !== client) {
-      issues.push({ code: "desktop_result_inferred", classification: "unknown" });
-    }
-  }
-  return result(issues);
 }
