@@ -390,6 +390,35 @@ export const hookCoverageSnapshotSchema: z.ZodType<HookCoverageSnapshot> = z.obj
   codexGlobalCoverage: z.literal("unknown"),
 });
 
+export interface GitHealthSnapshot {
+  repository: true;
+  branch: string | null;
+  detached: boolean;
+  head: string;
+  dirty: boolean;
+  changedPathCount: number;
+  baseRef: string | null;
+  ahead: number | null;
+  behind: number | null;
+  unmergedLocalBranchCount: number | null;
+}
+
+const gitHealthStringSchema = z.string().min(1).max(512);
+const gitHealthCountSchema = z.number().int().nonnegative().max(1_000_000);
+
+export const gitHealthSnapshotSchema: z.ZodType<GitHealthSnapshot> = z.object({
+  repository: z.literal(true),
+  branch: gitHealthStringSchema.nullable(),
+  detached: z.boolean(),
+  head: gitHealthStringSchema,
+  dirty: z.boolean(),
+  changedPathCount: gitHealthCountSchema,
+  baseRef: gitHealthStringSchema.nullable(),
+  ahead: gitHealthCountSchema.nullable(),
+  behind: gitHealthCountSchema.nullable(),
+  unmergedLocalBranchCount: gitHealthCountSchema.nullable(),
+});
+
 export function availableObservation<T>(
   source: SourceId,
   authority: string,

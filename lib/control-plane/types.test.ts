@@ -4,6 +4,7 @@ import {
   failedObservation,
   herdrSnapshotSchema,
   hookCoverageSnapshotSchema,
+  gitHealthSnapshotSchema,
   observationSchema,
   orchestraSnapshotSchema,
   runtimeManagerSnapshotSchema,
@@ -179,5 +180,24 @@ describe("control-plane observation contract", () => {
     expect(parsed).not.toHaveProperty("rawConfig");
     expect(parsed.references[0]).not.toHaveProperty("command");
     expect(parsed.references[0]).not.toHaveProperty("env");
+  });
+
+  it("validates only the client-safe Git health fields", () => {
+    const parsed = gitHealthSnapshotSchema.parse({
+      repository: true,
+      branch: "feature/health",
+      detached: false,
+      head: "abcdef123456",
+      dirty: true,
+      changedPathCount: 2,
+      baseRef: "origin/master",
+      ahead: 2,
+      behind: 1,
+      unmergedLocalBranchCount: 3,
+      commandLine: "must not cross the wire boundary",
+    });
+
+    expect(parsed).not.toHaveProperty("commandLine");
+    expect(parsed).toMatchObject({ branch: "feature/health", ahead: 2, behind: 1 });
   });
 });
