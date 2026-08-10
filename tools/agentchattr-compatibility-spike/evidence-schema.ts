@@ -802,6 +802,188 @@ export const runtimeControlActionSchema = withEvidenceBase("runtime_control_acti
   event: runtimeControlPhaseEventSchema,
 });
 
+export const evidenceRecordSchema = z.discriminatedUnion("kind", [
+  configurationBoundarySchema,
+  monitorIntervalSchema,
+  runtimeObservationSchema,
+  runtimeControlActionSchema,
+  mcpExchangeSchema,
+  messageObservationSchema,
+  identityBindingSchema,
+  loopGuardTransitionSchema,
+  beadsPromotionSchema,
+  desktopCapabilitySchema,
+  teardownSchema,
+]);
+
+export const approvedUpstreamPinSchema = z.strictObject({
+  repository: z.literal(APPROVED_UPSTREAM_PIN.repository),
+  commit: z.literal(APPROVED_UPSTREAM_PIN.commit),
+  tag: z.literal(APPROVED_UPSTREAM_PIN.tag),
+  version: z.literal(APPROVED_UPSTREAM_PIN.version),
+  licenseSha256: z.literal(APPROVED_UPSTREAM_PIN.licenseSha256),
+});
+
+export const endpointBoundarySchema = z.strictObject({
+  host: z.literal("127.0.0.1"),
+  port: z.int().min(1).max(65_535),
+  state: z.enum(["candidate_only_not_bound", "bound", "stopped"]),
+});
+
+const notRunResourceAdmissionSchema = z.strictObject({
+  measurementState: z.literal("not_run"),
+  availablePhysicalMemoryGiB: z.null(),
+  aggregateWorkingSetPercent: z.null(),
+  otherResourceHeavyJobActive: z.null(),
+  runtimeManagerCorrelationId: z.null(),
+  admissionResult: z.literal("not_run"),
+});
+
+const measuredResourceAdmissionSchema = z.strictObject({
+  measurementState: z.literal("measured"),
+  availablePhysicalMemoryGiB: z.number().nonnegative(),
+  aggregateWorkingSetPercent: z.number().min(0).max(100),
+  otherResourceHeavyJobActive: z.boolean(),
+  runtimeManagerCorrelationId: safeRefSchema.nullable(),
+  admissionResult: z.enum(["not_run", "admitted", "denied", "unknown"]),
+}).superRefine((admission, context) => {
+  if (admission.admissionResult !== "not_run" && admission.runtimeManagerCorrelationId === null) {
+    context.addIssue({
+      code: "custom",
+      message: "Measured admission results require a Runtime Manager correlation ID.",
+      path: ["runtimeManagerCorrelationId"],
+    });
+  }
+});
+
+export const resourceAdmissionSchema = z.discriminatedUnion("measurementState", [
+  notRunResourceAdmissionSchema,
+  measuredResourceAdmissionSchema,
+]);
+
+const prohibitedSafetyStateSchema = z.enum(["not_run", "disabled", "enabled", "unknown"]);
+const prohibitedSafetyFields = [
+  "launcher",
+  "wrapper",
+  "triggerQueueConsumer",
+  "terminalInjection",
+  "autoWake",
+  "jobsAuthority",
+  "persistentRules",
+] as const;
+
+export const safetyBoundarySchema = z.strictObject({
+  lifecycleOwner: z.literal("runtime-manager"),
+  launcher: prohibitedSafetyStateSchema,
+  wrapper: prohibitedSafetyStateSchema,
+  triggerQueueConsumer: prohibitedSafetyStateSchema,
+  terminalInjection: prohibitedSafetyStateSchema,
+  autoWake: prohibitedSafetyStateSchema,
+  jobsAuthority: prohibitedSafetyStateSchema,
+  persistentRules: prohibitedSafetyStateSchema,
+});
+
+export const evidenceManifestV2Schema = z.strictObject({
+  schemaVersion: z.literal(2),
+  spike: z.literal("agentchattr-compatibility"),
+  stage: z.literal("1.5"),
+  manifestId: safeRefSchema,
+  runId: safeRefSchema,
+  executionState: z.enum(["not_run", "running", "completed", "aborted"]),
+  upstream: approvedUpstreamPinSchema,
+  endpoint: endpointBoundarySchema,
+  resourceAdmission: resourceAdmissionSchema,
+  safety: safetyBoundarySchema,
+  evidence: z.array(evidenceRecordSchema),
+  extensions: safeExtensionsSchema.optional(),
+}).superRefine((manifest, context) => {
+  if (manifest.executionState === "not_run") {
+    if (manifest.endpoint.state !== "candidate_only_not_bound") {
+      context.addIssue({ code: "custom", message: "A not-run endpoint must remain unbound.", path: ["endpoint", "state"] });
+    }
+    if (manifest.resourceAdmission.measurementState !== "not_run") {
+      context.addIssue({ code: "custom", message: "A not-run manifest cannot contain measured admission.", path: ["resourceAdmission"] });
+    }
+    for (const field of prohibitedSafetyFields) {
+      if (manifest.safety[field] !== "not_run") {
+        context.addIssue({ code: "custom", message: "A not-run manifest cannot contain safety observations.", path: ["safety", field] });
+      }
+    }
+    if (manifest.evidence.length !== 0) {
+      context.addIssue({ code: "custom", message: "A not-run manifest must have no evidence.", path: ["evidence"] });
+    }
+    return;
+  }
+
+  if (manifest.resourceAdmission.measurementState !== "measured") {
+    context.addIssue({ code: "custom", message: "Execution requires measured resource admission.", path: ["resourceAdmission"] });
+  }
+  for (const field of prohibitedSafetyFields) {
+    if (manifest.safety[field] === "not_run") {
+      context.addIssue({ code: "custom", message: "Execution requires observed safety state.", path: ["safety", field] });
+    }
+  }
+  if (manifest.executionState === "completed" && !manifest.evidence.some((record) => record.kind === "teardown")) {
+    context.addIssue({ code: "custom", message: "Completed execution requires teardown evidence.", path: ["evidence"] });
+  }
+  if (manifest.executionState === "aborted"
+    && !manifest.evidence.some((record) => record.classification === "fail" || record.classification === "unknown")) {
+    context.addIssue({ code: "custom", message: "Aborted execution requires a failed or unknown stop condition.", path: ["evidence"] });
+  }
+});
+
+export type EvidenceRecord = z.infer<typeof evidenceRecordSchema>;
+export type ApprovedUpstreamPin = z.infer<typeof approvedUpstreamPinSchema>;
+export type EndpointBoundary = z.infer<typeof endpointBoundarySchema>;
+export type ResourceAdmission = z.infer<typeof resourceAdmissionSchema>;
+export type SafetyBoundary = z.infer<typeof safetyBoundarySchema>;
+export type EvidenceManifestV2 = z.infer<typeof evidenceManifestV2Schema>;
+
+export type StructuralIssue = {
+  code: "unknown_field" | "invalid_field" | "invalid_invariant" | "unsupported_schema_version";
+  classification: "fail";
+  path: string;
+};
+
+export type ManifestParseResult =
+  | { ok: true; manifest: EvidenceManifestV2 }
+  | { ok: false; issues: StructuralIssue[] };
+
+function jsonPointer(path: readonly PropertyKey[]) {
+  if (path.length === 0) {
+    return "";
+  }
+  return `/${path.map((segment) => String(segment).replaceAll("~", "~0").replaceAll("/", "~1")).join("/")}`;
+}
+
+export function parseEvidenceManifestV2(value: unknown): ManifestParseResult {
+  if (typeof value !== "object" || value === null || Array.isArray(value)
+    || (value as Record<string, unknown>).schemaVersion !== 2) {
+    return {
+      ok: false,
+      issues: [{ code: "unsupported_schema_version", classification: "fail", path: "/schemaVersion" }],
+    };
+  }
+
+  const result = evidenceManifestV2Schema.safeParse(value);
+  if (result.success) {
+    return { ok: true, manifest: result.data };
+  }
+
+  return {
+    ok: false,
+    issues: result.error.issues.map((issue) => ({
+      code: issue.code === "unrecognized_keys"
+        ? "unknown_field"
+        : issue.code === "custom"
+          ? "invalid_invariant"
+          : "invalid_field",
+      classification: "fail",
+      path: jsonPointer(issue.path),
+    })),
+  };
+}
+
 export type ConfigurationBoundary = z.infer<typeof configurationBoundarySchema>;
 export type MonitorInterval = z.infer<typeof monitorIntervalSchema>;
 export type Teardown = z.infer<typeof teardownSchema>;

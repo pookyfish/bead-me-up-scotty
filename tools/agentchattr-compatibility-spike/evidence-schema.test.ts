@@ -15,6 +15,7 @@ import {
   monitorIntervalSchema,
   messageFixtureSchema,
   messageObservationSchema,
+  parseEvidenceManifestV2 as parseManifestV2,
   readStateSchema,
   safeExtensionsSchema,
   safeRefSchema,
@@ -1140,6 +1141,276 @@ describe("operational boundaries and Herdr observations", () => {
     for (const proof of invalidProofs) {
       expect(teardownSchema.safeParse({ ...validTeardown(), ...proof, classification: "pass", observedResult: "unknown" }).success).toBe(false);
       expect(teardownSchema.safeParse({ ...validTeardown(), ...proof, classification: "unknown", observedResult: "pass" }).success).toBe(false);
+    }
+  });
+});
+
+function validMeasuredAdmission() {
+  return {
+    measurementState: "measured",
+    availablePhysicalMemoryGiB: 18.5,
+    aggregateWorkingSetPercent: 42.25,
+    otherResourceHeavyJobActive: false,
+    runtimeManagerCorrelationId: "runtime-manager-correlation-1",
+    admissionResult: "admitted",
+  };
+}
+
+function validObservedSafety() {
+  return {
+    lifecycleOwner: "runtime-manager",
+    launcher: "disabled",
+    wrapper: "disabled",
+    triggerQueueConsumer: "disabled",
+    terminalInjection: "disabled",
+    autoWake: "disabled",
+    jobsAuthority: "disabled",
+    persistentRules: "disabled",
+  };
+}
+
+function validCompletedManifest() {
+  return {
+    schemaVersion: 2,
+    spike: "agentchattr-compatibility",
+    stage: "1.5",
+    manifestId: "agentchattr-spike-manifest-1",
+    runId: "run-1",
+    executionState: "completed",
+    upstream: {
+      repository: "https://github.com/bcurts/agentchattr.git",
+      commit: "c24f605c9b24fb7a98003f7930e2d5e7a7f7d297",
+      tag: "v0.5.0",
+      version: "0.5.0",
+      licenseSha256: "a1abc583f6725867ed3564f1bcd201d78603612330665433a733a640721f40f3",
+    },
+    endpoint: { host: "127.0.0.1", port: 43123, state: "stopped" },
+    resourceAdmission: validMeasuredAdmission(),
+    safety: validObservedSafety(),
+    evidence: [
+      validConfigurationBoundary(),
+      validMonitorInterval(),
+      validAgentSnapshot(),
+      validRuntimeControlRequest(),
+      validMcpExchange(),
+      validMessageObservation(),
+      validIdentityBinding(),
+      validLoopGuardTransition(),
+      validBeadsPromotion(),
+      validDesktopCapability(),
+      validTeardown(),
+    ],
+    extensions: { "x-owner-ruling": "present" },
+  };
+}
+
+function validNotRunManifest() {
+  return {
+    ...validCompletedManifest(),
+    manifestId: "agentchattr-spike-manifest-template",
+    runId: "not-run",
+    executionState: "not_run",
+    endpoint: { host: "127.0.0.1", port: 43123, state: "candidate_only_not_bound" },
+    resourceAdmission: {
+      measurementState: "not_run",
+      availablePhysicalMemoryGiB: null,
+      aggregateWorkingSetPercent: null,
+      otherResourceHeavyJobActive: null,
+      runtimeManagerCorrelationId: null,
+      admissionResult: "not_run",
+    },
+    safety: {
+      lifecycleOwner: "runtime-manager",
+      launcher: "not_run",
+      wrapper: "not_run",
+      triggerQueueConsumer: "not_run",
+      terminalInjection: "not_run",
+      autoWake: "not_run",
+      jobsAuthority: "not_run",
+      persistentRules: "not_run",
+    },
+    evidence: [],
+  };
+}
+
+function expectStructuralFailure(value: unknown, code: string, path?: string) {
+  const result = parseManifestV2(value);
+  expect(result.ok).toBe(false);
+  if (!result.ok) {
+    expect(result.issues.some((issue) => issue.code === code && (path === undefined || issue.path === path))).toBe(true);
+    expect(result.issues.every((issue) => issue.classification === "fail")).toBe(true);
+  }
+}
+
+describe("strict version-2 evidence manifest", () => {
+  it("accepts the closed set of all eleven evidence record kinds", () => {
+    const result = parseManifestV2(validCompletedManifest());
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const manifest = result.manifest as { evidence: Array<{ kind: string }> };
+      expect(manifest.evidence.map((record) => record.kind)).toEqual([
+        "configuration_boundary",
+        "monitor_interval",
+        "runtime_observation",
+        "runtime_control_action",
+        "mcp_exchange",
+        "message_observation",
+        "identity_binding",
+        "loop_guard_transition",
+        "beads_promotion",
+        "desktop_capability",
+        "teardown",
+      ]);
+    }
+  });
+
+  it("admits only the exact empty not-run lifecycle template", () => {
+    const template = validNotRunManifest();
+
+    expect(parseManifestV2(template).ok).toBe(true);
+    expectStructuralFailure({ ...template, endpoint: { ...template.endpoint, state: "bound" } }, "invalid_invariant");
+    expectStructuralFailure({ ...template, resourceAdmission: validMeasuredAdmission() }, "invalid_invariant");
+    expectStructuralFailure({ ...template, safety: { ...template.safety, launcher: "disabled" } }, "invalid_invariant");
+    expectStructuralFailure({ ...template, evidence: [validConfigurationBoundary()] }, "invalid_invariant");
+  });
+
+  it("rejects every unsupported or missing schema version before normal parsing", () => {
+    for (const candidate of [
+      { ...validNotRunManifest(), schemaVersion: 1 },
+      { ...validNotRunManifest(), schemaVersion: 3 },
+      { ...validNotRunManifest(), schemaVersion: undefined },
+      null,
+    ]) {
+      expect(parseManifestV2(candidate)).toEqual({
+        ok: false,
+        issues: [{ code: "unsupported_schema_version", classification: "fail", path: "/schemaVersion" }],
+      });
+    }
+  });
+
+  it("rejects unknown fields structurally at every strict object boundary", () => {
+    const boundaries = [
+      { name: "envelope", path: "", select: (manifest: Record<string, unknown>) => manifest },
+      {
+        name: "record",
+        path: "/evidence/0",
+        select: (manifest: Record<string, unknown>) => (manifest.evidence as Array<Record<string, unknown>>)[0],
+      },
+      {
+        name: "phase event",
+        path: "/evidence/3/event",
+        select: (manifest: Record<string, unknown>) => (manifest.evidence as Array<Record<string, unknown>>)[3].event as Record<string, unknown>,
+      },
+      {
+        name: "nested target",
+        path: "/evidence/3/event/target",
+        select: (manifest: Record<string, unknown>) => ((manifest.evidence as Array<Record<string, unknown>>)[3].event as Record<string, unknown>).target as Record<string, unknown>,
+      },
+      {
+        name: "provenance",
+        path: "/evidence/0/provenance",
+        select: (manifest: Record<string, unknown>) => (manifest.evidence as Array<Record<string, unknown>>)[0].provenance as Record<string, unknown>,
+      },
+      {
+        name: "artifact",
+        path: "/evidence/0/artifacts/0",
+        select: (manifest: Record<string, unknown>) => ((manifest.evidence as Array<Record<string, unknown>>)[0].artifacts as Array<Record<string, unknown>>)[0],
+      },
+    ] as const;
+    const mutations = [
+      ["unexpectedCamelCase", "rejected-camel-value"],
+      ["compactalias", "rejected-compact-value"],
+      ["x-prefixed-unknown", "present"],
+      ["nestedUnknown", { rejected: "nested-value" }],
+      ["arrayUnknown", ["rejected-array-value"]],
+    ] as const;
+
+    for (const boundary of boundaries) {
+      for (const [key, value] of mutations) {
+        const manifest = structuredClone(validCompletedManifest()) as Record<string, unknown>;
+        boundary.select(manifest)[key] = value;
+        const result = parseManifestV2(manifest);
+
+        expect(result.ok, `${boundary.name} should reject ${key}`).toBe(false);
+        if (!result.ok) {
+          expect(result.issues).toContainEqual({ code: "unknown_field", classification: "fail", path: boundary.path });
+          const serialized = JSON.stringify(result);
+          expect(serialized).not.toContain(key);
+          expect(serialized).not.toContain("rejected-");
+        }
+      }
+    }
+  });
+
+  it("keeps safe extensions opaque while rejecting malformed extension structure", () => {
+    const accepted = { ...validCompletedManifest(), extensions: {
+      "x-actor-id": "present",
+      "x-supervisor-authority": digest,
+      "x-task-state": "unknown",
+    } };
+    const malformedExtensions = [
+      { key: "unexpectedCamelCase", value: "present", path: "/extensions/unexpectedCamelCase" },
+      { key: "compactalias", value: "present", path: "/extensions/compactalias" },
+      { key: "prefixed-unknown", value: "present", path: "/extensions/prefixed-unknown" },
+      { key: "x-nested", value: { rejectedValue: "secret" }, path: "/extensions/x-nested" },
+      { key: "x-array", value: ["secret"], path: "/extensions/x-array" },
+      { key: "bad~/key", value: "present", path: "/extensions/bad~0~1key" },
+    ] as const;
+
+    expect(parseManifestV2(accepted).ok).toBe(true);
+    for (const mutation of malformedExtensions) {
+      expectStructuralFailure(
+        { ...accepted, extensions: { [mutation.key]: mutation.value } },
+        "invalid_field",
+        mutation.path,
+      );
+    }
+  });
+
+  it("requires measured admission and observed safety after execution begins", () => {
+    for (const executionState of ["running", "completed", "aborted"] as const) {
+      const base = { ...validCompletedManifest(), executionState };
+      if (executionState === "aborted") {
+        base.evidence = base.evidence.map((record, index) => index === 0 ? { ...record, classification: "unknown" } : record);
+      }
+      expect(parseManifestV2(base).ok).toBe(true);
+      expectStructuralFailure({ ...base, resourceAdmission: validNotRunManifest().resourceAdmission }, "invalid_invariant");
+      expectStructuralFailure({ ...base, safety: { ...base.safety, terminalInjection: "not_run" } }, "invalid_invariant");
+    }
+  });
+
+  it("requires completed teardown and an aborted fail-or-unknown stop condition", () => {
+    const completedWithoutTeardown = validCompletedManifest();
+    completedWithoutTeardown.evidence = completedWithoutTeardown.evidence.filter((record) => record.kind !== "teardown");
+    expectStructuralFailure(completedWithoutTeardown, "invalid_invariant", "/evidence");
+
+    const abortedWithoutStopCondition = { ...validCompletedManifest(), executionState: "aborted" };
+    expectStructuralFailure(abortedWithoutStopCondition, "invalid_invariant", "/evidence");
+
+    const abortedWithUnknownStopCondition = structuredClone(abortedWithoutStopCondition);
+    abortedWithUnknownStopCondition.evidence[0].classification = "unknown";
+    expect(parseManifestV2(abortedWithUnknownStopCondition).ok).toBe(true);
+
+    const abortedWithFailedStopCondition = structuredClone(abortedWithoutStopCondition);
+    abortedWithFailedStopCondition.evidence[0].classification = "fail";
+    expect(parseManifestV2(abortedWithFailedStopCondition).ok).toBe(true);
+  });
+
+  it("returns only sanitized stable issue fields and never rejected values", () => {
+    const rejectedValue = "do-not-echo-this-value";
+    const result = parseManifestV2({
+      ...validCompletedManifest(),
+      endpoint: { host: rejectedValue, port: 43123, state: "stopped" },
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.issues).toContainEqual({ code: "invalid_field", classification: "fail", path: "/endpoint/host" });
+      expect(JSON.stringify(result)).not.toContain(rejectedValue);
+      for (const issue of result.issues) {
+        expect(Object.keys(issue).sort()).toEqual(["classification", "code", "path"]);
+      }
     }
   });
 });
