@@ -520,7 +520,7 @@ function validTeardown() {
     credentialRemoval: { state: "removed", evidenceHash: digest },
     listenerRemoval: { state: "removed", evidenceHash: digest },
     finalMonitorCapture: { state: "captured", evidenceHash: digest },
-    disposableRoot: { state: "deleted", ownership: "owned" },
+    disposableRoot: { disposition: "deleted", ownership: "confirmed" },
   };
 }
 
@@ -586,27 +586,22 @@ describe("operational boundaries and Herdr observations", () => {
   it("keeps every Herdr target shape, native contract, and token quality closed", () => {
     const lifecycle = validLifecycleEvent();
     const trace = validTraceSummary();
-    const targets = [
-      { targetKind: "workspace", workspaceId: "workspace-1" },
-      { targetKind: "tab", workspaceId: "workspace-1", tabId: "tab-1" },
-      { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" },
-      { targetKind: "terminal", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1", terminalId: "terminal-1" },
-      { targetKind: "agent_session", agentSessionId: "agent-session-1" },
-    ];
-    const incompleteTargets = [
-      { targetKind: "workspace" },
-      { targetKind: "tab", tabId: "tab-1" },
-      { targetKind: "pane", workspaceId: "workspace-1", paneId: "pane-1" },
-      { targetKind: "terminal", workspaceId: "workspace-1", tabId: "tab-1", terminalId: "terminal-1" },
-      { targetKind: "agent_session" },
+    const targets: Array<{ target: Record<string, string>; requiredProperties: string[] }> = [
+      { target: { targetKind: "workspace", workspaceId: "workspace-1" }, requiredProperties: ["workspaceId"] },
+      { target: { targetKind: "tab", workspaceId: "workspace-1", tabId: "tab-1" }, requiredProperties: ["workspaceId", "tabId"] },
+      { target: { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" }, requiredProperties: ["workspaceId", "tabId", "paneId"] },
+      { target: { targetKind: "terminal", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1", terminalId: "terminal-1" }, requiredProperties: ["workspaceId", "tabId", "paneId", "terminalId"] },
+      { target: { targetKind: "agent_session", agentSessionId: "agent-session-1" }, requiredProperties: ["agentSessionId"] },
     ];
 
-    for (const target of targets) {
+    for (const { target, requiredProperties } of targets) {
       expect(runtimeObservationSchema.safeParse({ ...lifecycle, observation: { ...lifecycle.observation, target } }).success).toBe(true);
       expect(runtimeObservationSchema.safeParse({ ...lifecycle, observation: { ...lifecycle.observation, target: { ...target, unexpected: "extra" } } }).success).toBe(false);
-    }
-    for (const target of incompleteTargets) {
-      expect(runtimeObservationSchema.safeParse({ ...lifecycle, observation: { ...lifecycle.observation, target } }).success).toBe(false);
+      for (const property of requiredProperties) {
+        const targetWithoutRequiredProperty = { ...target };
+        delete targetWithoutRequiredProperty[property];
+        expect(runtimeObservationSchema.safeParse({ ...lifecycle, observation: { ...lifecycle.observation, target: targetWithoutRequiredProperty } }).success).toBe(false);
+      }
     }
     expect(runtimeObservationSchema.safeParse({ ...lifecycle, nativeContract: { versionKind: "herdr_protocol", protocol: 0 } }).success).toBe(false);
     expect(runtimeObservationSchema.safeParse({ ...lifecycle, nativeContract: { versionKind: "named", name: "herdr-telemetry", version: "v1", protocol: 1 } }).success).toBe(false);
@@ -667,28 +662,45 @@ describe("operational boundaries and Herdr observations", () => {
     expect(teardownSchema.safeParse({ ...valid, listenerRemoval: { state: "removed", evidenceHash: digest, commandLine: "netstat" } }).success).toBe(false);
   });
 
-  it("requires every teardown proof to be successful before either result axis can pass", () => {
+  it("accepts fully actioned, known-clean no-op, and retained unowned teardown success", () => {
+    const fullyActioned = validTeardown();
+    const knownCleanNoOp = {
+      ...validTeardown(),
+      serviceDeregistration: { serviceName: "agentchattr-spike", state: "not_registered", evidenceHash: digest },
+      desktopProfileConfigRestoration: { state: "not_present", evidenceHash: digest },
+      credentialRemoval: { state: "not_present", evidenceHash: digest },
+      listenerRemoval: { state: "not_present", evidenceHash: digest },
+    };
+    const retainedUnowned = {
+      ...validTeardown(),
+      disposableRoot: { disposition: "retained", ownership: "not_owned" },
+    };
+
+    expect(teardownSchema.safeParse(fullyActioned).success).toBe(true);
+    expect(teardownSchema.safeParse(knownCleanNoOp).success).toBe(true);
+    expect(teardownSchema.safeParse(retainedUnowned).success).toBe(true);
+    expect(teardownSchema.safeParse({ ...validTeardown(), disposableRoot: { disposition: "deleted", ownership: "not_owned" } }).success).toBe(false);
+    expect(teardownSchema.safeParse({ ...validTeardown(), disposableRoot: { disposition: "retained", ownership: "confirmed" } }).success).toBe(false);
+  });
+
+  it("requires every teardown proof to be certain and successful before either result axis can pass", () => {
     const invalidProofs = [
-      { serviceDeregistration: { serviceName: "agentchattr-spike", state: "not_registered", evidenceHash: digest } },
       { serviceDeregistration: { serviceName: "agentchattr-spike", state: "failed", evidenceHash: digest } },
       { serviceDeregistration: { serviceName: "agentchattr-spike", state: "unknown", evidenceHash: digest } },
       { baselineInventoryRestoration: { state: "not_restored", baselineEvidenceHash: digest, finalEvidenceHash: digest } },
       { baselineInventoryRestoration: { state: "unknown", baselineEvidenceHash: digest, finalEvidenceHash: digest } },
       { desktopProfileConfigRestoration: { state: "not_restored", evidenceHash: digest } },
-      { desktopProfileConfigRestoration: { state: "not_applicable", evidenceHash: digest } },
       { desktopProfileConfigRestoration: { state: "unknown", evidenceHash: digest } },
-      { credentialRemoval: { state: "not_present", evidenceHash: digest } },
       { credentialRemoval: { state: "failed", evidenceHash: digest } },
       { credentialRemoval: { state: "unknown", evidenceHash: digest } },
-      { listenerRemoval: { state: "not_present", evidenceHash: digest } },
       { listenerRemoval: { state: "failed", evidenceHash: digest } },
       { listenerRemoval: { state: "unknown", evidenceHash: digest } },
       { finalMonitorCapture: { state: "missing", evidenceHash: digest } },
       { finalMonitorCapture: { state: "unknown", evidenceHash: digest } },
-      { disposableRoot: { state: "retained", ownership: "owned" } },
-      { disposableRoot: { state: "unknown", ownership: "owned" } },
-      { disposableRoot: { state: "deleted", ownership: "not_owned" } },
-      { disposableRoot: { state: "deleted", ownership: "unknown" } },
+      { disposableRoot: { disposition: "deleted", ownership: "not_owned" } },
+      { disposableRoot: { disposition: "retained", ownership: "confirmed" } },
+      { disposableRoot: { disposition: "unknown", ownership: "confirmed" } },
+      { disposableRoot: { disposition: "deleted", ownership: "unknown" } },
     ];
 
     for (const proof of invalidProofs) {
