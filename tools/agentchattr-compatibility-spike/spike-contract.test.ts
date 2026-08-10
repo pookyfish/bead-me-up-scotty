@@ -494,12 +494,16 @@ describe("AgentChattr compatibility spike evidence contract", () => {
     }
   });
 
-  it("rejects forward-slash drive roots after arbitrary separators without rejecting approved sanitized process evidence", () => {
+  it("rejects drive roots after arbitrary punctuation without rejecting HTTPS or approved sanitized process evidence", () => {
     for (const unsafe of [
       { note: "artifact|C:/ProgramData/AgentChattr/config.toml" },
       { note: "artifact=D:/AgentChattr/config.toml" },
       { nested: { detail: "artifact::E:/AgentChattr/config.toml" } },
       { nested: { detail: "artifact→z:/AgentChattr/config.toml" } },
+      { note: "artifact-C:/ProgramData/AgentChattr/config.toml" },
+      { note: "artifact.D:\\AgentChattr\\config.toml" },
+      { note: "artifact+E:/AgentChattr/config.toml" },
+      { nested: { detail: "artifact_F:\\AgentChattr\\config.toml" } },
     ]) {
       const manifest = validManifest();
       Object.assign(manifest.evidence[0], unsafe);
@@ -509,6 +513,9 @@ describe("AgentChattr compatibility spike evidence contract", () => {
     }
 
     const sanitized = validManifest();
+    Object.assign(sanitized.evidence[0], {
+      referenceUrl: "https://example.test/evidence/artifact.json",
+    });
     Object.assign(sanitized.evidence[0].processRecords[0], {
       sanitizedArgvTemplate:
         "agentchattr.exe --data-dir <data-dir> --port <port> --secret <secret>",
@@ -609,5 +616,141 @@ describe("AgentChattr compatibility spike evidence contract", () => {
       nested: { GATEWAYREADCONFIRMATIONSTATUS: false },
     });
     expect(validateEvidenceManifest(neutral).issues).toEqual([]);
+  });
+
+  it("rejects standalone receipt, confirmation, and acknowledgement authority families with arbitrary prefixes", () => {
+    for (const inferred of [
+      { arbitraryReceiptState: "received" },
+      { gatewayConfirmationStatus: true },
+      { upstreamAcknowledgementFlag: true },
+      { "adapter.receipt-result": "received" },
+      { PROXYCONFIRMATIONSTATUS: true },
+      { arbitraryacknowledgmentflag: true },
+    ]) {
+      const manifest = validManifest();
+      Object.assign(manifest.evidence[0], inferred);
+      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
+        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
+      );
+    }
+
+    const neutral = validManifest();
+    Object.assign(neutral.evidence[0], {
+      arbitraryReceiptState: "unknown",
+      gatewayConfirmationStatus: false,
+      upstreamAcknowledgementFlag: null,
+    });
+    expect(validateEvidenceManifest(neutral).issues).toEqual([]);
+  });
+
+  it("recurses through structured authority states without matching unrelated token substrings", () => {
+    const neutral = validManifest();
+    Object.assign(neutral.evidence[0], {
+      threadStatus: "observed",
+      networkStatus: "observed",
+      identityBindingSnapshot: {
+        bindingId: "binding-synthetic-1",
+        provider: "synthetic-provider",
+        threadStatus: "observed",
+        validity: "unknown",
+      },
+      upstreamDeliveryReceiptState: {
+        receiptId: "receipt-synthetic-1",
+        source: "upstream",
+        threadStatus: "observed",
+        result: "unknown",
+      },
+    });
+    expect(validateEvidenceManifest(neutral).issues).toEqual([]);
+
+    for (const inferred of [
+      { identityBindingSnapshot: { validity: "verified" } },
+      { upstreamDeliveryReceiptState: { result: "delivered" } },
+      { gatewayAcknowledgementSnapshot: { state: true } },
+    ]) {
+      const manifest = validManifest();
+      Object.assign(manifest.evidence[0], inferred);
+      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
+        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
+      );
+    }
+  });
+
+  it("does not infer compact authority roots from unrelated whole words", () => {
+    const manifest = validManifest();
+    Object.assign(manifest.evidence[0], {
+      bookbindingStatus: "observed",
+    });
+
+    expect(validateEvidenceManifest(manifest).issues).toEqual([]);
+  });
+
+  it("classifies qualified scalar state leaves inside structured authority evidence", () => {
+    for (const inferred of [
+      { identityBindingSnapshot: { currentStatus: "verified" } },
+      { upstreamDeliveryReceiptState: { observedStatus: "delivered" } },
+    ]) {
+      const manifest = validManifest();
+      Object.assign(manifest.evidence[0], inferred);
+      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
+        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
+      );
+    }
+
+    const neutral = validManifest();
+    Object.assign(neutral.evidence[0], {
+      identityBindingSnapshot: { currentStatus: "unknown" },
+      upstreamDeliveryReceiptState: { observedStatus: false },
+    });
+    expect(validateEvidenceManifest(neutral).issues).toEqual([]);
+  });
+
+  it("classifies compact qualified scalar state leaves inside structured authority evidence", () => {
+    for (const inferred of [
+      { identityBindingSnapshot: { currentstatus: "verified" } },
+      { identityBindingSnapshot: { CURRENTSTATUS: "verified" } },
+      { upstreamDeliveryReceiptState: { observedstatus: "delivered" } },
+      {
+        upstreamDeliveryReceiptState: {
+          state: [{ currentstatus: "delivered" }],
+        },
+      },
+    ]) {
+      const manifest = validManifest();
+      Object.assign(manifest.evidence[0], inferred);
+      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
+        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
+      );
+    }
+
+    const neutral = validManifest();
+    Object.assign(neutral.evidence[0], {
+      identityBindingSnapshot: { currentstatus: "unknown" },
+      upstreamDeliveryReceiptState: { OBSERVEDSTATUS: false },
+    });
+    expect(validateEvidenceManifest(neutral).issues).toEqual([]);
+  });
+
+  it("classifies scalar array members only when an authority state supplies their context", () => {
+    for (const inferred of [
+      { upstreamDeliveryReceiptState: ["unknown", "delivered"] },
+      { upstreamDeliveryReceiptState: { state: ["unknown", "delivered"] } },
+    ]) {
+      const manifest = validManifest();
+      Object.assign(manifest.evidence[0], inferred);
+      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
+        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
+      );
+    }
+
+    for (const allowed of [
+      { upstreamDeliveryReceiptState: ["unknown", false] },
+      { upstreamDeliveryReceiptState: { state: ["unknown", false] } },
+      { neutralList: ["delivered", true] },
+    ]) {
+      const manifest = validManifest();
+      Object.assign(manifest.evidence[0], allowed);
+      expect(validateEvidenceManifest(manifest).issues).toEqual([]);
+    }
   });
 });

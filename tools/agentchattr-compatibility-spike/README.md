@@ -66,12 +66,15 @@ read, work, lease, task, approval, handoff, or identity authority are rejected,
 including normalized aliases such as `delivery`, `read`, `lease`, `approval`,
 and `handoff` at any nesting depth. Redaction likewise examines neutral-field
 values for credential assignments, absolute paths, raw invocations, and both
-  headered and headerless configuration content, including `=`/`:` formats and
-  backslash or forward-slash drive roots embedded after punctuation. Transport
-  authority keys are matched by semantic family across camel case, separators,
-  arbitrary prefixes, and concatenated case variants so receipt, confirmation,
-  and acknowledgement aliases do not bypass the explicit neutral/unknown
-  allowlist.
+headered and headerless configuration content, including `=`/`:` formats and
+backslash or forward-slash drive roots after any non-alphanumeric separator;
+ordinary multi-letter HTTPS schemes remain permitted. Authority keys are
+matched by explicit camel-case/separator tokens, with conservative state-suffix
+parsing for unsegmented identifiers, so receipt, confirmation, and
+acknowledgement aliases cannot bypass the explicit neutral/unknown allowlist or
+turn unrelated names such as `threadStatus` into read authority. Structured
+authority evidence is recursively inspected until a scalar state is reached;
+neutral nested states remain evidence rather than inferred authority.
 
 ## Operator stop conditions
 

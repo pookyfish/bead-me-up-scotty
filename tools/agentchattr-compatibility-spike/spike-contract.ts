@@ -69,16 +69,159 @@ function semanticKeyTokens(key: string): string[] {
     .filter(Boolean);
 }
 
-function hasSemanticFamily(key: string, roots: readonly string[], context: readonly string[]): boolean {
-  const tokens = new Set(semanticKeyTokens(key));
+type AuthorityFamily = "transport" | "work" | "lease" | "task" | "approval" | "handoff" | "binding";
+
+const AUTHORITY_FAMILY_ROOTS: Record<AuthorityFamily, readonly string[]> = {
+  transport: [
+    "delivery",
+    "delivered",
+    "read",
+    "acceptance",
+    "accepted",
+    "queued",
+    "receipt",
+    "confirmation",
+    "acknowledgement",
+    "acknowledgment",
+  ],
+  work: ["work"],
+  lease: ["lease"],
+  task: ["task", "assignment"],
+  approval: ["approval", "approved"],
+  handoff: ["handoff", "handedoff"],
+  binding: ["binding"],
+};
+
+const AUTHORITY_NEUTRAL_STATUSES: Record<AuthorityFamily, readonly unknown[]> = {
+  transport: [false, null, "none", "unknown", "unsupported", "unobserved", "not_observed"],
+  work: [false, null, "none", "not_started", "unknown", "unsupported"],
+  lease: [false, null, "none", "unclaimed", "unknown", "unsupported"],
+  task: [false, null, "none", "unassigned", "unknown", "unsupported"],
+  approval: [false, null, "none", "unknown", "unsupported", "not_granted", "not_approved"],
+  handoff: [false, null, "none", "unknown", "unsupported", "pending", "not_complete"],
+  binding: [false, null, "none", "unknown", "unsupported", "unbound", "unverified"],
+};
+
+const AUTHORITY_COMPACT_TERMS: Record<AuthorityFamily, readonly string[]> = {
+  transport: [
+    "delivery",
+    "delivered",
+    "acceptance",
+    "accepted",
+    "queued",
+    "receipt",
+    "confirmation",
+    "acknowledgement",
+    "acknowledgment",
+  ],
+  work: ["workstarted"],
+  lease: ["leaseclaim", "leaseclaimed", "leaseowner"],
+  task: ["taskassignment", "assignment"],
+  approval: ["approval", "approved"],
+  handoff: ["handoff", "handedoff"],
+  binding: ["identitybinding"],
+};
+
+const AUTHORITY_STATE_SUFFIXES = [
+  "observation",
+  "resolution",
+  "assignment",
+  "authority",
+  "evidence",
+  "validity",
+  "snapshot",
+  "complete",
+  "verified",
+  "started",
+  "granted",
+  "claimed",
+  "status",
+  "result",
+  "state",
+  "outcome",
+  "owner",
+  "claim",
+  "flag",
+] as const;
+
+const AUTHORITY_STATE_TOKENS = new Set<string>(AUTHORITY_STATE_SUFFIXES);
+const AUTHORITY_STATE_QUALIFIER_TOKENS = new Set([
+  "actual",
+  "current",
+  "effective",
+  "inferred",
+  "latest",
+  "observed",
+  "recorded",
+  "reported",
+]);
+const AUTHORITY_IDENTIFIER_TOKENS = new Set(["id", "uid", "ref", "reference", "hash", "checksum"]);
+
+function compactAuthorityStems(key: string): string[] {
+  const stems: string[] = [];
+  let stem = normalizedKey(key);
+  while (stem.length > 0) {
+    const suffix = AUTHORITY_STATE_SUFFIXES.find(
+      (candidate) => stem.length > candidate.length && stem.endsWith(candidate),
+    );
+    if (!suffix) break;
+    stem = stem.slice(0, -suffix.length);
+    stems.push(stem);
+  }
+  return stems;
+}
+
+function authorityFamiliesForKey(key: string): AuthorityFamily[] {
+  const keyTokens = semanticKeyTokens(key);
+  const tokens = new Set(keyTokens);
   const compact = normalizedKey(key);
-  return roots.some(
-    (root) =>
-      tokens.has(root) ||
-      compact === root ||
-      (root.length >= 6 && compact.includes(root)) ||
-      context.some((term) => compact.includes(`${root}${term}`) || compact.includes(`${term}${root}`)),
-  );
+  const stems = compactAuthorityStems(key);
+  if (AUTHORITY_IDENTIFIER_TOKENS.has(keyTokens.at(-1) ?? "")) return [];
+  const families = (Object.keys(AUTHORITY_FAMILY_ROOTS) as AuthorityFamily[]).filter((family) => {
+    const roots = AUTHORITY_FAMILY_ROOTS[family];
+    if (roots.some((root) => tokens.has(root) || compact === root)) return true;
+    return stems.some((stem) =>
+      roots.some((root) => stem === root) ||
+      AUTHORITY_COMPACT_TERMS[family].some((term) => stem.endsWith(term)),
+    );
+  });
+  if (compact === "messagestatus" && !families.includes("transport")) {
+    families.push("transport");
+  }
+  return families;
+}
+
+function isAuthorityStateKey(key: string): boolean {
+  const tokens = semanticKeyTokens(key);
+  const tokenizedState =
+    tokens.some((token) => AUTHORITY_STATE_TOKENS.has(token)) &&
+    tokens.every(
+      (token) => AUTHORITY_STATE_TOKENS.has(token) || AUTHORITY_STATE_QUALIFIER_TOKENS.has(token),
+    );
+  if (tokenizedState) return true;
+
+  let compact = normalizedKey(key);
+  let consumedQualifier = false;
+  while (compact.length > 0) {
+    const qualifier = [...AUTHORITY_STATE_QUALIFIER_TOKENS].find(
+      (candidate) => compact.length > candidate.length && compact.startsWith(candidate),
+    );
+    if (!qualifier) break;
+    compact = compact.slice(qualifier.length);
+    consumedQualifier = true;
+  }
+  return consumedQualifier && AUTHORITY_STATE_TOKENS.has(compact);
+}
+
+function normalizedAuthorityStatus(value: unknown): unknown {
+  return typeof value === "string"
+    ? value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "")
+    : value;
+}
+
+function isNeutralAuthorityStatus(family: AuthorityFamily, value: unknown): boolean {
+  const normalized = normalizedAuthorityStatus(value);
+  return AUTHORITY_NEUTRAL_STATUSES[family].some((candidate) => candidate === normalized);
 }
 
 function isApprovedArgvTemplate(value: unknown, container: UnknownRecord): boolean {
@@ -139,7 +282,7 @@ function containsRawSensitiveEvidence(value: unknown): boolean {
         /(?:^|\s)--(?:token|secret|password)(?:=|\s+)(?!<(?:secret)>)/i.test(nested) ||
         /\b(?:token|secret|password|api[_-]?key|access[_-]?key|auth[_-]?key)\s*[:=]\s*(?!<secret>)[^\s,;}\]]+/i.test(nested) ||
         /\bBearer\s+[A-Za-z0-9._~+/=-]+/i.test(nested) ||
-        /(?:^|[^a-z0-9+.-])[a-z]:[\\/]|\\\\[^\\]+\\|\/(?:home|users|var|opt|etc|tmp)\//i.test(nested) ||
+        /(?:^|[^a-z0-9])[a-z]:[\\/]|\\\\[^\\]+\\|\/(?:home|users|var|opt|etc|tmp)\//i.test(nested) ||
         /\b[a-z0-9_.-]+\.(?:exe|cmd|bat|ps1|py)\s+(?:--|-|\/)/i.test(nested) ||
         /\b(?:python|node|pwsh|powershell)\s+[^\r\n]+/i.test(nested) ||
         /^\s*\[[^\]]+\]\s*[\r\n]+[a-z0-9_.-]+\s*=/i.test(nested) ||
@@ -150,42 +293,38 @@ function containsRawSensitiveEvidence(value: unknown): boolean {
   });
 }
 
-function containsInferredAuthorityStatus(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(containsInferredAuthorityStatus);
+function containsInferredAuthorityStatus(
+  value: unknown,
+  inheritedFamilies: readonly AuthorityFamily[] = [],
+  scalarArrayHasAuthority = false,
+): boolean {
+  if (Array.isArray(value)) {
+    return value.some((entry) => {
+      if (isRecord(entry) || Array.isArray(entry)) {
+        return containsInferredAuthorityStatus(entry, inheritedFamilies, scalarArrayHasAuthority);
+      }
+      return (
+        scalarArrayHasAuthority &&
+        inheritedFamilies.some((family) => !isNeutralAuthorityStatus(family, entry))
+      );
+    });
+  }
   if (!isRecord(value)) return false;
   return Object.entries(value).some(([key, nested]) => {
-    const normalized = normalizedKey(key);
-    const status = typeof nested === "string" ? nested.toLowerCase().replace(/[\s-]+/g, "_") : nested;
-    const stateContext = ["state", "status", "flag", "result", "authority"];
-    if (
-      normalized === "messagestatus" ||
-      hasSemanticFamily(
-        key,
-        ["delivery", "delivered", "read", "acceptance", "accepted", "queued"],
-        ["receipt", "confirmation", "acknowledgement", "acknowledgment", "evidence", "observation", ...stateContext],
-      )
-    ) {
-      return ![false, null, "none", "unknown", "unsupported", "unobserved", "not_observed"].includes(status as never);
+    const directFamilies = authorityFamiliesForKey(key);
+    if (isRecord(nested) || Array.isArray(nested)) {
+      const nestedFamilies = directFamilies.length > 0 ? directFamilies : inheritedFamilies;
+      const nestedArrayHasAuthority =
+        directFamilies.length > 0 ||
+        (inheritedFamilies.length > 0 && isAuthorityStateKey(key));
+      return containsInferredAuthorityStatus(nested, nestedFamilies, nestedArrayHasAuthority);
     }
-    if (hasSemanticFamily(key, ["work"], ["started", ...stateContext])) {
-      return ![false, null, "none", "not_started", "unknown", "unsupported"].includes(status as never);
-    }
-    if (hasSemanticFamily(key, ["lease"], ["claim", "claimed", "owner", ...stateContext])) {
-      return ![false, null, "none", "unclaimed", "unknown", "unsupported"].includes(status as never);
-    }
-    if (hasSemanticFamily(key, ["task", "assignment"], ["assignment", ...stateContext])) {
-      return ![false, null, "none", "unassigned", "unknown", "unsupported"].includes(status as never);
-    }
-    if (hasSemanticFamily(key, ["approval", "approved"], ["outcome", "granted", ...stateContext])) {
-      return ![false, null, "none", "unknown", "unsupported", "not_granted", "not_approved"].includes(status as never);
-    }
-    if (hasSemanticFamily(key, ["handoff", "handedoff"], ["resolution", "complete", ...stateContext])) {
-      return ![false, null, "none", "unknown", "unsupported", "pending", "not_complete"].includes(status as never);
-    }
-    if (hasSemanticFamily(key, ["binding"], ["identity", "verified", ...stateContext])) {
-      return ![false, null, "none", "unknown", "unsupported", "unbound", "unverified"].includes(status as never);
-    }
-    return containsInferredAuthorityStatus(nested);
+    const scalarFamilies = directFamilies.length > 0
+      ? directFamilies
+      : isAuthorityStateKey(key)
+        ? inheritedFamilies
+        : [];
+    return scalarFamilies.some((family) => !isNeutralAuthorityStatus(family, nested));
   });
 }
 
