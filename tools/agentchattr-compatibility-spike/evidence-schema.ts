@@ -111,6 +111,17 @@ export type EvidenceBase<K extends string = string> = {
   extensions?: z.infer<typeof safeExtensionsSchema>;
 };
 
+function isEarlierUtcTimestamp(left: string, right: string) {
+  const [leftSecond, leftFraction = ""] = left.slice(0, -1).split(".");
+  const [rightSecond, rightFraction = ""] = right.slice(0, -1).split(".");
+  if (leftSecond !== rightSecond) {
+    return leftSecond < rightSecond;
+  }
+
+  const precision = Math.max(leftFraction.length, rightFraction.length);
+  return leftFraction.padEnd(precision, "0") < rightFraction.padEnd(precision, "0");
+}
+
 export function withEvidenceBase<K extends string, Shape extends z.ZodRawShape>(kind: K, shape: Shape) {
   return z
     .strictObject({
@@ -120,7 +131,7 @@ export function withEvidenceBase<K extends string, Shape extends z.ZodRawShape>(
     })
     .refine((record) => {
       const timestamps = record as EvidenceBase;
-      return timestamps.startedAt <= timestamps.observedAt;
+      return isEarlierUtcTimestamp(timestamps.startedAt, timestamps.observedAt);
     }, {
       message: "Evidence timestamps must be monotonic.",
       path: ["observedAt"],
@@ -204,7 +215,7 @@ export const identityBindingSchema = withEvidenceBase("identity_binding", {
   if (record.executionSurface !== "herdr" && record.herdrSessionRef !== null) {
     context.addIssue({ code: "custom", message: "Only Herdr bindings may carry a Herdr session reference.", path: ["herdrSessionRef"] });
   }
-  if (record.validUntil !== null && record.validFrom >= record.validUntil) {
+  if (record.validUntil !== null && !isEarlierUtcTimestamp(record.validFrom, record.validUntil)) {
     context.addIssue({ code: "custom", message: "Identity validity interval must be increasing.", path: ["validUntil"] });
   }
 });
@@ -700,7 +711,7 @@ export const runtimeAuthorizationEventSchema = z.strictObject({
   validFrom: utcTimestampSchema,
   validUntil: utcTimestampSchema,
   evidenceHash: sha256Schema,
-}).refine((event) => event.validFrom < event.validUntil, {
+}).refine((event) => isEarlierUtcTimestamp(event.validFrom, event.validUntil), {
   message: "Authorization validity interval must be increasing.",
   path: ["validUntil"],
 });

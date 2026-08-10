@@ -103,12 +103,20 @@ describe("strict evidence schema primitives", () => {
     expect(evidenceArtifactSchema.safeParse({ ...validEvidence().artifacts[0], unexpected: true }).success).toBe(false);
   });
 
-  it("requires timestamps to be monotonic within an evidence record", () => {
+  it("compares evidence timestamps chronologically across fractional precision", () => {
     expect(syntheticEvidenceSchema.safeParse(validEvidence()).success).toBe(true);
     expect(
       syntheticEvidenceSchema.safeParse({
         ...validEvidence(),
-        startedAt: "2026-08-10T08:00:02.000Z",
+        startedAt: "2026-08-10T08:00:00Z",
+        observedAt: "2026-08-10T08:00:00.1Z",
+      }).success,
+    ).toBe(true);
+    expect(
+      syntheticEvidenceSchema.safeParse({
+        ...validEvidence(),
+        startedAt: "2026-08-10T08:00:00.1Z",
+        observedAt: "2026-08-10T08:00:00Z",
       }).success,
     ).toBe(false);
   });
@@ -279,6 +287,16 @@ describe("typed conversation evidence records", () => {
     const valid = validIdentityBinding();
 
     expect(identityBindingSchema.safeParse(valid).success).toBe(true);
+    expect(identityBindingSchema.safeParse({
+      ...valid,
+      validFrom: "2026-08-10T08:00:00Z",
+      validUntil: "2026-08-10T08:00:00.1Z",
+    }).success).toBe(true);
+    expect(identityBindingSchema.safeParse({
+      ...valid,
+      validFrom: "2026-08-10T08:00:00.1Z",
+      validUntil: "2026-08-10T08:00:00Z",
+    }).success).toBe(false);
     expect(identityBindingSchema.safeParse({ ...valid, validFrom: "2026-08-10T10:00:00.000Z" }).success).toBe(false);
     expect(identityBindingSchema.safeParse({ ...valid, validUntil: null }).success).toBe(false);
     expect(identityBindingSchema.safeParse({ ...valid, bindingState: "unverified", validUntil: null }).success).toBe(true);
@@ -632,13 +650,27 @@ describe("append-only Herdr runtime control evidence", () => {
 
   it("requires stable UUID identities, lowercase SHA-256 idempotency, and nonnegative sequence", () => {
     const valid = validRuntimeControlRequest();
+    const authorization = validRuntimeControlAuthorization();
+    const execution = validRuntimeControlExecution();
 
     for (const field of ["eventId", "actionId", "correlationId"] as const) {
       expect(runtimeControlActionSchema.safeParse({ ...valid, [field]: "not-a-uuid" }).success).toBe(false);
     }
+    expect(runtimeControlActionSchema.safeParse({
+      ...authorization,
+      event: { ...authorization.event, authorizationId: "not-a-uuid" },
+    }).success).toBe(false);
     expect(runtimeControlActionSchema.safeParse({ ...valid, idempotencyKey: `sha256:${"A".repeat(64)}` }).success).toBe(false);
     expect(runtimeControlActionSchema.safeParse({ ...valid, sequence: -1 }).success).toBe(false);
     expect(runtimeControlActionSchema.safeParse({ ...valid, sequence: 1.5 }).success).toBe(false);
+    expect(runtimeControlActionSchema.safeParse({
+      ...execution,
+      event: { ...execution.event, attemptNumber: 0 },
+    }).success).toBe(false);
+    expect(runtimeControlActionSchema.safeParse({
+      ...execution,
+      event: { ...execution.event, attemptNumber: -1 },
+    }).success).toBe(false);
 
     for (const record of [
       validRuntimeControlExecution(),
@@ -692,6 +724,60 @@ describe("append-only Herdr runtime control evidence", () => {
     expect(runtimeActionSchema.safeParse("handoff").success).toBe(false);
   });
 
+  it("maps every authorization scope action to exactly its approved target class", () => {
+    const authorization = validRuntimeControlAuthorization();
+    const targets = {
+      workspace: { targetKind: "workspace", workspaceId: "workspace-1" },
+      agent_session: { targetKind: "agent_session", agentSessionId: "agent-session-1" },
+      pane: { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" },
+      tab: { targetKind: "tab", workspaceId: "workspace-1", tabId: "tab-1" },
+      runtime_manager_project: { targetKind: "runtime_manager_project", projectId: "project-1" },
+    } as const;
+    const mappings = [
+      [["list_agents", "create_tab", "close_workspace"], "workspace"],
+      [["get_agent", "wait_for_agent", "wait_for_output", "stop_session", "delete_session"], "agent_session"],
+      [["read_pane", "relay_message", "send_text", "submit_input", "focus_agent", "rename_agent", "run_command", "send_keys", "split_pane", "close_pane"], "pane"],
+      [["close_tab", "spawn_agent"], "tab"],
+      [["create_workspace"], "runtime_manager_project"],
+    ] as const;
+
+    for (const [actions, targetKind] of mappings) {
+      for (const action of actions) {
+        const scope = { ...authorization.event.scope, action, target: targets[targetKind] };
+        expect(runtimeControlActionSchema.safeParse({ ...authorization, event: { ...authorization.event, scope } }).success).toBe(true);
+        for (const [otherTargetKind, target] of Object.entries(targets)) {
+          if (otherTargetKind !== targetKind) {
+            expect(runtimeControlActionSchema.safeParse({
+              ...authorization,
+              event: { ...authorization.event, scope: { ...scope, target } },
+            }).success).toBe(false);
+          }
+        }
+      }
+    }
+  });
+
+  it("compares authorization validity chronologically across fractional precision", () => {
+    const authorization = validRuntimeControlAuthorization();
+
+    expect(runtimeControlActionSchema.safeParse({
+      ...authorization,
+      event: {
+        ...authorization.event,
+        validFrom: "2026-08-10T08:00:00Z",
+        validUntil: "2026-08-10T08:00:00.1Z",
+      },
+    }).success).toBe(true);
+    expect(runtimeControlActionSchema.safeParse({
+      ...authorization,
+      event: {
+        ...authorization.event,
+        validFrom: "2026-08-10T08:00:00.1Z",
+        validUntil: "2026-08-10T08:00:00Z",
+      },
+    }).success).toBe(false);
+  });
+
   it("rejects labels, focus, CWD, and pane numbers as control targets", () => {
     const request = validRuntimeControlRequest();
     const invalidTargets = [
@@ -720,6 +806,66 @@ describe("append-only Herdr runtime control evidence", () => {
     for (const [record, mutation] of mutations) {
       expect(runtimeControlActionSchema.safeParse({ ...record, event: { ...record.event, ...mutation } }).success).toBe(false);
     }
+  });
+
+  it("accepts every approved runtime-control phase state and rejects undeclared states", () => {
+    const request = validRuntimeControlRequest();
+    const authorization = validRuntimeControlAuthorization();
+    const execution = validRuntimeControlExecution();
+    const verification = validRuntimeControlVerification();
+    const acknowledgement = validRuntimeControlAcknowledgement();
+    const reconciliation = validRuntimeControlReconciliation();
+
+    for (const requestState of ["recorded", "rejected", "cancelled"]) {
+      expect(runtimeControlActionSchema.safeParse({ ...request, event: { ...request.event, requestState } }).success).toBe(true);
+    }
+    expect(runtimeControlActionSchema.safeParse({ ...request, event: { ...request.event, requestState: "unknown" } }).success).toBe(false);
+
+    for (const decision of ["pending", "authorized", "denied", "expired", "cancelled", "unknown"]) {
+      expect(runtimeControlActionSchema.safeParse({ ...authorization, event: { ...authorization.event, decision } }).success).toBe(true);
+    }
+    expect(runtimeControlActionSchema.safeParse({ ...authorization, event: { ...authorization.event, decision: "approved" } }).success).toBe(false);
+
+    for (const state of ["started", "succeeded", "failed", "timed_out", "unknown"]) {
+      expect(runtimeControlActionSchema.safeParse({ ...execution, event: { ...execution.event, state } }).success).toBe(true);
+    }
+    expect(runtimeControlActionSchema.safeParse({ ...execution, event: { ...execution.event, state: "completed" } }).success).toBe(false);
+
+    for (const state of ["verified_applied", "verified_not_applied", "mismatched", "timed_out", "unknown", "unsupported"]) {
+      expect(runtimeControlActionSchema.safeParse({ ...verification, event: { ...verification.event, state } }).success).toBe(true);
+    }
+    expect(runtimeControlActionSchema.safeParse({ ...verification, event: { ...verification.event, state: "succeeded" } }).success).toBe(false);
+
+    for (const state of ["not_applicable", "pending", "acknowledged", "timed_out", "unknown", "unsupported"]) {
+      const event: Record<string, unknown> = { phase: "acknowledgement", attemptId, state };
+      if (state === "acknowledged") {
+        event.directAcknowledgementEvidenceHash = digest;
+      }
+      expect(runtimeControlActionSchema.safeParse({ ...acknowledgement, event }).success).toBe(true);
+    }
+    expect(runtimeControlActionSchema.safeParse({ ...acknowledgement, event: { ...acknowledgement.event, state: "received" } }).success).toBe(false);
+
+    for (const observedDisposition of ["applied", "not_applied", "unresolved"]) {
+      expect(runtimeControlActionSchema.safeParse({
+        ...reconciliation,
+        event: { ...reconciliation.event, observedDisposition },
+      }).success).toBe(true);
+    }
+    expect(runtimeControlActionSchema.safeParse({
+      ...reconciliation,
+      event: { ...reconciliation.event, observedDisposition: "unknown" },
+    }).success).toBe(false);
+
+    for (const retryDecision of ["do_not_retry", "retry_authorized", "unresolved"]) {
+      expect(runtimeControlActionSchema.safeParse({
+        ...reconciliation,
+        event: { ...reconciliation.event, retryDecision },
+      }).success).toBe(true);
+    }
+    expect(runtimeControlActionSchema.safeParse({
+      ...reconciliation,
+      event: { ...reconciliation.event, retryDecision: "retry" },
+    }).success).toBe(false);
   });
 
   it("keeps human intent, authorization scope, verification evidence, and acknowledgement strict", () => {
