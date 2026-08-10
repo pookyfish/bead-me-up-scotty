@@ -101,7 +101,7 @@ const terminalIntegrationStatuses = new Set([
   "released",
   "superseded",
 ]);
-const resolvedStatuses = new Set(["resolved", "released", "superseded", "closed"]);
+const resolvedConflictStatuses = new Set(["resolved", "closed"]);
 
 interface CachedOrchestraSnapshot {
   mtimeMs: number;
@@ -188,16 +188,16 @@ function sectionStats(
   return { total, included, rejected, truncated };
 }
 
-function hasResolution(record: {
+function conflictIsResolved(record: {
   status?: string | null;
-  resolved?: boolean;
   resolution?: unknown;
 }): boolean {
-  if (resolvedStatuses.has(record.status?.toLowerCase() ?? "")) return true;
-  if (record.resolved === true) return true;
-  if (record.resolved === false) return false;
-  if (record.resolution == null) return false;
-  return typeof record.resolution !== "string" || record.resolution.trim().length > 0;
+  if (resolvedConflictStatuses.has(record.status?.toLowerCase() ?? "")) return true;
+  return typeof record.resolution === "string" && record.resolution.trim().length > 0;
+}
+
+function impactIsResolved(record: { resolved?: boolean }): boolean {
+  return record.resolved === true;
 }
 
 function newestFirst(
@@ -275,7 +275,7 @@ function parseSnapshot(raw: Record<string, unknown>): {
 
   const conflictSection = parseArraySection(raw.conflicts, rawConflictSchema);
   const unresolvedConflictEntries = conflictSection.entries.filter(
-    (record) => !hasResolution(record),
+    (record) => !conflictIsResolved(record),
   );
   const unresolvedConflicts = unresolvedConflictEntries
     .slice(0, HISTORY_LIMIT)
@@ -290,7 +290,7 @@ function parseSnapshot(raw: Record<string, unknown>): {
 
   const impactSection = parseArraySection(raw.impacts, rawImpactSchema);
   const unresolvedImpactEntries = impactSection.entries.filter(
-    (record) => !hasResolution(record),
+    (record) => !impactIsResolved(record),
   );
   const unresolvedImpacts = unresolvedImpactEntries
     .slice(0, HISTORY_LIMIT)

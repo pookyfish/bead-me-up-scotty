@@ -155,6 +155,25 @@ const orchestraLargeFixture = {
   })),
 };
 
+function orchestraResolutionFixture({
+  conflicts = [],
+  impacts = [],
+}: {
+  conflicts?: unknown[];
+  impacts?: unknown[];
+}) {
+  return {
+    schema_version: 2,
+    supervisor: null,
+    active_work: {},
+    file_locks: {},
+    integration_queue: [],
+    conflicts,
+    impacts,
+    decisions: [],
+  };
+}
+
 describe("observeOrchestra", () => {
   it("returns not_configured when .orchestra/state.json is absent", async () => {
     const result = await observeOrchestra("C:/missing-repo", fakeFs({ missing: true }));
@@ -244,5 +263,86 @@ describe("observeOrchestra", () => {
     expect(second.freshness).toBe("cached");
     expect(second.capability).toBe("degraded");
     expect(second.error?.code).toBe("incomplete_observation");
+  });
+
+  it("treats a nonempty conflict resolution as authoritative over resolved false", async () => {
+    const result = await observeOrchestra(
+      "C:/resolved-conflict-repo",
+      fakeFs({
+        json: orchestraResolutionFixture({
+          conflicts: [{
+            reporter: "codex-reviewer",
+            detail: "The original conflict.",
+            resolved: false,
+            resolution: "The supervisor released the lock.",
+          }],
+        }),
+      }),
+    );
+
+    expect(result.data?.unresolvedConflicts).toEqual([]);
+    expect(result.data?.sections.conflicts.included).toBe(0);
+  });
+
+  it("excludes conflicts carrying resolved or closed status", async () => {
+    const result = await observeOrchestra(
+      "C:/status-resolved-conflict-repo",
+      fakeFs({
+        json: orchestraResolutionFixture({
+          conflicts: [
+            { reporter: "reviewer-a", detail: "Resolved conflict.", status: "resolved" },
+            { reporter: "reviewer-b", detail: "Closed conflict.", status: "closed" },
+          ],
+        }),
+      }),
+    );
+
+    expect(result.data?.unresolvedConflicts).toEqual([]);
+    expect(result.data?.sections.conflicts.included).toBe(0);
+  });
+
+  it("keeps an impact unresolved when resolved false despite resolution metadata", async () => {
+    const result = await observeOrchestra(
+      "C:/unresolved-impact-repo",
+      fakeFs({
+        json: orchestraResolutionFixture({
+          impacts: [{
+            source_agent: "codex-reviewer",
+            summary: "Downstream work remains blocked.",
+            resolved: false,
+            status: "resolved",
+            resolution: "Operational recovery completed, policy decision pending.",
+          }],
+        }),
+      }),
+    );
+
+    expect(result.data?.unresolvedImpacts).toEqual([{
+      sourceAgent: "codex-reviewer",
+      at: null,
+      type: null,
+      summary: "Downstream work remains blocked.",
+      beadIds: [],
+      urgency: null,
+    }]);
+    expect(result.data?.sections.impacts.included).toBe(1);
+  });
+
+  it("excludes an impact only when resolved is true", async () => {
+    const result = await observeOrchestra(
+      "C:/resolved-impact-repo",
+      fakeFs({
+        json: orchestraResolutionFixture({
+          impacts: [{
+            source_agent: "codex-reviewer",
+            summary: "Downstream work is unblocked.",
+            resolved: true,
+          }],
+        }),
+      }),
+    );
+
+    expect(result.data?.unresolvedImpacts).toEqual([]);
+    expect(result.data?.sections.impacts.included).toBe(0);
   });
 });
