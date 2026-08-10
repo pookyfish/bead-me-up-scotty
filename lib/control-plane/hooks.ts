@@ -81,8 +81,21 @@ function executableBasename(tokens: string[]): string | null {
   return api.basename(executable) || null;
 }
 
-function looksLikeFileReference(value: string): boolean {
-  return value.startsWith(".") ||
+const INLINE_CODE_OPTIONS = new Set(["-e", "--eval", "-c", "--command"]);
+const FILE_ARGUMENT_OPTIONS = new Set(["-file", "--file"]);
+
+function looksLikeFileArgument(value: string): boolean {
+  if (!value || /[()[\]{};&|`]/.test(value)) return false;
+  return value.startsWith("./") ||
+    value.startsWith(".\\") ||
+    value.startsWith("../") ||
+    value.startsWith("..\\") ||
+    value.startsWith(".claude/") ||
+    value.startsWith(".claude\\") ||
+    value.startsWith(".codex/") ||
+    value.startsWith(".codex\\") ||
+    value.startsWith("/") ||
+    value.startsWith("\\") ||
     value.includes("/") ||
     value.includes("\\") ||
     /^[A-Za-z]:[\\/]/.test(value) ||
@@ -93,11 +106,14 @@ function looksLikeFileReference(value: string): boolean {
 
 function referenceCandidate(tokens: string[]): string | null {
   const index = executableIndex(tokens);
-  if (looksLikeFileReference(tokens[index] ?? "")) return tokens[index];
-  for (const token of tokens.slice(index + 1)) {
-    if (!token.startsWith("-") && looksLikeFileReference(token)) return token;
+  if (looksLikeFileArgument(tokens[index] ?? "")) return tokens[index];
+  const next = tokens[index + 1];
+  if (!next || INLINE_CODE_OPTIONS.has(next.toLowerCase())) return null;
+  if (FILE_ARGUMENT_OPTIONS.has(next.toLowerCase())) {
+    const fileArgument = tokens[index + 2];
+    return looksLikeFileArgument(fileArgument ?? "") ? fileArgument : null;
   }
-  return null;
+  return !next.startsWith("-") && looksLikeFileArgument(next) ? next : null;
 }
 
 function parseCommand(provider: HookProvider, event: string, command: string) {
@@ -122,10 +138,17 @@ function parseConfig(provider: HookProvider, text: string): ParsedConfig {
   }
 
   const references: ParsedConfig["references"] = [];
+  let malformed = false;
   for (const [event, groups] of Object.entries(raw.hooks ?? {})) {
-    if (!Array.isArray(groups)) continue;
+    if (!Array.isArray(groups)) {
+      malformed = true;
+      continue;
+    }
     for (const group of groups) {
-      if (!isRecord(group) || !Array.isArray(group.hooks)) continue;
+      if (!isRecord(group) || !Array.isArray(group.hooks)) {
+        malformed = true;
+        continue;
+      }
       for (const hook of group.hooks) {
         if (isRecord(hook) && typeof hook.command === "string") {
           references.push(parseCommand(provider, event, hook.command));
@@ -133,7 +156,7 @@ function parseConfig(provider: HookProvider, text: string): ParsedConfig {
       }
     }
   }
-  return { present: true, references, failure: null };
+  return { present: true, references, failure: malformed ? "parse_error" : null };
 }
 
 async function readConfig(

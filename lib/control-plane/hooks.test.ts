@@ -136,4 +136,40 @@ describe("observeHookCoverage", () => {
       exists: true,
     });
   });
+
+  it("does not treat inline command code as a hook file reference", async () => {
+    const result = await observeHookCoverage("C:/repo", fakeFiles({
+      ".claude/settings.json": JSON.stringify({
+        hooks: {
+          SessionStart: [{
+            hooks: [{ type: "command", command: "node -e fake(C:\\outside\\TOP_SECRET.js)" }],
+          }],
+        },
+      }),
+    }));
+
+    expect(result.data?.references[0]).toMatchObject({
+      executableBasename: "node",
+      fileRef: null,
+      fileScope: "unknown",
+      exists: null,
+    });
+    expect(JSON.stringify(result)).not.toContain("TOP_SECRET");
+  });
+
+  it("degrades malformed hook groups without erasing valid peer evidence", async () => {
+    const result = await observeHookCoverage("C:/repo", fakeFiles({
+      ...completeClaudeFixture,
+      ".codex/hooks.json": JSON.stringify({
+        hooks: { SessionStart: "not-a-hook-group-list" },
+      }),
+    }));
+
+    expect(result.capability).toBe("degraded");
+    expect(result.error?.code).toBe("parse_error");
+    expect(result.data?.references).toEqual([expect.objectContaining({
+      provider: "claude",
+      fileRef: ".claude/hooks/actor-stamp.cjs",
+    })]);
+  });
 });
