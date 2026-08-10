@@ -3,6 +3,7 @@ import {
   availableObservation,
   failedObservation,
   observationSchema,
+  orchestraSnapshotSchema,
 } from "./types";
 
 describe("control-plane observation contract", () => {
@@ -50,5 +51,30 @@ describe("control-plane observation contract", () => {
       { observedAt: "2026-08-09T22:00:00.000Z" },
     );
     expect(result.data.sessions).toHaveLength(2);
+  });
+
+  it("keeps orchestra wire validation closed to raw coordination fields", () => {
+    const sections = {
+      activeWork: { total: 0, included: 0, rejected: 0, truncated: false },
+      fileLocks: { total: 0, included: 0, rejected: 0, truncated: false },
+      integrationQueue: { total: 0, included: 0, rejected: 0, truncated: false },
+      conflicts: { total: 0, included: 0, rejected: 0, truncated: false },
+      decisions: { total: 0, included: 0, rejected: 0, truncated: false },
+      impacts: { total: 0, included: 0, rejected: 0, truncated: false },
+    };
+    const parsed = orchestraSnapshotSchema.parse({
+      schemaVersion: 2,
+      supervisor: null,
+      activeWork: {},
+      fileLocks: {},
+      pendingIntegration: [],
+      unresolvedConflicts: [],
+      unresolvedImpacts: [],
+      recentDecisions: [],
+      sections,
+      raw_details_blob: "must not cross the wire boundary",
+    });
+
+    expect(parsed).not.toHaveProperty("raw_details_blob");
   });
 });
