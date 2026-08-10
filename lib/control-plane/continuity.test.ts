@@ -151,11 +151,20 @@ describe("supervisor continuity", () => {
     expect(diagnostics).not.toContainEqual(expect.objectContaining({ workKey: "work", code: "supervisor_continuity_stalled" }));
   });
 
-  it.each(["planning", "correction"] as const)("uses the correct live %s binding despite live decoys", (phase) => {
+  it.each(["planning", "correction"] as const)("uses the correct live %s binding despite inactive wrong-role decoys", (phase) => {
     const correct = { source: "herdr" as const, surface: "herdr" as const, sessionId: "correct" };
     const fixture = checkpointFor(phase, correct);
     fixture.checkpoint.supervisorBinding = phase === "correction" ? { source: "herdr", surface: "herdr", sessionId: "decoy" } : fixture.checkpoint.supervisorBinding;
     fixture.checkpoint.workerBinding = phase === "planning" ? { source: "herdr", surface: "herdr", sessionId: "decoy" } : fixture.checkpoint.workerBinding;
-    expect(evaluateSupervisorContinuity({ orchestra: orchestra(fixture), herdr: herdrWith(session("correct", "working"), session("decoy", "working")), now }).some(({ code }) => code === "supervisor_continuity_stalled" || code === "supervisor_continuity_unproven")).toBe(false);
+    expect(evaluateSupervisorContinuity({ orchestra: orchestra(fixture), herdr: herdrWith(session("correct", "working"), session("decoy", "idle")), now }).some(({ code }) => code === "supervisor_continuity_stalled" || code === "supervisor_continuity_unproven")).toBe(false);
+  });
+
+  it.each(["planning", "correction"] as const)("does not let a live wrong-role decoy mask an idle %s binding", (phase) => {
+    const correct = { source: "herdr" as const, surface: "herdr" as const, sessionId: "correct" };
+    const fixture = checkpointFor(phase, correct);
+    fixture.checkpoint.supervisorBinding = phase === "correction" ? { source: "herdr", surface: "herdr", sessionId: "decoy" } : fixture.checkpoint.supervisorBinding;
+    fixture.checkpoint.workerBinding = phase === "planning" ? { source: "herdr", surface: "herdr", sessionId: "decoy" } : fixture.checkpoint.workerBinding;
+    const diagnostics = evaluateSupervisorContinuity({ orchestra: orchestra(fixture), herdr: herdrWith(session("correct", "idle"), session("decoy", "working")), now });
+    expect(diagnostics).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_stalled" }));
   });
 });
