@@ -12,16 +12,20 @@
 
 - This is Stage 1.5 compatibility evidence only. It must not add a sixth control-plane source, a production communication provider, a UI, an automatic dispatcher, or a production dependency/install.
 - The upstream pin to re-verify before any executable work is `https://github.com/bcurts/agentchattr.git`, commit `c24f605c9b24fb7a98003f7930e2d5e7a7f7d297`, tag `v0.5.0`, root `VERSION` value `0.5.0`, and MIT root `LICENSE`. A changed, absent, or unreviewed pin blocks the spike.
+- `docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/provenance.md` is acquired and independently approved **before** any dependency, server, process-monitor, Desktop-profile, Runtime Manager, or MCP work. The gate is one-way: later tasks may consume its approval but may not create, repair, or retroactively approve it.
 - No upstream source, UI asset, launcher, wrapper, or copied code enters Scotty. If future reuse is proposed, stop this spike and obtain a new provenance/MIT-attribution review.
 - AgentChattr owns only live messages, channels, replies, mentions, chat presence, unread/queued state, its stable message UID, and its optional browser UI. It has no task, decision, lease, session, pane, process, dispatch, Git, or identity authority.
 - Beads is the only task/dependency/status/assignment authority and the only durable authority for decisions, approvals, review verdicts, directives, human gates, and handoffs. AgentChattr Jobs are disabled or ignored; persistent Rules are not policy and must not be created or used.
 - Herdr alone controls a Herdr pane. The spike must not invoke AgentChattr CLI launchers, Windows wrappers, trigger-queue consumers, terminal injection, auto-wake, pane focus, pane prompt, agent launch, or a permission-bypass launcher. A mention never creates a lease or work claim.
 - Runtime Manager alone registers, starts, stops, and inventories the disposable service. Scotty must not call lifecycle endpoints directly. Its load-admission decision applies to start and restart.
 - Bind every test service endpoint to `127.0.0.1` only, use non-conflicting ports recorded in the evidence manifest, and retain its data directory under the disposable spike root. Network mode is prohibited.
-- Keep credentials, raw configuration, queue files, absolute user paths, command lines, and raw tokens out of source control, browser payloads, screenshots, and reports. Evidence uses placeholders, stable hashes, redacted relative paths, and process PID/executable/start-time metadata only.
+- Keep credentials, raw configuration, queue files, absolute user paths, raw command lines, and raw tokens out of source control, browser payloads, screenshots, and reports. Evidence may retain only a reviewed sanitized argv template (executable basename plus literal safe flags, with `<data-dir>`, `<port>`, and `<secret>` placeholders) and a stable argv hash; tests must reject raw command lines while accepting that sanitized template/hash.
 - Identity, logical session, execution surface, orchestration role, and Bead/task remain independent many-to-many dimensions. No display/provider-name matching, channel membership, reply, mention, role, or Bead ID may imply an identity binding, lease, or exclusive assignment.
 - A message enters an attributed federated projection only after an explicit verified binding to the exact external instance/session/surface evidence. Renamed, reclaimed, or restart-mismatched identities become unbound; never remap them by display name.
 - Desktop read/send is tested independently for Claude Code Desktop and Codex Desktop. Unsupported or unavailable is recorded per client; neither result implies desktop wake, launch, injection, or the other client's capability.
+- The live interval has continuous bounded evidence: process/child creation monitoring, trigger-queue event/hash monitoring, and monotonic Herdr pane revision/input-control auditing start before the service and end after deregistration. Any monitor start failure, event-stream loss, sample gap beyond its bound, or missing final record is `unknown` and therefore a required no-go.
+- The spike owns a pure per-channel loop-guard state machine and an operator-invoked autonomous-send gate. Every autonomous test `chat_send` must receive an allow decision from that gate before an MCP request is made; a seventh attempt is locally rejected and must have no upstream request/message evidence. Only directly evidenced authenticated human-origin activity resets the guard; `/continue`, agent-origin text, and unauthenticated events never reset it.
+- Live admission is quantitative and recorded: available physical memory must be at least 4 GiB; aggregate working set of browser, Node, Python, Claude, Codex, and Herdr processes must not exceed 70% of physical memory; and no other resource-heavy job may be active. The manifest records each field, the selected-port preflight and immediate pre-bind recheck, and Runtime Manager's nonempty admission correlation token plus explicit `admitted` result. Missing or denied evidence blocks the start.
 - No merge, production deployment, production install, production configuration, or later-stage planning occurs in this spike. The future branch remains a separately reviewable spike branch until the go/no-go decision is accepted.
 
 ## Boundaries and non-goals
@@ -32,17 +36,17 @@ The spike answers compatibility questions. It does **not** design the production
 
 ## Future spike branch file map
 
-Create the following files on a new, clean spike branch only after the execution gate. The artifact directory may contain redacted JSON/text fixtures and report material, never credentials or raw upstream data. Do not create any of these files while preparing this plan.
+The provenance artifact below is created on this plan-review branch solely to establish the one-way pre-execution gate. After it has been independently approved, create the remaining files on a new, clean spike branch. The artifact directory may contain redacted JSON/text fixtures and report material, never credentials or raw upstream data.
 
 | Path | Responsibility |
 | --- | --- |
 | `tools/agentchattr-compatibility-spike/README.md` | Repeatable operator runbook, exact stop conditions, redaction rules, teardown owner, and authoritative list of upstream interfaces actually discovered. |
 | `tools/agentchattr-compatibility-spike/spike-contract.ts` | Pure, spike-only validation of the evidence manifest, identity fixture, delivery vocabulary, cursor/UID fixtures, loop count, and promotion-result records; no application import and no lifecycle call. |
 | `tools/agentchattr-compatibility-spike/spike-contract.test.ts` | TDD tests for the pure contract and all required negative/unknown classifications. |
-| `tools/agentchattr-compatibility-spike/run-spike.ps1` | Explicit operator-invoked harness that captures sanitized process/inventory/message evidence. It must refuse network bind, unknown upstream revision, missing Runtime Manager ownership, enabled prohibited paths, missing test Bead, or missing manual MCP client confirmation. |
+| `tools/agentchattr-compatibility-spike/run-spike.ps1` | Explicit operator-invoked harness and autonomous-send gate. It captures sanitized process/inventory/message evidence; runs event-driven process/child, trigger-queue hash, and monotonic Herdr revision/input-control monitors for the whole live interval; and refuses network bind, unknown upstream revision, missing Runtime Manager ownership/admission token, enabled prohibited paths, monitor gaps, missing test Bead, or missing manual MCP client confirmation. |
 | `tools/agentchattr-compatibility-spike/fixtures/identity-bindings.json` | Synthetic many-to-many bindings: one actor on multiple sessions/surfaces, one session across roles and zero/multiple Beads, one Bead involving multiple bound actors, and stale/revoked/unverified bindings. Never use a real name or token. |
 | `tools/agentchattr-compatibility-spike/fixtures/message-contract.json` | Expected stable UID/channel/thread/parent/cursor/idempotency cases, including overlap, replay, restart, deletion/tombstone, retry, equal/near-equal timestamps, queue state, and unknown vocabulary. |
-| `docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/provenance.md` | Independently reviewed pin, Windows compatibility, license/hash, upstream server/API/MCP version or explicit absence, and copy/attribution conclusion. |
+| `docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/provenance.md` | Already-created, independently reviewed pre-execution pin, Windows compatibility, license/hash, upstream server/API/MCP version or explicit absence, and copy/attribution conclusion. It is read-only to the spike branch. |
 | `docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/manifest.json` | Sanitized run metadata, approved port numbers, relative disposable root identifier, tool inventory, test-Bead ID, result classifications, and artifact hashes. |
 | `docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/report.md` | Case-by-case expected/observed result, evidence links/hashes, failures, unsupported/unknown findings, teardown confirmation, and signed go/no-go recommendation. |
 
@@ -63,13 +67,19 @@ The upstream interface must be discovered from the pinned source rather than gue
 | Beads | Inspect the current test Bead/comment write/read interface and its acknowledgement fields. Determine whether a write can be verified against Bead ID, stable Scotty decision ID, choice, and idempotency key without inventing a second durable store. Absence of an atomic acknowledged mechanism is a no-go for production planning, not a reason to extend Beads in this spike. |
 | Desktop clients | Use each actual Desktop MCP client separately; capture client/version, server registration scope, authenticated `chat_read`, authenticated `chat_send`, and resulting stored message. A client that cannot safely participate is `unsupported` or `unknown`, not assumed compatible. |
 
-## Execution gate before Task 1
+## One-way provenance gate before any execution preparation
+
+- [ ] Re-fetch only the GitHub REST/raw endpoints listed in `provenance.md`; compare the repository URL, default branch/current commit, latest tag/release, root `VERSION`, license hash, and identified source paths/lines to the committed artifact. Do not clone or inspect a local upstream checkout during this step. Record a mismatch as `fail` in the proposed spike report and stop.
+- [ ] Have an independent reviewer append their identity, UTC decision, repeated pin/current comparison, MIT-obligation conclusion, and Windows direct-server/no-wrapper conclusion to `provenance.md`. An explicit `approved` result is the only transition into the execution gate. `hold`, `fail`, `unknown`, absent review, or a changed revision stops the spike before any dependency, service, monitoring, Runtime Manager, Desktop, process, or MCP action.
+
+## Execution gate before Task 1 (only after provenance approval)
 
 - [ ] Confirm the future branch is a new spike branch from the reviewed Scotty baseline, is clean, and has an isolated branch owner. Do not use a worktree, alter another agent's work, or begin with a pre-existing AgentChattr checkout.
 - [ ] Register the spike Bead/work ownership using the repository's Beads workflow. Create one disposable test Bead clearly marked as a compatibility fixture; do not touch an active work Bead or a human gate.
-- [ ] Independently review and approve `provenance.md` **before** cloning, installing, configuring, or running upstream executable material. Record the reviewer, UTC time, repository URL, exact commit/tag, observed `VERSION`, server/API/MCP version evidence or explicit absence, root license SHA-256, Windows compatibility conclusion, and MIT obligations. A revision change or a missing approval halts the spike.
-- [ ] Run a read-only resource/process preflight. Capture `Get-Process` PID/name/working-set data for browser, Node, Python, Claude, Codex, Herdr, and current AgentChattr-named processes; capture `Get-NetTCPConnection -State Listen` for the selected loopback ports; and capture Runtime Manager's authenticated service inventory. Reuse nothing except Runtime Manager and the one pre-existing, operator-confirmed Herdr pane. If memory pressure, a conflicting listener, an existing AgentChattr service, or another resource-heavy job is present, stop and obtain explicit operator direction.
-- [ ] Reserve non-conflicting loopback ports in the manifest after the preflight, and verify every selected endpoint resolves to `127.0.0.1`. Do not use `0.0.0.0`, LAN addresses, port forwarding, or a public tunnel.
+- [ ] Verify the independent `approved` row in `provenance.md` is earlier than this gate's UTC start. Copy its artifact hash and review timestamp into the manifest; do not edit the provenance artifact from this point onward.
+- [ ] Run a read-only resource/process preflight. Record total/available physical memory, the 4-GiB availability threshold, the aggregate working set and 70%-of-physical threshold for browser/Node/Python/Claude/Codex/Herdr, each selected process's sanitized PID/name/working set, and a declaration that no other resource-heavy job is active. Capture `Get-NetTCPConnection -State Listen` for candidate ports and Runtime Manager's authenticated inventory. If a threshold fails, a conflicting listener/AgentChattr service exists, or evidence is incomplete, stop and classify the admission `fail`/`unknown`.
+- [ ] Reserve non-conflicting loopback ports in the manifest after the preflight. Immediately before Runtime Manager bind/start, repeat the listener check and record the second result plus the actual `127.0.0.1` bind. Do not use `0.0.0.0`, LAN addresses, port forwarding, or a public tunnel.
+- [ ] Obtain and record Runtime Manager's service-admission correlation token and explicit terminal `admitted` result before it starts the named service. A missing/empty token, denied/unknown result, or an inventory that cannot identify the named service blocks the start; Scotty does not substitute a direct start.
 - [ ] Create the disposable root and verify it is outside the Scotty checkout. Use this exact pattern, replacing only `<UTC-run-id>`: `New-Item -ItemType Directory -Path "$env:TEMP\\scotty-agentchattr-spike-<UTC-run-id>"`. Record only the relative root label in committed evidence.
 - [ ] Fetch the reviewed upstream source without switching the Scotty branch: `git clone --filter=blob:none --no-checkout https://github.com/bcurts/agentchattr.git "$env:TEMP\\scotty-agentchattr-spike-<UTC-run-id>\\upstream"`; `git -C "<root>\\upstream" fetch --depth=1 origin c24f605c9b24fb7a98003f7930e2d5e7a7f7d297`; `git -C "<root>\\upstream" checkout --detach c24f605c9b24fb7a98003f7930e2d5e7a7f7d297`. Re-run the provenance commands in the table, compare them to the approved artifact, and stop on any mismatch.
 - [ ] Do not start the service until the source inspection has identified a direct documented server invocation and a documented way to disable or avoid every prohibited launcher, wrapper, trigger-queue, injection, and auto-wake path. If upstream cannot provide that separation, classify the spike `fail` and proceed directly to teardown/reporting.
@@ -119,43 +129,38 @@ The upstream interface must be discovered from the pinned source rather than gue
 
 ---
 
-### Task 2: Record independently reviewed upstream provenance and safe Windows configuration
+### Task 2: Validate the already-approved direct-server configuration boundary
 
 **Files:**
-- Create: `docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/provenance.md`
 - Modify: `docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/manifest.json`
 - Modify: `tools/agentchattr-compatibility-spike/README.md`
 
 **Interfaces:**
-- Consumes: the execution-gate checkout and source inspection.
-- Produces: an independently approved provenance gate plus a sanitized configuration matrix that maps each prohibited path to observed disabled/absent evidence.
+- Consumes: the immutable, independently approved provenance artifact and the execution-gate checkout.
+- Produces: a sanitized configuration matrix that maps each prohibited path to observed disabled/absent evidence.
 - Never produces: copied upstream source/assets, an application configuration field, a production service registration, or a Desktop configuration change.
 
-- [ ] **Step 1: Capture the provenance facts before any executable launch**
+- [ ] **Step 1: Verify the provenance gate without editing it**
 
-  Run exactly: `git -C "<root>\\upstream" remote get-url origin`; `git -C "<root>\\upstream" rev-parse HEAD`; `git -C "<root>\\upstream" tag --points-at HEAD`; `Get-Content -Raw "<root>\\upstream\\VERSION"`; and `Get-FileHash "<root>\\upstream\\LICENSE" -Algorithm SHA256`. Also record the upstream files/commands that prove Windows server support and the server/API/MCP version, or explicitly record that each version is absent.
+  Before creating the disposable checkout, compare the approved reviewer row and artifact hash against the manifest copy made in the execution gate. After checkout, verify the checked-out commit, tag, root `VERSION`, and license hash against that immutable artifact. A mismatch stops the spike; do not amend, replace, or approve `provenance.md` during Task 2.
 
-- [ ] **Step 2: Obtain the required independent provenance review**
+- [ ] **Step 2: Write failing configuration-boundary and redaction tests**
 
-  The reviewer compares every captured fact to the approved design pin, confirms MIT/license obligations and Windows compatibility, and signs `provenance.md`. Any mismatch, missing version evidence, license ambiguity, wrapper-only path, or unapproved revision is `fail`; skip all live message tests and go to Task 6.
+  Add fixture-driven cases requiring a named Runtime Manager service, fixed disposable per-project data directory, `127.0.0.1` bind, auth enabled, direct server invocation, a nonempty admission correlation token and `admitted` result, and explicit disabled/unused evidence for launchers, wrappers, trigger-queue consumer, terminal injection, auto-wake, Jobs, and persistent Rules. Include tests that refuse raw tokens, raw config, queue contents, absolute paths, and raw command lines while accepting a sanitized argv template and argv hash.
 
-- [ ] **Step 3: Write failing configuration-boundary tests**
-
-  Add fixture-driven cases requiring a named Runtime Manager service, fixed disposable per-project data directory, `127.0.0.1` bind, auth enabled, direct server invocation, and explicit disabled/unused evidence for launchers, wrappers, trigger-queue consumer, terminal injection, auto-wake, Jobs, and persistent Rules. Include a test that refuses raw tokens, raw config, queue contents, absolute paths, command lines, and browser payloads in manifest/report serialization.
-
-- [ ] **Step 4: Run the focused tests before writing the runbook/configuration matrix**
+- [ ] **Step 3: Run the focused tests before writing the runbook/configuration matrix**
 
   Run: `npm run test:unit -- tools/agentchattr-compatibility-spike/spike-contract.test.ts`.
 
   Expected: failure until the manifest and runbook make each required boundary explicit.
 
-- [ ] **Step 5: Complete the redacted runbook and matrix, then re-run tests**
+- [ ] **Step 4: Complete the redacted runbook and matrix, then re-run tests**
 
   The runbook must use the actual direct invocation found in pinned upstream documentation, not a guessed command. It must state that Runtime Manager receives the named registration and is the only starter/stopper; Scotty never calls lifecycle endpoints. Capture a before/after Runtime Manager `GET /health`/`GET /services` inventory using the existing authenticated observer semantics, with tokens redacted. Re-run the focused and full unit suite; expected result is pass.
 
-- [ ] **Step 6: Commit provenance/runbook evidence only after independent review**
+- [ ] **Step 5: Commit runbook/configuration evidence only**
 
-  Use an explicit pathspec containing the three listed files. If independent review did not approve the artifact, do not commit a passing provenance claim; commit only the redacted failure report at Task 6 if policy permits.
+  Use an explicit pathspec containing the two listed files. The provenance artifact is a prior one-way gate and is not part of this task's commit.
 
 ---
 
@@ -169,12 +174,12 @@ The upstream interface must be discovered from the pinned source rather than gue
 
 **Interfaces:**
 - Consumes: independently approved provenance, named Runtime Manager registration, a manually configured MCP client, and one operator-confirmed already-running Herdr pane.
-- Produces: sanitized tool-list/request/result/stored-message evidence for authenticated `chat_send` and `chat_read`, plus before/after process, trigger-queue, Herdr, and Runtime Manager inventory evidence.
+- Produces: sanitized tool-list/request/result/stored-message evidence for authenticated `chat_send` and `chat_read`, plus continuous process/child, trigger-queue, Herdr pane, and Runtime Manager evidence with monotonic timestamps and a final exact-inventory comparison.
 - Does not produce: a new agent, a prompted pane, an auto-wake, a lease, a Bead assignment, a Jobs record, a Rule, or a production MCP configuration.
 
 - [ ] **Step 1: Add failing no-autonomous-ownership tests**
 
-  Add cases that require: the service is loopback/authenticated before a tool call; `tools/list` exposes both exact required tool names; an unauthenticated request is rejected; a successful send and read produce an upstream stored-message record; and the before/after evidence contains no new Claude/Codex/AgentChattr wrapper/terminal-injection process, no Herdr pane revision/control change, no trigger-queue consumption, and no Runtime Manager inventory change other than the one named server.
+  Add cases that require: the service is loopback/authenticated before a tool call; `tools/list` exposes both exact required tool names; an unauthenticated request is rejected; a successful send and read produce an upstream stored-message record; and continuous evidence contains no new Claude/Codex/AgentChattr wrapper/terminal-injection process, no unallowed child process, no unexplained Herdr pane revision/state-change/control event, no trigger-queue create/change/delete/hash event, and no Runtime Manager inventory change other than the one named server. Add a failing case for a missing process event subscription, a sample interval exceeding two seconds, a nonmonotonic timestamp/revision sequence, a missing final capture, or an unverifiable input-control audit; each must classify no-spawn evidence `unknown`/`fail`.
 
 - [ ] **Step 2: Run focused tests and confirm the safety harness is absent**
 
@@ -184,17 +189,21 @@ The upstream interface must be discovered from the pinned source rather than gue
 
 - [ ] **Step 3: Implement the operator-invoked harness with refusal-first behavior**
 
-  The harness may read process/listener state, obtain the existing read-only Herdr snapshot, and capture Runtime Manager inventory. It must require the operator to supply sanitized evidence files for actual MCP initialization, `tools/list`, `chat_send`, and `chat_read`; it must not invent an MCP client, type into a Herdr pane, execute an AgentChattr launcher, or make a lifecycle request itself. It stops if the discovered tool schemas differ materially from the approved names/capabilities.
+  The harness may read process/listener state, obtain the existing read-only Herdr snapshot, and capture Runtime Manager inventory. Before the Runtime Manager start, it starts a `Win32_ProcessStartTrace` event subscription and a one-second process-tree snapshot sampler, both timestamped from one `System.Diagnostics.Stopwatch`; it runs them until after Runtime Manager deregistration and final inventory capture. Records contain only PID, parent PID, creation time, executable basename, expected-service flag, and a sanitized argv template/hash where available. A subscription failure, event-consumer loss, sampler interval over two seconds, or gap in monotonic sequence is `unknown`/`fail`.
+
+  It also snapshots the exact Herdr `paneId`, `revision`, and `stateChangeSeq` before the live interval and once per second through the final capture. It records the harness's input-control invocation count as zero and requires an operator-supplied, sanitized Herdr control audit covering the same interval; if the platform cannot prove that AgentChattr made no input-control operation, the result is `unsupported`/`NO-GO`, not inferred from a quiet pane. It watches every identified trigger-queue file/directory from the pinned source configuration using creation/change/delete events plus a SHA-256 value before/after and after each event; an unknown queue location, watcher loss, or hash gap is `unknown`/`fail`.
+
+  The harness must require the operator to supply sanitized evidence files for actual MCP initialization, `tools/list`, `chat_send`, and `chat_read`; it must not invent an MCP client, type into a Herdr pane, execute an AgentChattr launcher, or make a lifecycle request itself. It stops if the discovered tool schemas differ materially from the approved names/capabilities.
 
 - [ ] **Step 4: Perform the one-service MCP exercise, one resource-heavy job at a time**
 
-  Start the isolated named service through Runtime Manager only after its load admission. From a manually configured MCP client, capture authentication and invoke `chat_send` once in a disposable channel, then `chat_read` to retrieve the resulting stored message. Verify direct evidence for every reported state. REST/WebSocket/browser observations may be supplementary but cannot replace this MCP gate.
+  Start the isolated named service through Runtime Manager only after its recorded admission correlation token/result and immediate pre-bind port recheck. From a manually configured MCP client, capture authentication and invoke one human/operator `chat_send` in a disposable channel, then `chat_read` to retrieve the resulting stored message. Verify direct evidence for every reported state. REST/WebSocket/browser observations may be supplementary but cannot replace this MCP gate.
 
   Separately have the already-running Herdr-managed CLI participant manually perform the same MCP read/send. It must be a human/operator action in that pane; capture its pre/post `herdr api snapshot` and prove AgentChattr neither owns nor types into the pane.
 
 - [ ] **Step 5: Exercise the offline/unbound mention negative case**
 
-  Mention an offline or deliberately unbound disposable participant. Capture process/inventory/queue evidence before and after. Report `queued` only if upstream directly acknowledges it; otherwise `unknown`. In all cases prove no CLI launch, process spawn, console injection, trigger-queue consumption, pane action, Runtime Manager inventory mutation, lease, or work claim.
+  Mention an offline or deliberately unbound disposable participant. Capture continuous process/inventory/queue/Herdr evidence through the whole interval. Report `queued` only if upstream directly acknowledges it; otherwise `unknown`. In all cases prove no CLI launch, process spawn, console injection, trigger-queue consumption, pane action, Runtime Manager inventory mutation, lease, or work claim.
 
 - [ ] **Step 6: Re-run contract tests and commit only harness changes**
 
@@ -223,7 +232,9 @@ The upstream interface must be discovered from the pinned source rather than gue
 
 - [ ] **Step 2: Write failing identity and loop-guard tests**
 
-  Use the synthetic fixture to prove an attributed message requires an exact verified binding that includes logical session, actor, provider/model, execution surface, role, runtime session ref, Herdr pane ref where applicable, upstream instance/display name, Beads actor, bound-at/by, and validity. Prove rename/reclaim/restart mismatch marks it unbound. Send six consecutive agent-originated disposable messages with no human message; the fixture/harness must reject a seventh autonomous message. A verified human message resets the count; `/continue` or an upstream control alone cannot.
+  Use the synthetic fixture to prove an attributed message requires an exact verified binding that includes logical session, actor, provider/model, execution surface, role, runtime session ref, Herdr pane ref where applicable, upstream instance/display name, Beads actor, bound-at/by, and validity. Prove rename/reclaim/restart mismatch marks it unbound; a role change updates time-bounded role history without minting an identity; a channel membership, mention, or reply creates neither binding nor lease; a provider binding cannot be keyed by Bead/channel; stale/revoked bindings cannot attribute; and same-display-name/provider actors never merge.
+
+  Define pure per-channel states `active(0)` through `active(6)` and `paused(6)`. `requestAutonomousSend(channel, evidence)` may transition only `active(0..5)` to the next count and returns an allow record before MCP; `active(6)` returns a rejected-before-MCP record and remains paused. `recordAuthenticatedHumanOrigin(channel, evidence)` resets only when it carries direct upstream UID, channel, timestamp, authenticated human-origin proof, and a verified human identity; agent text, an unauthenticated event, `/continue`, and an upstream control never reset. Test six consecutive agent-originated disposable send requests, a seventh rejection with no MCP invocation/upstream UID, the human-only reset, and every invalid reset source.
 
 - [ ] **Step 3: Write failing promotion/reconciliation tests**
 
@@ -233,7 +244,7 @@ The upstream interface must be discovered from the pinned source rather than gue
 
 - [ ] **Step 4: Run tests and implement only spike-contract validation**
 
-  Run `npm run test:unit -- tools/agentchattr-compatibility-spike/spike-contract.test.ts`, confirm failure, then implement validation without adding a Scotty provider or calling a production route. Re-run focused and full tests; expected result is pass for the harness logic, not a claim that upstream supplies every semantic.
+  Run `npm run test:unit -- tools/agentchattr-compatibility-spike/spike-contract.test.ts`, confirm failure, then implement validation without adding a Scotty provider or calling a production route. Implement the operator-invoked `Invoke-GuardedAutonomousSend` wrapper in `run-spike.ps1` around every autonomous test MCP send; it must persist its pre-send decision and refuse to issue the MCP request when paused. If any autonomous send can bypass interception, do not run autonomous live cases: record `unsupported` and `NO-GO`. Re-run focused and full tests; expected result is pass for the harness logic, not a claim that upstream supplies every semantic.
 
 - [ ] **Step 5: Capture bounded live evidence and fault injection**
 
@@ -255,8 +266,10 @@ The upstream interface must be discovered from the pinned source rather than gue
 
 **Files:**
 - Modify: `tools/agentchattr-compatibility-spike/README.md`
+- Modify: `tools/agentchattr-compatibility-spike/spike-contract.test.ts`
+- Modify: `tools/agentchattr-compatibility-spike/fixtures/message-contract.json`
 - Modify: `docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/manifest.json`
-- Modify: `docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/report.md`
+- Create: `docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/report.md`
 
 **Interfaces:**
 - Consumes: the already proven loopback/authenticated MCP service and actual Desktop clients.
@@ -273,22 +286,22 @@ The upstream interface must be discovered from the pinned source rather than gue
 
 - [ ] **Step 3: Manually verify each actual MCP client**
 
-  With no new launchers or automatic wake enabled, separately configure the already-running isolated loopback server in Claude Code Desktop and Codex Desktop according to that client's supported local MCP configuration. For each client, capture authenticated `chat_read`, authenticated `chat_send`, and the stored message. If configuration or operation cannot be performed safely, record why and use `unsupported` or `unknown`.
+  With no new launchers or automatic wake enabled, separately configure the already-running isolated loopback server only in a disposable profile/configuration root for Claude Code Desktop and then Codex Desktop. The operator must first prove that the client supports a profile/config-directory override that neither reads nor writes the normal client configuration; otherwise classify that client `unsupported` and do not add a temporary MCP entry. For each supported disposable profile, capture authenticated `chat_read`, authenticated `chat_send`, and the stored message. If configuration or operation cannot be performed safely, record why and use `unsupported` or `unknown`.
 
 - [ ] **Step 4: Verify negative boundaries after each client attempt**
 
-  Compare the process, Herdr, trigger-queue, and Runtime Manager inventory captures with the Task 3 baseline. Any launcher, wrapper, auto-wake, spawn, injection, or pane control is a required failure even if read/send works.
+  Compare the continuous process/child, Herdr revision/input-control, trigger-queue hash, and Runtime Manager evidence with the Task 3 baseline. Any launcher, wrapper, auto-wake, spawn, injection, pane control, monitor gap, or client-profile leakage into normal configuration is a required failure even if read/send works.
 
 - [ ] **Step 5: Commit the redacted capability evidence only**
 
-  Use an explicit pathspec containing only the three listed files. Do not commit client configuration files, tokens, screenshots containing secrets, or raw server logs.
+  Use an explicit pathspec containing exactly the five listed files. Do not commit client configuration files, tokens, screenshots containing secrets, or raw server logs.
 
 ---
 
 ### Task 6: Review the gate artifact, decide go/no-go, and tear down safely
 
 **Files:**
-- Create: `docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/report.md`
+- Modify: `docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/report.md`
 - Modify: `docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/manifest.json`
 - Modify: `tools/agentchattr-compatibility-spike/README.md`
 
@@ -300,7 +313,7 @@ The upstream interface must be discovered from the pinned source rather than gue
 
   Include host context; upstream URL/commit/tag/VERSION/license hash; discovered server/API/MCP version or absence; exact redacted direct-server/Runtime-Manager/MCP commands; ports and auth posture; all expected/observed results; artifact locations/hashes; process/pane/inventory comparisons; no-spawn evidence; and teardown results. For every required case classify exactly `pass`, `fail`, `unsupported`, or `unknown`.
 
-  Required rows are: provenance/license/Windows; Runtime Manager ownership/load admission; loopback/auth/no-secret boundary; manual MCP `chat_send`/`chat_read`; Herdr managed-pane manual participation; offline/unbound mention no-spawn; UID/pagination/reply/order/dedupe/retry/restart/deletion; queue/delivery/read vocabulary; failure/reconnect/token/event gap/Herdr-unavailable; six-message guard and human-only resume; explicit binding/many-to-many/rename handling; each required Beads promotion/reconciliation case; Claude Desktop; Codex Desktop; Jobs/Rules disabled; and teardown.
+  Required rows are: provenance/license/Windows; Runtime Manager ownership/load admission token/result; quantitative resource admission and pre-bind port recheck; loopback/auth/no-secret/sanitized-argv boundary; manual MCP `chat_send`/`chat_read`; whole-interval process/child/trigger-queue/Herdr monitor continuity; Herdr managed-pane manual participation; offline/unbound mention no-spawn; UID/pagination/reply/order/dedupe/retry/restart/deletion; queue/delivery/read vocabulary; failure/reconnect/token/event gap/Herdr-unavailable; six-message pre-MCP guard and authenticated-human-only resume; explicit binding/many-to-many/rename/role/no-implicit-binding handling; each required Beads promotion/reconciliation case; Claude Desktop disposable profile; Codex Desktop disposable profile; Jobs/Rules disabled; and teardown/deregistration/profile restoration.
 
 - [ ] **Step 2: Perform the independent review against the approved design**
 
@@ -308,15 +321,17 @@ The upstream interface must be discovered from the pinned source rather than gue
 
 - [ ] **Step 3: Apply the go/no-go rule**
 
-  `GO` for a separately reviewed **production-planning** proposal requires `pass` for the required provenance, Windows loopback/authenticated MCP read/send, no-autonomous-spawn/injection, explicit identity/many-to-many, UID/order/dedupe/retry/reconnect, six-message/human-resume, and acknowledged Beads durability/reconciliation cases. Any required `fail`, `unknown`, or `unsupported` is `NO-GO`. Desktop capability may remain independently `unsupported`/`unknown`; it must be displayed honestly and cannot enable wake/launch/injection, but it must be called out as an unresolved production limitation.
+  `GO` for a separately reviewed **production-planning** proposal requires `pass` for the required provenance, quantitative admission/RM token/result/port bind, Windows loopback/authenticated MCP read/send, uninterrupted no-spawn/no-injection monitoring, pre-MCP six-message guard with authenticated-human-only resume, explicit identity/many-to-many, UID/order/dedupe/retry/reconnect, and acknowledged Beads durability/reconciliation cases. Any required `fail`, `unknown`, or `unsupported` is `NO-GO`. Desktop capability may remain independently `unsupported`/`unknown`; it must be displayed honestly and cannot enable wake/launch/injection, but it must be called out as an unresolved production limitation.
 
 - [ ] **Step 4: List production-planning blockers without solving them here**
 
   The report must state whether the following remain unanswered: direct Windows server invocation with every prohibited path disabled; stable UID and cursor/event semantics; explicit queue/delivery/read semantics; deterministic pagination/replay behavior; auth/token rotation behavior; a safe Runtime Manager registration lifecycle; exact durable Beads idempotency/acknowledgement/verification capability; identity binding storage/expiry/revocation; source-safe deleted-message/tombstone behavior; observability/provenance payload limits; each Desktop client's supported MCP configuration; and a separately reviewed audited Herdr wake adapter. Any unanswered required item blocks production planning.
 
-- [ ] **Step 5: Stop and remove only spike-owned resources**
+- [ ] **Step 5: Stop, deregister, restore, and remove only verified spike-owned resources**
 
-  Stop the named service through Runtime Manager. Verify with authenticated Runtime Manager inventory, `Get-Process`, and `Get-NetTCPConnection` that the process/listeners the spike launched have exited while pre-existing user processes remain untouched. Inspect the disposable root; if it contains only spike-owned source/runtime/state, remove it with `Remove-Item -LiteralPath "<root>" -Recurse -Force`. If ownership is uncertain, do not remove it; report the exact path to the operator. Mark teardown `pass` only after verification.
+  Stop **and deregister** the named service through Runtime Manager, then verify with the authenticated inventory that its registration and service-owned record are absent. Remove each temporary Desktop MCP entry and credential only from the verified disposable profile roots, then verify the normal client configuration hashes and the complete process/listener/Runtime Manager inventory exactly match the preflight baseline except for documented unrelated external changes. Verify with `Get-Process` and `Get-NetTCPConnection` that processes/listeners the spike launched have exited while pre-existing user processes remain untouched.
+
+  Inspect every proposed deletion target. Only when the service registration, Desktop profile/config root, credentials, and disposable root are proven spike-owned may the operator delete them. If any ownership, restoration, deregistration, or inventory comparison is uncertain, classify teardown `fail`, perform no deletion for the uncertain target, and report its sanitized relative identifier to the operator. Mark teardown `pass` only after all required restoration and exact-inventory verification succeeds.
 
 - [ ] **Step 6: Final validation and constrained handoff**
 
@@ -326,19 +341,19 @@ The upstream interface must be discovered from the pinned source rather than gue
 
 | Approved design requirement | Plan coverage |
 | --- | --- |
-| v0.5.0/c24f605/MIT pin and independent review before executable work | Global constraints; execution gate; Task 2; Task 6 provenance row |
+| v0.5.0/c24f605/MIT pin and one-way independent review before any execution preparation | Global constraints; one-way provenance gate; immutable Task 2 check; Task 6 provenance row |
 | Optional transport only; no production provider/control-plane source | Goal/architecture; boundaries; all task file limits |
 | Beads-only work/durable authority; Jobs/Rules excluded | Global constraints; Tasks 2, 4, and 6 |
-| Herdr pane controller only; no launcher/wrapper/injection/auto-wake/spawn | Global constraints; execution gate; Task 3; Task 5; Task 6 |
+| Herdr pane controller only; no launcher/wrapper/injection/auto-wake/spawn | Global constraints; continuous Task 3 audit; Task 5; Task 6 |
 | Runtime Manager owns registration and lifecycle/load admission | Global constraints; interfaces table; Tasks 2, 3, and 6 |
-| Explicit many-to-many identity prerequisite | Global constraints; Task 1 fixture; Task 4 tests/live evidence |
+| Explicit many-to-many identity prerequisite and no implicit/reused identity | Global constraints; Task 1 fixture; Task 4 negative tests/live evidence |
 | Authenticated loopback Windows MCP `chat_send`/`chat_read` | Global constraints; Task 3 MCP gate |
 | Messages/channels/replies/order/dedupe/retry/reconnect/deletion | Task 1 contract; Task 4 live matrix |
-| Queue/delivery/read vocabulary, loop pause, human-only resume | Task 1; Task 3 offline mention; Task 4 |
+| Queue/delivery/read vocabulary, pre-MCP loop pause, authenticated-human-only resume | Task 1; Task 3 offline mention; Task 4 |
 | Acknowledged idempotent Beads promotion and decision outcome mirroring | Task 1 promotion record; Task 4 safe mirror; Task 6 go/no-go |
 | Failure behavior and no false delivery/lease/acceptance | Global constraints; Tasks 3-4; Task 6 review |
 | Independent Desktop capability honesty | Global constraints; Task 5; Task 6 blockers |
-| Resource preflight, evidence, teardown, no merge/install | Execution gate; Tasks 3 and 6 |
+| Quantitative resource/RM/port admission, continuous monitoring, teardown/deregistration, no merge/install | Execution gate; Tasks 3 and 6 |
 
 ## Execution handoff
 
