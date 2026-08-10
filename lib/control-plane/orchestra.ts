@@ -10,6 +10,8 @@ import {
   type Observation,
   type OrchestraSectionStats,
   type OrchestraSnapshot,
+  type SupervisorCheckpointProjection,
+  supervisorCheckpointSchema,
 } from "./types";
 
 const HISTORY_LIMIT = 50;
@@ -48,6 +50,7 @@ const rawActiveWorkSchema = z.object({
   repo: z.string().nullish(),
   branch: z.string().nullish(),
   files_touching: z.array(z.string()).optional(),
+  supervision: z.unknown().optional(),
 }).passthrough();
 const rawFileLockSchema = z.object({
   locked_by: z.string(),
@@ -179,6 +182,47 @@ function boundedList(values: string[] | undefined): string[] {
   return (values ?? []).slice(0, STRING_LIST_LIMIT).map(bounded);
 }
 
+const legacyCheckpointKeys = new Set([
+  "supervisor_session_id", "worker_session_id", "reviewer_session_id",
+  "supervisorSessionId", "workerSessionId", "reviewerSessionId",
+]);
+
+function projectSupervision(raw: unknown): SupervisorCheckpointProjection | null {
+  if (raw === undefined) return null;
+  if (!isRecord(raw) || [...legacyCheckpointKeys].some((key) => key in raw)) {
+    return { status: "invalid", code: "invalid_checkpoint" };
+  }
+  const binding = (value: unknown) => {
+    if (value === null) return null;
+    if (!isRecord(value)) return value;
+    return { source: value.source, surface: value.surface, sessionId: value.session_id };
+  };
+  const parsed = supervisorCheckpointSchema.safeParse({
+    schemaVersion: raw.schema_version,
+    objectiveStatus: raw.objective_status,
+    objective: raw.objective,
+    planPath: raw.plan_path,
+    completedStages: raw.completed_stages,
+    totalStages: raw.total_stages,
+    stage: raw.stage,
+    phase: raw.phase,
+    supervisorBinding: binding(raw.supervisor_binding),
+    workerBinding: binding(raw.worker_binding),
+    reviewerBinding: binding(raw.reviewer_binding),
+    nextAction: raw.next_action,
+    lastTransitionAt: raw.last_transition_at,
+    lastOwnerUpdateAt: raw.last_owner_update_at,
+    transitionDueAt: raw.transition_due_at,
+    ownerUpdateDueAt: raw.owner_update_due_at,
+    pauseReason: raw.pause_reason,
+    blocker: raw.blocker,
+    handoffGeneration: raw.handoff_generation,
+  });
+  return parsed.success
+    ? { status: "valid", checkpoint: parsed.data }
+    : { status: "invalid", code: "invalid_checkpoint" };
+}
+
 function sectionStats(
   total: number,
   included: number,
@@ -233,16 +277,19 @@ function parseSnapshot(raw: Record<string, unknown>): {
   }
 
   const activeWorkSection = parseMapSection(raw.active_work, rawActiveWorkSchema);
-  const activeWorkEntries = activeWorkSection.entries.map(([key, record]) => [
-    key,
-    {
+  let invalidCheckpoints = 0;
+  const activeWorkEntries = activeWorkSection.entries.map(([key, record]) => {
+    const supervision = projectSupervision(record.supervision);
+    if (supervision?.status === "invalid") invalidCheckpoints += 1;
+    return [key, {
       beadId: nullable(record.bead_id),
       status: nullable(record.status),
       repo: nullable(record.repo),
       branch: nullable(record.branch),
       filesTouching: boundedList(record.files_touching),
-    },
-  ] as const);
+      supervision,
+    }] as const;
+  });
   const activeWork = Object.fromEntries(activeWorkEntries);
 
   const fileLocksSection = parseMapSection(raw.file_locks, rawFileLockSchema);
@@ -384,8 +431,9 @@ function parseSnapshot(raw: Record<string, unknown>): {
     conflictSection.rejected +
     impactSection.rejected +
     decisionSection.rejected > 0;
+  const hasIncompleteRecords = incomplete || invalidCheckpoints > 0;
 
-  return { data, incomplete };
+  return { data, incomplete: hasIncompleteRecords };
 }
 
 function observedResult(

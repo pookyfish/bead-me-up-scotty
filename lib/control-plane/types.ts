@@ -120,6 +120,7 @@ export interface OrchestraSnapshot {
     repo: string | null;
     branch: string | null;
     filesTouching: string[];
+    supervision: SupervisorCheckpointProjection | null;
   }>;
   fileLocks: Record<string, {
     lockedBy: string;
@@ -164,6 +165,83 @@ export interface OrchestraSnapshot {
   >;
 }
 
+export type ExactSessionBinding =
+  | { source: "herdr"; surface: "herdr"; sessionId: string }
+  | { source: "codex-collaboration"; surface: "collaboration"; sessionId: string }
+  | { source: "claude-desktop"; surface: "desktop"; sessionId: string }
+  | { source: "codex-desktop"; surface: "desktop"; sessionId: string }
+  | { source: "external"; surface: "external"; sessionId: string };
+
+export interface SupervisorCheckpoint {
+  schemaVersion: 1;
+  objectiveStatus: "approved_incomplete" | "paused" | "blocked" | "complete";
+  objective: string;
+  planPath: string;
+  completedStages: number;
+  totalStages: number;
+  stage: string;
+  phase: "planning" | "implementation" | "review" | "correction" | "transition" | "handoff";
+  supervisorBinding: ExactSessionBinding | null;
+  workerBinding: ExactSessionBinding | null;
+  reviewerBinding: ExactSessionBinding | null;
+  nextAction: string;
+  lastTransitionAt: string;
+  lastOwnerUpdateAt: string | null;
+  transitionDueAt: string | null;
+  ownerUpdateDueAt: string | null;
+  pauseReason: string | null;
+  blocker: string | null;
+  handoffGeneration: number;
+}
+
+export type SupervisorCheckpointProjection =
+  | { status: "valid"; checkpoint: SupervisorCheckpoint }
+  | { status: "invalid"; code: "invalid_checkpoint" };
+
+const checkpointTextSchema = z.string().min(1).max(2_000).regex(/^[^\u0000-\u001F\u007F]*$/);
+const planPathSchema = checkpointTextSchema.refine((value) =>
+  !/^[A-Za-z]:[\\/]/.test(value) && !value.startsWith("/") && !value.startsWith("\\\\") && !value.split(/[\\/]+/).includes(".."),
+  "planPath must be project-relative",
+);
+const exactSessionBindingSchema: z.ZodType<ExactSessionBinding> = z.discriminatedUnion("source", [
+  z.object({ source: z.literal("herdr"), surface: z.literal("herdr"), sessionId: checkpointTextSchema }),
+  z.object({ source: z.literal("codex-collaboration"), surface: z.literal("collaboration"), sessionId: checkpointTextSchema }),
+  z.object({ source: z.literal("claude-desktop"), surface: z.literal("desktop"), sessionId: checkpointTextSchema }),
+  z.object({ source: z.literal("codex-desktop"), surface: z.literal("desktop"), sessionId: checkpointTextSchema }),
+  z.object({ source: z.literal("external"), surface: z.literal("external"), sessionId: checkpointTextSchema }),
+]);
+
+export const supervisorCheckpointSchema: z.ZodType<SupervisorCheckpoint> = z.object({
+  schemaVersion: z.literal(1), objectiveStatus: z.enum(["approved_incomplete", "paused", "blocked", "complete"]),
+  objective: checkpointTextSchema, planPath: planPathSchema, completedStages: z.number().int().nonnegative(), totalStages: z.number().int().nonnegative(),
+  stage: checkpointTextSchema, phase: z.enum(["planning", "implementation", "review", "correction", "transition", "handoff"]),
+  supervisorBinding: exactSessionBindingSchema.nullable(), workerBinding: exactSessionBindingSchema.nullable(), reviewerBinding: exactSessionBindingSchema.nullable(),
+  nextAction: checkpointTextSchema, lastTransitionAt: z.iso.datetime(), lastOwnerUpdateAt: z.iso.datetime().nullable(), transitionDueAt: z.iso.datetime().nullable(), ownerUpdateDueAt: z.iso.datetime().nullable(),
+  pauseReason: checkpointTextSchema.nullable(), blocker: checkpointTextSchema.nullable(), handoffGeneration: z.number().int().nonnegative(),
+}).superRefine((value, ctx) => {
+  if (value.objectiveStatus === "approved_incomplete" && (value.totalStages === 0 || value.completedStages >= value.totalStages || value.transitionDueAt === null || value.ownerUpdateDueAt === null)) ctx.addIssue({ code: "custom", message: "approved_incomplete must have unfinished stages and deadlines" });
+  if (value.objectiveStatus === "complete" && (value.totalStages === 0 || value.completedStages !== value.totalStages)) ctx.addIssue({ code: "custom", message: "complete must have all stages complete" });
+  if (value.objectiveStatus === "paused" && !value.pauseReason) ctx.addIssue({ code: "custom", message: "paused requires pauseReason" });
+  if (value.objectiveStatus === "blocked" && !value.blocker) ctx.addIssue({ code: "custom", message: "blocked requires blocker" });
+});
+export const supervisorCheckpointProjectionSchema: z.ZodType<SupervisorCheckpointProjection> = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("valid"), checkpoint: supervisorCheckpointSchema }),
+  z.object({ status: z.literal("invalid"), code: z.literal("invalid_checkpoint") }),
+]);
+
+export interface ControlPlaneDiagnostic {
+  code: "supervisor_continuity_stalled" | "supervisor_owner_update_overdue" | "supervisor_continuity_unproven";
+  severity: "warning" | "info";
+  workKey: string;
+  beadId: string | null;
+  stage: string;
+  message: string;
+  nextAction: string;
+}
+export const controlPlaneDiagnosticSchema: z.ZodType<ControlPlaneDiagnostic> = z.object({
+  code: z.enum(["supervisor_continuity_stalled", "supervisor_owner_update_overdue", "supervisor_continuity_unproven"]), severity: z.enum(["warning", "info"]), workKey: checkpointTextSchema, beadId: checkpointTextSchema.nullable(), stage: checkpointTextSchema, message: checkpointTextSchema, nextAction: checkpointTextSchema,
+});
+
 export const orchestraSectionStatsSchema: z.ZodType<OrchestraSectionStats> = z.object({
   total: z.number().int().nonnegative(),
   included: z.number().int().nonnegative(),
@@ -185,6 +263,7 @@ const orchestraActiveWorkSchema = z.object({
   repo: orchestraNullableStringSchema,
   branch: orchestraNullableStringSchema,
   filesTouching: orchestraBoundedStringListSchema,
+  supervision: supervisorCheckpointProjectionSchema.nullable().default(null),
 });
 
 const orchestraFileLockSchema = z.object({
@@ -417,6 +496,28 @@ export const gitHealthSnapshotSchema: z.ZodType<GitHealthSnapshot> = z.object({
   ahead: gitHealthCountSchema.nullable(),
   behind: gitHealthCountSchema.nullable(),
   unmergedLocalBranchCount: gitHealthCountSchema.nullable(),
+});
+
+export interface ControlPlaneSnapshot {
+  generatedAt: string;
+  project: { id: string; name: string; path: string | null };
+  sources: {
+    orchestra: Observation<OrchestraSnapshot>;
+    herdr: Observation<HerdrSnapshot>;
+    runtimeManager: Observation<RuntimeManagerSnapshot>;
+    hooks: Observation<HookCoverageSnapshot>;
+    git: Observation<GitHealthSnapshot>;
+  };
+  diagnostics: ControlPlaneDiagnostic[];
+}
+
+export const controlPlaneSnapshotSchema: z.ZodType<ControlPlaneSnapshot> = z.object({
+  generatedAt: z.iso.datetime(),
+  project: z.object({ id: z.string().min(1), name: z.string().min(1), path: z.string().nullable() }),
+  sources: z.object({
+    orchestra: observationOf(orchestraSnapshotSchema), herdr: observationOf(herdrSnapshotSchema), runtimeManager: observationOf(runtimeManagerSnapshotSchema), hooks: observationOf(hookCoverageSnapshotSchema), git: observationOf(gitHealthSnapshotSchema),
+  }),
+  diagnostics: z.array(controlPlaneDiagnosticSchema),
 });
 
 export function availableObservation<T>(

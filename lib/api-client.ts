@@ -1,6 +1,7 @@
 import type { Bead, CreateInput, UpdateInput, DepType } from "./schema";
 import type { UpdateStatus, UpdateResult } from "./update-types";
 import type { UnmergedResponse } from "./unmerged-types";
+import type { ControlPlaneSnapshot } from "./control-plane/types";
 
 export interface Meta {
   kind: "bd" | "demo";
@@ -152,6 +153,9 @@ const enc = encodeURIComponent;
 const base = (projectId: string) => `/api/p/${enc(projectId)}`;
 
 export const api = {
+  controlPlane: {
+    get: (projectId: string) => request<ControlPlaneSnapshot>(`${base(projectId)}/control-plane`),
+  },
   list: (projectId: string) => request<BeadsResponse>(`${base(projectId)}/beads`),
   get: (projectId: string, id: string) => request<Bead>(`${base(projectId)}/beads/${enc(id)}`),
   create: (projectId: string, input: CreateInput) =>
