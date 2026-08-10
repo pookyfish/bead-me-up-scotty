@@ -59,7 +59,7 @@ const healthResponseSchema = z.object({
 
 const servicesEnvelopeSchema = z.object({
   epoch: z.number().int().nonnegative(),
-  services: z.unknown(),
+  services: z.record(z.string(), z.unknown()),
 });
 
 function isRecord(value: unknown): value is Record<string, unknown> {

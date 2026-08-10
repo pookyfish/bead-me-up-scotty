@@ -19,6 +19,7 @@ interface FakeRuntimeOptions {
   serviceVerdict?: "adopted" | "foreign" | "down" | "unknown";
   malformedHealth?: boolean;
   malformedServices?: boolean;
+  nullServices?: boolean;
 }
 
 interface RuntimeManagerFetchRequest {
@@ -141,6 +142,8 @@ function fakeRuntime(options: FakeRuntimeOptions = {}): FakeRuntime {
       return Response.json(
         options.malformedServices
           ? { epoch: health.epoch, services: "not-an-object", raw_body: "raw-body-marker" }
+          : options.nullServices
+            ? { epoch: health.epoch, services: null, raw_body: "raw-body-marker" }
           : {
               epoch: health.epoch,
               services: { scotty: serviceFixture(options.serviceVerdict) },
@@ -299,6 +302,17 @@ describe("observeRuntimeManager", () => {
     const result = await observeRuntimeManager(
       "C:/repo",
       fakeRuntime({ malformedServices: true }),
+    );
+
+    expect(result.capability).toBe("degraded");
+    expect(result.error?.code).toBe("parse_error");
+    expect(result.data).toEqual({ epoch: 13, managerPid: 7, services: null });
+  });
+
+  it("rejects a null live inventory while retaining health", async () => {
+    const result = await observeRuntimeManager(
+      "C:/repo",
+      fakeRuntime({ nullServices: true }),
     );
 
     expect(result.capability).toBe("degraded");
