@@ -38,10 +38,17 @@ export const extensionValueSchema = z.union([
   extensionStatusSchema,
   sha256Schema,
 ]);
+const structuralInvalidFieldParams = { contractStructuralCode: "invalid_field" } as const;
 export const safeExtensionsSchema = z
   .record(extensionKeySchema, extensionValueSchema)
-  .refine((extensions) => Object.keys(extensions).length <= 16, {
-    message: "Safe extensions support at most 16 entries.",
+  .superRefine((extensions, context) => {
+    if (Object.keys(extensions).length > 16) {
+      context.addIssue({
+        code: "custom",
+        message: "Safe extensions support at most 16 entries.",
+        params: structuralInvalidFieldParams,
+      });
+    }
   });
 
 export const provenanceSourceKindSchema = z.enum([
@@ -975,9 +982,11 @@ export function parseEvidenceManifestV2(value: unknown): ManifestParseResult {
     issues: result.error.issues.map((issue) => ({
       code: issue.code === "unrecognized_keys"
         ? "unknown_field"
-        : issue.code === "custom"
-          ? "invalid_invariant"
-          : "invalid_field",
+        : issue.code === "custom" && issue.params?.contractStructuralCode === "invalid_field"
+          ? "invalid_field"
+          : issue.code === "custom"
+            ? "invalid_invariant"
+            : "invalid_field",
       classification: "fail",
       path: jsonPointer(issue.path),
     })),

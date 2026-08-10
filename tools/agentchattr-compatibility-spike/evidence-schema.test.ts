@@ -1368,6 +1368,35 @@ describe("strict version-2 evidence manifest", () => {
     }
   });
 
+  it("classifies safe-extension cardinality limits as structural invalid fields", () => {
+    const sixteenEntries = Object.fromEntries(
+      Array.from({ length: 16 }, (_, index) => [`x-limit-${index}`, "redacted"]),
+    );
+    const seventeenEntries = {
+      ...sixteenEntries,
+      "x-limit-16": "redacted",
+    };
+
+    expect(parseManifestV2({ ...validCompletedManifest(), extensions: sixteenEntries }).ok).toBe(true);
+    expect(parseManifestV2({ ...validCompletedManifest(), extensions: seventeenEntries })).toEqual({
+      ok: false,
+      issues: [{ code: "invalid_field", classification: "fail", path: "/extensions" }],
+    });
+
+    const recordWithSixteen = structuredClone(validCompletedManifest());
+    (recordWithSixteen.evidence[0] as Record<string, unknown>).extensions = sixteenEntries;
+    expect(parseManifestV2(recordWithSixteen).ok).toBe(true);
+
+    const recordWithSeventeen = structuredClone(validCompletedManifest());
+    (recordWithSeventeen.evidence[0] as Record<string, unknown>).extensions = seventeenEntries;
+    const recordResult = parseManifestV2(recordWithSeventeen);
+    expect(recordResult).toEqual({
+      ok: false,
+      issues: [{ code: "invalid_field", classification: "fail", path: "/evidence/0/extensions" }],
+    });
+    expect(JSON.stringify(recordResult)).not.toContain("redacted");
+  });
+
   it("requires measured admission and observed safety after execution begins", () => {
     for (const executionState of ["running", "completed", "aborted"] as const) {
       const base = { ...validCompletedManifest(), executionState };
