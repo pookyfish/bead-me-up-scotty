@@ -126,3 +126,230 @@ export function withEvidenceBase<K extends string, Shape extends z.ZodRawShape>(
       path: ["observedAt"],
     });
 }
+
+export const collaborationIntentSchema = z.enum([
+  "task_proposal", "review_request", "question", "ready",
+  "peer_acceptance", "blocked", "stalemate", "handoff_notice",
+]);
+export const transportStateSchema = z.enum([
+  "server_accepted", "queued", "submitted", "failed", "timed_out", "unknown", "unsupported",
+]);
+export const acknowledgementStateSchema = z.enum([
+  "not_applicable", "pending", "acknowledged", "timed_out", "unknown", "unsupported",
+]);
+export const readStateSchema = z.enum([
+  "not_observed", "read", "unread", "unknown", "unsupported",
+]);
+export const observationContextSchema = z.enum([
+  "initial_page", "overlap_page", "retry_replay", "post_restart", "tombstone",
+]);
+export const messageStateSchema = z.enum(["present", "deleted", "unknown"]);
+
+export const messageObservationSchema = withEvidenceBase("message_observation", {
+  providerInstanceId: safeRefSchema,
+  channelId: safeRefSchema,
+  stableMessageUid: safeRefSchema,
+  cursorId: z.int().nonnegative(),
+  parentUid: safeRefSchema.nullable(),
+  threadId: safeRefSchema.nullable(),
+  senderExternalId: safeRefSchema,
+  contentChecksum: sha256Schema,
+  collaborationIntent: collaborationIntentSchema.optional(),
+  collaborationSessionId: safeRefSchema.optional(),
+  collaborationSequence: z.int().nonnegative().optional(),
+  directEvidenceArtifactHash: sha256Schema,
+  transportState: transportStateSchema,
+  receiverAcknowledgementState: acknowledgementStateSchema,
+  readState: readStateSchema,
+  observationContext: observationContextSchema,
+  messageState: messageStateSchema,
+}).refine(
+  (record) => (record.collaborationSessionId === undefined) === (record.collaborationSequence === undefined),
+  {
+    message: "Collaboration session ID and sequence must be provided together.",
+    path: ["collaborationSequence"],
+  },
+);
+
+export const executionSurfaceSchema = z.enum([
+  "herdr", "claude_code_desktop", "codex_desktop", "claude_cli", "codex_cli", "external_mcp",
+]);
+export const orchestrationRoleSchema = z.enum([
+  "supervisor", "co_supervisor", "worker", "reviewer", "direct", "human", "observer",
+]);
+export const bindingStateSchema = z.enum(["verified", "unverified", "revoked", "stale"]);
+
+export const identityBindingSchema = withEvidenceBase("identity_binding", {
+  actorId: safeRefSchema,
+  logicalSessionId: safeRefSchema,
+  executionSurface: executionSurfaceSchema,
+  orchestrationRole: orchestrationRoleSchema,
+  modelProvider: safeRefSchema,
+  modelId: safeRefSchema,
+  herdrSessionRef: safeRefSchema.nullable(),
+  agentChattrInstanceId: safeRefSchema,
+  agentChattrSessionId: safeRefSchema,
+  agentChattrExternalId: safeRefSchema,
+  beadsActorId: safeRefSchema,
+  validFrom: utcTimestampSchema,
+  validUntil: utcTimestampSchema.nullable(),
+  bindingState: bindingStateSchema,
+}).superRefine((record, context) => {
+  if (record.executionSurface === "herdr" && record.herdrSessionRef === null) {
+    context.addIssue({ code: "custom", message: "Herdr bindings require a Herdr session reference.", path: ["herdrSessionRef"] });
+  }
+  if (record.executionSurface !== "herdr" && record.herdrSessionRef !== null) {
+    context.addIssue({ code: "custom", message: "Only Herdr bindings may carry a Herdr session reference.", path: ["herdrSessionRef"] });
+  }
+  if (record.validUntil !== null && record.validFrom >= record.validUntil) {
+    context.addIssue({ code: "custom", message: "Identity validity interval must be increasing.", path: ["validUntil"] });
+  }
+});
+
+const loopStateSchema = z.enum([
+  "active(0)", "active(1)", "active(2)", "active(3)", "active(4)", "active(5)", "paused(6)",
+]);
+
+export const loopGuardTransitionSchema = withEvidenceBase("loop_guard_transition", {
+  channelId: safeRefSchema,
+  origin: z.enum(["agent", "human"]),
+  fromState: loopStateSchema,
+  toState: loopStateSchema,
+  mcpInvoked: z.boolean(),
+  stableMessageUid: safeRefSchema.nullable(),
+  authenticatedHumanProofHash: sha256Schema.nullable(),
+}).superRefine((record, context) => {
+  const agentActiveTransition = record.origin === "agent"
+    && /^active\([0-4]\)$/.test(record.fromState)
+    && record.toState === `active(${Number(record.fromState.slice(7, 8)) + 1})`
+    && record.mcpInvoked
+    && record.stableMessageUid !== null
+    && record.authenticatedHumanProofHash === null;
+  const agentSixthTransition = record.origin === "agent"
+    && record.fromState === "active(5)"
+    && record.toState === "paused(6)"
+    && record.mcpInvoked
+    && record.stableMessageUid !== null
+    && record.authenticatedHumanProofHash === null;
+  const seventhSendRejected = record.origin === "agent"
+    && record.fromState === "paused(6)"
+    && record.toState === "paused(6)"
+    && !record.mcpInvoked
+    && record.stableMessageUid === null
+    && record.authenticatedHumanProofHash === null;
+  const humanReset = record.origin === "human"
+    && record.fromState === "paused(6)"
+    && record.toState === "active(0)"
+    && !record.mcpInvoked
+    && record.stableMessageUid === null
+    && record.authenticatedHumanProofHash !== null;
+
+  if (!agentActiveTransition && !agentSixthTransition && !seventhSendRejected && !humanReset) {
+    context.addIssue({ code: "custom", message: "Loop transition is not an approved transition class." });
+  }
+});
+
+export const promotionArtifactTypeSchema = z.enum([
+  "task", "directive", "decision", "review_verdict", "handoff_capsule",
+]);
+
+export const agentChattrIdempotencyKeySchema = z.string().refine((value) => {
+  const parts = value.split(":");
+  return parts.length === 4 && parts[0] === "agentchattr" && parts.slice(1).every((part) => safeRefSchema.safeParse(part).success);
+}, { message: "AgentChattr idempotency keys must use safe canonical components." });
+
+const runtimePromotionSourceSchema = z.strictObject({
+  kind: z.literal("runtime_control"),
+  correlationId: uuidSchema,
+  actionIds: z.array(uuidSchema).min(1).refine((actionIds) => new Set(actionIds).size === actionIds.length, {
+    message: "Runtime promotion action IDs must be unique.",
+  }),
+});
+export const promotionSourceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("agentchattr_message") }),
+  runtimePromotionSourceSchema,
+]);
+
+export const beadsPromotionSchema = withEvidenceBase("beads_promotion", {
+  beadId: safeRefSchema,
+  scottyDecisionId: safeRefSchema,
+  artifactType: promotionArtifactTypeSchema,
+  selectedValueChecksum: sha256Schema,
+  agentChattrIdempotencyKey: agentChattrIdempotencyKeySchema,
+  promotionSource: promotionSourceSchema,
+  beadsArtifactId: safeRefSchema.nullable(),
+  acknowledgedAt: utcTimestampSchema.nullable(),
+  verifiedAt: utcTimestampSchema.nullable(),
+  state: z.enum(["durable", "promotion_pending", "reconciliation_conflict"]),
+}).superRefine((record, context) => {
+  if (record.state === "durable" && (record.beadsArtifactId === null || record.acknowledgedAt === null || record.verifiedAt === null)) {
+    context.addIssue({ code: "custom", message: "Durable promotions require an artifact and acknowledgement timestamps." });
+  }
+  if (record.acknowledgedAt !== null && record.verifiedAt !== null && record.acknowledgedAt > record.verifiedAt) {
+    context.addIssue({ code: "custom", message: "Promotion acknowledgement must not follow verification.", path: ["verifiedAt"] });
+  }
+});
+
+export const mcpOperationSchema = z.enum(["initialize", "tools/list", "chat_send", "chat_read"]);
+export const mcpAuthenticationStateSchema = z.enum(["authenticated", "unauthenticated", "failed", "unknown", "unsupported"]);
+
+export const mcpExchangeSchema = withEvidenceBase("mcp_exchange", {
+  clientKind: z.enum(["operator_mcp_client", "claude_code_desktop", "codex_desktop"]),
+  clientVersion: safeRefSchema,
+  operation: mcpOperationSchema,
+  authenticationState: mcpAuthenticationStateSchema,
+  requestArtifactHash: sha256Schema,
+  responseArtifactHash: sha256Schema,
+  resultingStableMessageUid: safeRefSchema.nullable(),
+}).superRefine((record, context) => {
+  const successfulChat = record.observedResult === "pass" && (record.operation === "chat_send" || record.operation === "chat_read");
+  if (successfulChat !== (record.resultingStableMessageUid !== null)) {
+    context.addIssue({ code: "custom", message: "Only successful chat exchanges may carry a resulting message UID.", path: ["resultingStableMessageUid"] });
+  }
+  if (record.observedResult === "pass" && record.authenticationState !== "authenticated") {
+    context.addIssue({ code: "custom", message: "Passing MCP exchanges require authenticated evidence.", path: ["authenticationState"] });
+  }
+});
+
+export const desktopClientSchema = z.enum(["claude_code_desktop", "codex_desktop"]);
+
+export const desktopCapabilitySchema = withEvidenceBase("desktop_capability", {
+  client: desktopClientSchema,
+  clientVersion: safeRefSchema,
+  readClassification: classificationSchema,
+  sendClassification: classificationSchema,
+  authenticationEvidenceHash: sha256Schema,
+  storedMessageUid: safeRefSchema.nullable(),
+  storedMessageEvidenceHash: sha256Schema.nullable(),
+}).superRefine((record, context) => {
+  const hasStoredMessage = record.storedMessageUid !== null && record.storedMessageEvidenceHash !== null;
+  if (record.sendClassification === "pass" && !hasStoredMessage) {
+    context.addIssue({ code: "custom", message: "Passing Desktop sends require stored-message evidence.", path: ["storedMessageEvidenceHash"] });
+  }
+  if (record.sendClassification !== "pass" && record.classification !== "fail" && (record.storedMessageUid !== null || record.storedMessageEvidenceHash !== null)) {
+    context.addIssue({ code: "custom", message: "Non-passing Desktop sends may not carry stored-message evidence.", path: ["storedMessageEvidenceHash"] });
+  }
+  if (record.sendClassification !== "pass" && record.classification === "fail" && record.storedMessageUid !== null) {
+    context.addIssue({ code: "custom", message: "Failed stored-message observations may not claim a stored UID.", path: ["storedMessageUid"] });
+  }
+});
+
+export const identityFixtureSchema = z.strictObject({
+  schemaVersion: z.literal(2),
+  fixture: z.literal("identity_bindings"),
+  records: z.array(identityBindingSchema).min(1),
+  sessionBeadLinks: z.array(z.strictObject({ logicalSessionId: safeRefSchema, beadId: safeRefSchema })),
+});
+
+export const messageFixtureSchema = z.strictObject({
+  schemaVersion: z.literal(2),
+  fixture: z.literal("message_contract"),
+  records: z.array(messageObservationSchema).min(1),
+});
+
+export type MessageObservation = z.infer<typeof messageObservationSchema>;
+export type IdentityBinding = z.infer<typeof identityBindingSchema>;
+export type LoopGuardTransition = z.infer<typeof loopGuardTransitionSchema>;
+export type BeadsPromotion = z.infer<typeof beadsPromotionSchema>;
+export type McpExchange = z.infer<typeof mcpExchangeSchema>;
+export type DesktopCapability = z.infer<typeof desktopCapabilitySchema>;
