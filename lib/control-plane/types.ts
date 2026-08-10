@@ -250,6 +250,64 @@ export const orchestraSnapshotSchema: z.ZodType<OrchestraSnapshot> = z.object({
   sections: z.record(orchestraSectionNameSchema, orchestraSectionStatsSchema),
 });
 
+export interface HerdrSessionObservation {
+  provider: string | null;
+  displayName: string | null;
+  sessionId: string | null;
+  agentSession: {
+    source: string | null;
+    agent: string | null;
+    kind: string | null;
+    value: string | null;
+  } | null;
+  surface: "herdr";
+  status: "idle" | "working" | "blocked" | "done" | "unknown";
+  workspaceId: string;
+  tabId: string;
+  paneId: string;
+  terminalId: string;
+  cwd: string | null;
+  focused: boolean;
+  revision: number;
+  stateChangeSeq: number;
+}
+
+export interface HerdrSnapshot {
+  protocol: number;
+  version: string;
+  sessions: HerdrSessionObservation[];
+}
+
+const herdrAgentSessionSchema = z.object({
+  source: z.string().nullable(),
+  agent: z.string().nullable(),
+  kind: z.string().nullable(),
+  value: z.string().nullable(),
+});
+
+const herdrSessionObservationSchema: z.ZodType<HerdrSessionObservation> = z.object({
+  provider: z.string().nullable(),
+  displayName: z.string().nullable(),
+  sessionId: z.string().nullable(),
+  agentSession: herdrAgentSessionSchema.nullable(),
+  surface: z.literal("herdr"),
+  status: z.enum(["idle", "working", "blocked", "done", "unknown"]),
+  workspaceId: z.string(),
+  tabId: z.string(),
+  paneId: z.string(),
+  terminalId: z.string(),
+  cwd: z.string().nullable(),
+  focused: z.boolean(),
+  revision: z.number().int().nonnegative(),
+  stateChangeSeq: z.number().int().nonnegative(),
+});
+
+export const herdrSnapshotSchema: z.ZodType<HerdrSnapshot> = z.object({
+  protocol: z.number().int().nonnegative(),
+  version: z.string(),
+  sessions: z.array(herdrSessionObservationSchema),
+});
+
 export function availableObservation<T>(
   source: SourceId,
   authority: string,

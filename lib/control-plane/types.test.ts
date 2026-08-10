@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   availableObservation,
   failedObservation,
+  herdrSnapshotSchema,
   observationSchema,
   orchestraSnapshotSchema,
 } from "./types";
@@ -76,5 +77,40 @@ describe("control-plane observation contract", () => {
     });
 
     expect(parsed).not.toHaveProperty("raw_details_blob");
+  });
+
+  it("keeps the Herdr wire contract closed to inferred identity fields", () => {
+    const parsed = herdrSnapshotSchema.parse({
+      protocol: 19,
+      version: "0.8.0-preview",
+      sessions: [{
+        provider: "codex",
+        displayName: "codex-supervisor",
+        sessionId: "session-a",
+        agentSession: {
+          source: "herdr:codex",
+          agent: "codex",
+          kind: "id",
+          value: "session-a",
+        },
+        surface: "herdr",
+        status: "working",
+        workspaceId: "w1",
+        tabId: "w1:t1",
+        paneId: "w1:p1",
+        terminalId: "term-a",
+        cwd: "C:\\repo",
+        focused: true,
+        revision: 3,
+        stateChangeSeq: 5,
+        actor: "must not cross the wire boundary",
+        role: "supervisor",
+        task: "Task 3",
+      }],
+    });
+
+    expect(parsed.sessions[0]).not.toHaveProperty("actor");
+    expect(parsed.sessions[0]).not.toHaveProperty("role");
+    expect(parsed.sessions[0]).not.toHaveProperty("task");
   });
 });
