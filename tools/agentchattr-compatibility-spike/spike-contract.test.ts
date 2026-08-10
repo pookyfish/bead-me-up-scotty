@@ -393,6 +393,38 @@ describe("typed message, identity, collaboration, and promotion invariants", () 
     });
   });
 
+  it("allows mutable message observations to progress without changing the approved durable replay tuple", () => {
+    const initial = messageObservation("progressive", {
+      transportState: "queued",
+      receiverAcknowledgementState: "pending",
+      readState: "unread",
+    });
+    const progressed = {
+      ...initial,
+      caseId: "message-progressive-replay",
+      observationContext: "retry_replay",
+      transportState: "server_accepted",
+      receiverAcknowledgementState: "acknowledged",
+      readState: "read",
+      collaborationIntent: "peer_acceptance",
+      collaborationSessionId: "progressive-session",
+      collaborationSequence: 0,
+      directEvidenceArtifactHash: hashes.c,
+    };
+
+    expect(validateEvidenceManifest(validManifestV2([identityBinding(), initial, progressed]))).toEqual({
+      classification: "pass",
+      issues: [],
+    });
+
+    const divergent = { ...progressed, caseId: "message-progressive-divergent", contentChecksum: hashes.d };
+    expect(validateEvidenceManifest(validManifestV2([identityBinding(), initial, divergent])).issues).toContainEqual({
+      code: "message_uid_divergence",
+      classification: "fail",
+      path: "/evidence/9/stableMessageUid",
+    });
+  });
+
   it("rejects cursor identity, descending cursors, and divergent reuse of a stable UID", () => {
     const cursorResult = validateEvidenceManifest(
       validManifestV2([identityBinding(), messageObservation("cursor", { stableMessageUid: "10" })]),
@@ -511,6 +543,42 @@ describe("typed message, identity, collaboration, and promotion invariants", () 
     );
   });
 
+  it("classifies a collaboration session ending after blocked or stalemate as incomplete", () => {
+    const blockedOnly = validManifestV2([
+      identityBinding(),
+      messageObservation("blocked-tail", {
+        collaborationIntent: "blocked",
+        collaborationSessionId: "blocked-tail-session",
+        collaborationSequence: 0,
+      }),
+    ]);
+    expect(validateEvidenceManifest(blockedOnly).issues).toContainEqual({
+      code: "collaboration_transition_incomplete",
+      classification: "unknown",
+      path: "/evidence/8/collaborationIntent",
+    });
+
+    const stalemateTail = validManifestV2([
+      identityBinding(),
+      messageObservation("blocked-before-stalemate", {
+        collaborationIntent: "blocked",
+        collaborationSessionId: "stalemate-tail-session",
+        collaborationSequence: 0,
+      }),
+      messageObservation("stalemate-tail", {
+        cursorId: 11,
+        collaborationIntent: "stalemate",
+        collaborationSessionId: "stalemate-tail-session",
+        collaborationSequence: 1,
+      }),
+    ]);
+    expect(validateEvidenceManifest(stalemateTail).issues).toContainEqual({
+      code: "collaboration_transition_incomplete",
+      classification: "unknown",
+      path: "/evidence/9/collaborationIntent",
+    });
+  });
+
   it("keeps transport, acknowledgement, read, peer acceptance, and Beads durability independent", () => {
     const peerAccepted = messageObservation("peer-accepted", {
       collaborationIntent: "peer_acceptance",
@@ -541,6 +609,31 @@ describe("typed message, identity, collaboration, and promotion invariants", () 
       "promotion_reconciliation_conflict",
       "fail",
     );
+  });
+
+  it("derives pending and conflict promotion diagnostics from typed promotion state", () => {
+    const pending = beadsPromotion("pending-state", {
+      state: "promotion_pending",
+      beadsArtifactId: null,
+      acknowledgedAt: null,
+      verifiedAt: null,
+    });
+    const pendingResult = validateEvidenceManifest(validManifestV2([pending]));
+    expect(pendingResult.classification).toBe("unknown");
+    expect(pendingResult.issues).toContainEqual({
+      code: "promotion_pending",
+      classification: "unknown",
+      path: "/evidence/7/state",
+    });
+
+    const conflict = beadsPromotion("conflict-state", { state: "reconciliation_conflict" });
+    const conflictResult = validateEvidenceManifest(validManifestV2([conflict]));
+    expect(conflictResult.classification).toBe("fail");
+    expect(conflictResult.issues).toContainEqual({
+      code: "promotion_reconciliation_conflict",
+      classification: "fail",
+      path: "/evidence/7/state",
+    });
   });
 });
 
@@ -981,6 +1074,26 @@ describe("typed runtime-control state machine", () => {
     expect(validateEvidenceManifest(validManifestV2(records))).toEqual({ classification: "pass", issues: [] });
   });
 
+  it("uses the latest applicable reconciliation so a later applied do-not-retry decision wins", () => {
+    const records = timeline([
+      requestEvent(),
+      authorizationEvent(1),
+      executionEvent(1, "failed"),
+      reconciliationEvent(actionIds.attemptOne),
+      reconciliationEvent(actionIds.attemptOne, {
+        observedDisposition: "applied",
+        retryDecision: "do_not_retry",
+      }),
+      authorizationEvent(2),
+      executionEvent(2, "succeeded"),
+    ]);
+    expect(validateEvidenceManifest(validManifestV2(records)).issues).toContainEqual({
+      code: "runtime_duplicate_execution_risk",
+      classification: "fail",
+      path: "/evidence",
+    });
+  });
+
   it("allows timed-out retry only with the reviewed provider-idempotency artifact and same key", () => {
     const records = timeline([
       requestEvent({ reviewedProviderIdempotencyArtifactHash: hashes.f }),
@@ -1061,6 +1174,26 @@ describe("typed runtime-control state machine", () => {
     }
   });
 
+  it("does not let policy reconciliation unlock timed-out or unknown unsupported-idempotency mutations", () => {
+    for (const state of ["timed_out", "unknown"] as const) {
+      for (const providerIdempotencyState of ["unsupported", "unknown"] as const) {
+        const records = timeline([
+          requestEvent(),
+          authorizationEvent(1),
+          executionEvent(1, state, { providerIdempotencyState }),
+          reconciliationEvent(actionIds.attemptOne, { decidingSource: "scotty_policy" }),
+          authorizationEvent(2),
+          executionEvent(2, "succeeded"),
+        ]);
+        expect(validateEvidenceManifest(validManifestV2(records)).issues).toContainEqual({
+          code: "runtime_human_reconciliation_required",
+          classification: "fail",
+          path: "/evidence",
+        });
+      }
+    }
+  });
+
   it("allows read-only retries only inside the bound and with a fresh current authorization", () => {
     const request = requestEvent({
       action: "read_pane",
@@ -1088,6 +1221,19 @@ describe("typed runtime-control state machine", () => {
       "runtime_retry_policy_exceeded",
       "fail",
     );
+  });
+
+  it("applies bounded maxAttempts to the first observed execution attempt", () => {
+    const records = timeline([
+      requestEvent({ retryPolicy: { mode: "bounded", maxAttempts: 1 } }),
+      authorizationEvent(1),
+      executionEvent(2, "succeeded"),
+    ]);
+    expect(validateEvidenceManifest(validManifestV2(records)).issues).toContainEqual({
+      code: "runtime_retry_policy_exceeded",
+      classification: "fail",
+      path: "/evidence",
+    });
   });
 
   it("keeps provider success separate from verification and acknowledgement", () => {

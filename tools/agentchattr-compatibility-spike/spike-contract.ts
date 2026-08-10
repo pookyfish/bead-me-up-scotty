@@ -152,16 +152,10 @@ function messageDurableSignature(message: MessageObservation) {
   ]);
 }
 
-function messageStateSignature(message: MessageObservation) {
+function messageReplaySignature(message: MessageObservation) {
   return JSON.stringify([
     messageDurableSignature(message),
-    message.transportState,
-    message.receiverAcknowledgementState,
-    message.readState,
-    message.collaborationIntent ?? null,
-    message.collaborationSessionId ?? null,
-    message.collaborationSequence ?? null,
-    message.directEvidenceArtifactHash,
+    message.messageState,
   ]);
 }
 
@@ -196,8 +190,7 @@ function validateMessages(
       const linked = previous.find((candidate) => candidate.messageState === "present");
       if (!linked) {
         addIssue(issues, "message_tombstone_unlinked", "fail", `${path}/stableMessageUid`);
-      } else if (messageDurableSignature(linked) !== messageDurableSignature(message)
-        || messageStateSignature(linked) !== messageStateSignature(message)) {
+      } else if (messageDurableSignature(linked) !== messageDurableSignature(message)) {
         addIssue(issues, "message_uid_divergence", "fail", `${path}/stableMessageUid`);
       }
     } else if (message.messageState === "deleted") {
@@ -207,7 +200,7 @@ function validateMessages(
         || message.observationContext === "retry_replay"
         || message.observationContext === "post_restart";
       if (!replayContext || previous.some((candidate) => candidate.messageState !== message.messageState
-        || messageStateSignature(candidate) !== messageStateSignature(message))) {
+        || messageReplaySignature(candidate) !== messageReplaySignature(message))) {
         addIssue(issues, "message_uid_divergence", "fail", `${path}/stableMessageUid`);
       }
     }
@@ -259,7 +252,11 @@ function validateIdentityAttribution(
   });
 }
 
-function validateCollaborationSequences(messages: MessageObservation[], issues: ContractIssue[]) {
+function validateCollaborationSequences(
+  manifest: EvidenceManifestV2,
+  messages: MessageObservation[],
+  issues: ContractIssue[],
+) {
   const sessions = new Map<string, MessageObservation[]>();
   for (const message of messages) {
     if (message.collaborationSessionId === undefined) continue;
@@ -295,6 +292,15 @@ function validateCollaborationSequences(messages: MessageObservation[], issues: 
         requiredNext = null;
       }
     });
+    const finalRecord = records.at(-1);
+    if (requiredNext !== null && finalRecord !== undefined) {
+      addIssue(
+        issues,
+        "collaboration_transition_incomplete",
+        "unknown",
+        `${evidencePath(manifest, finalRecord)}/collaborationIntent`,
+      );
+    }
   }
 }
 
@@ -319,9 +325,23 @@ function promotionCoreSignature(promotion: BeadsPromotion) {
   ]);
 }
 
-function validatePromotions(promotions: BeadsPromotion[], issues: ContractIssue[]) {
+function validatePromotions(
+  manifest: EvidenceManifestV2,
+  promotions: BeadsPromotion[],
+  issues: ContractIssue[],
+) {
   const byKey = new Map<string, BeadsPromotion[]>();
   for (const promotion of promotions) {
+    if (promotion.state === "promotion_pending") {
+      addIssue(issues, "promotion_pending", "unknown", `${evidencePath(manifest, promotion)}/state`);
+    } else if (promotion.state === "reconciliation_conflict") {
+      addIssue(
+        issues,
+        "promotion_reconciliation_conflict",
+        "fail",
+        `${evidencePath(manifest, promotion)}/state`,
+      );
+    }
     const records = byKey.get(promotion.agentChattrIdempotencyKey) ?? [];
     records.push(promotion);
     byKey.set(promotion.agentChattrIdempotencyKey, records);
@@ -700,6 +720,10 @@ function validateRuntimeActionGroup(
     }
     seenAttemptIds.add(execution.event.attemptId);
     previousAttemptNumber = execution.event.attemptNumber;
+    const maxAttempts = request.retryPolicy.mode === "bounded" ? request.retryPolicy.maxAttempts : 1;
+    if (execution.event.attemptNumber > maxAttempts) {
+      addIssue(issues, "runtime_retry_policy_exceeded", "fail", "/evidence");
+    }
 
     const recordIndex = records.indexOf(execution);
     const previousExecution = executions[executions.indexOf(execution) - 1];
@@ -754,10 +778,6 @@ function validateRuntimeRetries(
   for (let index = 1; index < executions.length; index += 1) {
     const previous = executions[index - 1];
     const current = executions[index];
-    const maxAttempts = request.retryPolicy.mode === "bounded" ? request.retryPolicy.maxAttempts : 1;
-    if (current.event.attemptNumber > maxAttempts) {
-      addIssue(issues, "runtime_retry_policy_exceeded", "fail", "/evidence");
-    }
     if (request.effectClass === "read_only") continue;
 
     const between = records.filter((record) => record.sequence > previous.sequence
@@ -778,10 +798,19 @@ function validateRuntimeRetries(
       continue;
     }
 
-    const reconciliation = reconciliations.find((record) => record.event.phase === "reconciliation"
-      && record.event.observedDisposition === "not_applied"
-      && record.event.retryDecision === "retry_authorized");
-    const uncertainUnsupported = previous.event.state === "unknown"
+    const latestReconciliation = reconciliations.at(-1);
+    if (latestReconciliation?.event.phase === "reconciliation"
+      && (latestReconciliation.event.observedDisposition === "applied"
+        || latestReconciliation.event.retryDecision === "do_not_retry")) {
+      addIssue(issues, "runtime_duplicate_execution_risk", "fail", "/evidence");
+      continue;
+    }
+    const reconciliation = latestReconciliation?.event.phase === "reconciliation"
+      && latestReconciliation.event.observedDisposition === "not_applied"
+      && latestReconciliation.event.retryDecision === "retry_authorized"
+      ? latestReconciliation
+      : undefined;
+    const uncertainUnsupported = (previous.event.state === "timed_out" || previous.event.state === "unknown")
       && previous.event.providerIdempotencyState !== "supported";
     if (uncertainUnsupported && (reconciliation?.event.phase !== "reconciliation"
       || reconciliation.event.decidingSource !== "human")) {
@@ -886,8 +915,8 @@ function validateCrossRecordInvariants(manifest: EvidenceManifestV2): ContractIs
   const promotions = recordsOf(manifest, "beads_promotion");
   validateMessages(manifest, messages, issues);
   validateIdentityAttribution(manifest, messages, bindings, issues);
-  validateCollaborationSequences(messages, issues);
-  validatePromotions(promotions, issues);
+  validateCollaborationSequences(manifest, messages, issues);
+  validatePromotions(manifest, promotions, issues);
   validateRuntimeObservations(recordsOf(manifest, "runtime_observation"), issues);
   validateLoopTransitions(recordsOf(manifest, "loop_guard_transition"), issues);
   validateDesktop(recordsOf(manifest, "desktop_capability"), issues);
