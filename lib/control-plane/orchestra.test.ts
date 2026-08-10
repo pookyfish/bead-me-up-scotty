@@ -395,6 +395,16 @@ describe("observeOrchestra", () => {
     expect(second.data?.activeWork).toEqual(first.data?.activeWork);
   });
 
+  it("keeps malformed unsafe entries independently fail-closed beside a safe existing sentinel name", async () => {
+    const source = { ...orchestraMixedFixture, active_work: { "invalid-active-work-1": orchestraMixedFixture.active_work["valid-entry"], "bad\u0000one": { status: 7 }, ["x".repeat(2_001)]: { status: 8 } } };
+    const fs = fakeFs({ json: source });
+    const first = await observeOrchestra("C:/malformed-multiplicity", fs);
+    const second = await observeOrchestra("C:/malformed-multiplicity", fs);
+    expect(Object.keys(first.data?.activeWork ?? {}).sort()).toEqual(["invalid-active-work-1", "invalid-active-work-2", "invalid-active-work-3"]);
+    expect(evaluateSupervisorContinuity({ orchestra: first, herdr: continuityHerdr, now: continuityNow }).filter(({ code }) => code === "supervisor_continuity_unproven").map(({ workKey }) => workKey).sort()).toEqual(["invalid-active-work-2", "invalid-active-work-3"]);
+    expect(second.data?.activeWork).toEqual(first.data?.activeWork);
+  });
+
   it("retains an unsafe-key entry even when a sibling field is malformed", async () => {
     const result = await observeOrchestra("C:/unsafe-malformed", fakeFs({
       json: { ...orchestraMixedFixture, active_work: { "bad\u0000key": { ...orchestraMixedFixture.active_work["valid-entry"], status: 7, supervision: rawCheckpoint() } } },
@@ -418,6 +428,7 @@ describe("observeOrchestra", () => {
     expect(evaluateSupervisorContinuity({ orchestra: result, herdr: continuityHerdr, now: continuityNow })).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: "supervisor_continuity_unproven", workKey: "invalid-active-work-1", stage: "invalid supervision checkpoint" }),
     ]));
+    expect(result.data?.sections.activeWork).toEqual({ total: 1, included: 1, rejected: 1, truncated: false });
   });
 
   it("keeps a control-bearing active-work bead ID fail-closed", async () => {
@@ -466,6 +477,16 @@ describe("observeOrchestra", () => {
     expect(evaluateSupervisorContinuity({ orchestra: restored, herdr, now: continuityNow })).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_stalled" }));
   });
 
+  it("restores a raw handoff and accepts only its new exact working supervisor", async () => {
+    const result = await observeOrchestra("C:/handoff-live", fakeFs({ json: { ...orchestraMixedFixture, active_work: { safe: { ...orchestraMixedFixture.active_work["valid-entry"], supervision: rawCheckpoint({ phase: "handoff", supervisor_binding: { source: "herdr", surface: "herdr", session_id: "new" } }) } } } }));
+    const restored = JSON.parse(JSON.stringify(result));
+    const live = availableObservation("herdr", "managed-session-runtime", { protocol: 19, version: "0.8", sessions: [
+      { provider: "codex", displayName: "supervisor", sessionId: "old", surface: "herdr" as const, status: "working" as const, workspaceId: "w", tabId: "t", paneId: "p", terminalId: "old", cwd: "C:/repo", focused: false, revision: 1, stateChangeSeq: 1, agentSession: null },
+      { provider: "codex", displayName: "supervisor", sessionId: "new", surface: "herdr" as const, status: "working" as const, workspaceId: "w", tabId: "t", paneId: "p", terminalId: "new", cwd: "C:/repo", focused: false, revision: 1, stateChangeSeq: 1, agentSession: null },
+    ] }, ["observe"], { observedAt: "2026-08-09T22:00:00.000Z" });
+    expect(evaluateSupervisorContinuity({ orchestra: restored, herdr: live, now: continuityNow }).some(({ code }) => code === "supervisor_continuity_stalled" || code === "supervisor_continuity_unproven")).toBe(false);
+  });
+
   it("rejects empty raw binding IDs", async () => {
     const result = await observeOrchestra("C:/binding", fakeFs({
       json: { ...orchestraMixedFixture, active_work: { safe: { ...orchestraMixedFixture.active_work["valid-entry"], supervision: rawCheckpoint({ phase: "implementation", worker_binding: { source: "herdr", surface: "herdr", session_id: "" } }) } } },
@@ -483,5 +504,10 @@ describe("observeOrchestra", () => {
     const result = await observeOrchestra("C:/control-checkpoint", fakeFs({ json: { ...orchestraMixedFixture, active_work: { safe: { ...orchestraMixedFixture.active_work["valid-entry"], supervision: rawCheckpoint({ next_action: "bad\u0000action" }) } } } }));
     expect(result.data?.activeWork.safe.supervision).toEqual({ status: "invalid", code: "invalid_checkpoint" });
     expect(JSON.stringify(result)).not.toContain("bad\u0000action");
+    expect(evaluateSupervisorContinuity({ orchestra: result, herdr: continuityHerdr, now: continuityNow })).toContainEqual({
+      code: "supervisor_continuity_unproven", severity: "info", workKey: "safe", beadId: "better-palia-maps-l4cq3.1", stage: "invalid supervision checkpoint",
+      message: "Supervision checkpoint for better-palia-maps-l4cq3.1 is invalid, so approved-plan continuity cannot be proven. Next action: replace the invalid SUPERVISION-CHECKPOINT/v1 record before supervisor exit",
+      nextAction: "replace the invalid SUPERVISION-CHECKPOINT/v1 record before supervisor exit",
+    });
   });
 });

@@ -150,4 +150,12 @@ describe("supervisor continuity", () => {
     expect(diagnostics).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_stalled", workKey: "stalled" }));
     expect(diagnostics).not.toContainEqual(expect.objectContaining({ workKey: "work", code: "supervisor_continuity_stalled" }));
   });
+
+  it.each(["planning", "correction"] as const)("uses the correct live %s binding despite live decoys", (phase) => {
+    const correct = { source: "herdr" as const, surface: "herdr" as const, sessionId: "correct" };
+    const fixture = checkpointFor(phase, correct);
+    fixture.checkpoint.supervisorBinding = phase === "correction" ? { source: "herdr", surface: "herdr", sessionId: "decoy" } : fixture.checkpoint.supervisorBinding;
+    fixture.checkpoint.workerBinding = phase === "planning" ? { source: "herdr", surface: "herdr", sessionId: "decoy" } : fixture.checkpoint.workerBinding;
+    expect(evaluateSupervisorContinuity({ orchestra: orchestra(fixture), herdr: herdrWith(session("correct", "working"), session("decoy", "working")), now }).some(({ code }) => code === "supervisor_continuity_stalled" || code === "supervisor_continuity_unproven")).toBe(false);
+  });
 });

@@ -287,7 +287,7 @@ function parseSnapshot(raw: Record<string, unknown>): {
     : [["", undefined] as [string, unknown]];
   const activeWorkSection = {
     total: isRecord(raw.active_work) ? rawActiveWorkEntries.length : 1,
-    rejected: isRecord(raw.active_work) ? 0 : 1,
+    rejected: 0,
   };
   let invalidCheckpoints = 0;
   let activeWorkNestedTruncation = false;
