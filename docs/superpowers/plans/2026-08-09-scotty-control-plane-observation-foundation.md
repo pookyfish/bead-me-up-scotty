@@ -894,6 +894,10 @@ git show --stat --oneline HEAD
 
 **Files:**
 - Modify: `lib/control-plane/types.ts`
+- Modify: `lib/control-plane/orchestra.ts`
+- Test: `lib/control-plane/orchestra.test.ts`
+- Create: `lib/control-plane/continuity.ts`
+- Test: `lib/control-plane/continuity.test.ts`
 - Create: `lib/control-plane/snapshot.ts`
 - Test: `lib/control-plane/types.test.ts`
 - Test: `lib/control-plane/snapshot.test.ts`
@@ -903,8 +907,9 @@ git show --stat --oneline HEAD
 
 **Interfaces:**
 - Consumes: all five adapters from Tasks 2-6 plus `getProject()`.
-- Produces: `ControlPlaneSnapshot`, `buildControlPlaneSnapshot(projectId, deps?)`, `GET /api/p/:projectId/control-plane`, `api.controlPlane.get(projectId)`.
+- Produces: `SupervisorCheckpoint`, `ControlPlaneDiagnostic`, pure `evaluateSupervisorContinuity({ orchestra, herdr, now })`, `ControlPlaneSnapshot`, `buildControlPlaneSnapshot(projectId, deps?)`, `GET /api/p/:projectId/control-plane`, `api.controlPlane.get(projectId)`.
 - Explicit non-interface: no Beads collection or task summary appears in this snapshot; Stage 2 joins it with the existing Beads React Query cache.
+- Continuity is derived coordination evidence, not task state or authority. The checkpoint is optional versioned metadata on an existing orchestra `active_work` record and carries the supervisor's declared next action; Scotty never infers a new task or dispatches from it in Stage 1.
 
 - [ ] **Step 1: Write failing aggregation tests**
 
@@ -949,6 +954,54 @@ it("returns a source-empty Demo snapshot without invoking adapters", async () =>
 it("rejects an unknown project with the existing 404 code", async () => {
   await expect(buildControlPlaneSnapshot("missing", snapshotDeps({}))).rejects.toMatchObject({ code: "unknown_project" });
 });
+
+it("reports the exact declared next action when an approved plan silently stalls", () => {
+  const diagnostics = evaluateSupervisorContinuity({
+    orchestra: orchestraWithCheckpoint({
+      objectiveStatus: "approved_incomplete",
+      completedStages: 5,
+      totalStages: 9,
+      stage: "Task 5 complete",
+      phase: "transition",
+      workerSessionId: null,
+      reviewerSessionId: null,
+      nextAction: "Review Task 5 commit 0285f01, then dispatch Task 6.",
+      transitionDueAt: "2026-08-09T20:45:00.000Z",
+      ownerUpdateDueAt: "2026-08-09T20:40:00.000Z",
+    }),
+    herdr: availableHerdr([]),
+    now: new Date("2026-08-09T21:00:00.000Z"),
+  });
+  expect(diagnostics).toContainEqual(expect.objectContaining({
+    code: "supervisor_continuity_stalled",
+    severity: "warning",
+    nextAction: "Review Task 5 commit 0285f01, then dispatch Task 6.",
+  }));
+});
+
+it.each(["live-reviewer", "paused", "blocked", "complete", "handoff-before-deadline"])(
+  "does not report a false stall for %s",
+  (mode) => expect(evaluateContinuityFixture(mode)).not.toContainEqual(
+    expect.objectContaining({ code: "supervisor_continuity_stalled" }),
+  ),
+);
+
+it("marks continuity unproven instead of idle when Herdr is unavailable", () => {
+  const diagnostics = evaluateContinuityFixture("herdr-unavailable");
+  expect(diagnostics).toContainEqual(expect.objectContaining({
+    code: "supervisor_continuity_unproven",
+    severity: "info",
+  }));
+  expect(diagnostics).not.toContainEqual(expect.objectContaining({
+    code: "supervisor_continuity_stalled",
+  }));
+});
+
+it("reports an overdue owner update even while a bound worker is live", () => {
+  expect(evaluateContinuityFixture("live-worker-owner-update-overdue")).toContainEqual(
+    expect.objectContaining({ code: "supervisor_owner_update_overdue" }),
+  );
+});
 ```
 
 - [ ] **Step 2: Verify tests fail**
@@ -958,6 +1011,58 @@ npm run test:unit -- lib/control-plane/snapshot.test.ts
 ```
 
 - [ ] **Step 3: Implement the deadline-bounded snapshot using `Promise.allSettled`**
+
+First extend the bounded orchestra projection. An `active_work` record may carry this optional snake-case `supervision` object; unknown fields remain ignored:
+
+```ts
+export interface SupervisorCheckpoint {
+  schemaVersion: 1;
+  objectiveStatus: "approved_incomplete" | "paused" | "blocked" | "complete";
+  planPath: string | null;
+  completedStages: number;
+  totalStages: number;
+  stage: string;
+  phase: "planning" | "implementation" | "review" | "correction" | "transition" | "handoff";
+  supervisorSessionId: string | null;
+  workerSessionId: string | null;
+  reviewerSessionId: string | null;
+  nextAction: string;
+  lastTransitionAt: string;
+  lastOwnerUpdateAt: string | null;
+  transitionDueAt: string | null;
+  ownerUpdateDueAt: string | null;
+  pauseReason: string | null;
+  blocker: string | null;
+  handoffGeneration: number;
+}
+```
+
+Project it as `activeWork[key].supervision: SupervisorCheckpoint | null`. Require `schema_version: 1`, bounded strings, nonnegative counts, `completed_stages <= total_stages`, ISO timestamps, a nonempty `next_action`, a nonempty `pause_reason` when paused, and a nonempty `blocker` when blocked. A malformed checkpoint degrades the orchestra observation as `incomplete_observation` while preserving the rest of that active-work record with `supervision: null`. Never expose free-form `notes` through the wire. Add orchestra adapter and wire-schema tests for valid projection, malformed omission/degradation, bounds, and redaction.
+
+Create `continuity.ts` with no I/O and these client-safe results:
+
+```ts
+export interface ControlPlaneDiagnostic {
+  code:
+    | "supervisor_continuity_stalled"
+    | "supervisor_owner_update_overdue"
+    | "supervisor_continuity_unproven";
+  severity: "warning" | "info";
+  workKey: string;
+  beadId: string | null;
+  stage: string;
+  message: string;
+  nextAction: string | null;
+}
+
+export function evaluateSupervisorContinuity(input: {
+  orchestra: Observation<OrchestraSnapshot>;
+  herdr: Observation<HerdrSnapshot>;
+  now: Date;
+}): ControlPlaneDiagnostic[];
+```
+
+Evaluate only projected facts. For `planning` and `handoff`, bind liveness to `supervisorSessionId` (falling back only to the projected orchestra supervisor session); for `implementation`/`correction`, use `workerSessionId`; for `review`, use `reviewerSessionId`; `transition` intentionally has no implicit live owner. A session proves active execution only when the exact session ID matches and its Herdr status is `working`. Never match on provider/display name. Do not report `supervisor_continuity_stalled` before `transitionDueAt`, or for `paused`, `blocked`, or `complete`. When Herdr is unavailable/degraded without usable session data, emit `supervisor_continuity_unproven` and do not claim idle. When the due time has passed with no bound working session, emit one warning carrying the checkpoint's exact `nextAction`. Independently emit `supervisor_owner_update_overdue` when `ownerUpdateDueAt` has passed, even if work is live. Missing optional checkpoints produce no diagnostic.
 
 Define the public shape and assembled `controlPlaneSnapshotSchema` in client-safe `types.ts`:
 
@@ -972,6 +1077,7 @@ export interface ControlPlaneSnapshot {
     hooks: Observation<HookCoverageSnapshot>;
     git: Observation<GitHealthSnapshot>;
   };
+  diagnostics: ControlPlaneDiagnostic[];
 }
 ```
 
@@ -979,7 +1085,7 @@ Resolve the registered project with `getProject()` only. If it returns `undefine
 
 For a real project, create one aggregate AbortController and `SNAPSHOT_DEADLINE_MS = 7000`. Start all five adapters together with its signal. Wrap every adapter promise in an injected-timer deadline race so even an adapter that ignores abort and never settles becomes a stable source-specific `timeout` observation. The aggregate deadline aborts child work; every wrapper clears timers/listeners. Then use `Promise.allSettled` to convert unexpected rejection to an `unavailable` observation with a stable source-specific message. Stage 2 owns the client query/polling consumer; Stage 1 guarantees only that this request itself is bounded.
 
-Parse the final response with `controlPlaneSnapshotSchema`, assembled in `types.ts` with `observationOf(orchestraSnapshotSchema)`, `observationOf(herdrSnapshotSchema)`, `observationOf(runtimeManagerSnapshotSchema)`, `observationOf(hookCoverageSnapshotSchema)`, and `observationOf(gitHealthSnapshotSchema)`. Never import `store.ts`, `bd.ts`, `schema.ts`, `interactions.ts`, or `git-unmerged.ts` here.
+After all observations settle, call the pure continuity evaluator with the final orchestra and Herdr observations and the same injected clock. Parse the final response with `controlPlaneSnapshotSchema`, assembled in `types.ts` with `observationOf(orchestraSnapshotSchema)`, `observationOf(herdrSnapshotSchema)`, `observationOf(runtimeManagerSnapshotSchema)`, `observationOf(hookCoverageSnapshotSchema)`, `observationOf(gitHealthSnapshotSchema)`, and `controlPlaneDiagnosticSchema`. Demo returns `diagnostics: []`. Never import `store.ts`, `bd.ts`, `schema.ts`, `interactions.ts`, or `git-unmerged.ts` here.
 
 - [ ] **Step 4: Add the dynamic Node route and client type**
 
@@ -1017,6 +1123,7 @@ controlPlane: {
 
 ```powershell
 npm run test:unit -- lib/control-plane/snapshot.test.ts
+npm run test:unit -- lib/control-plane/orchestra.test.ts lib/control-plane/continuity.test.ts
 npm run test:unit -- app/api/p/[projectId]/control-plane/route.test.ts
 npm run lint
 ```
@@ -1026,8 +1133,8 @@ The route test must prove unknown projects return the existing 404 envelope and 
 - [ ] **Step 6: Commit the snapshot API**
 
 ```powershell
-git add -- lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/snapshot.ts lib/control-plane/snapshot.test.ts app/api/p/[projectId]/control-plane/route.ts app/api/p/[projectId]/control-plane/route.test.ts lib/api-client.ts
-git commit --only -m "feat: expose control-plane observations" -- lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/snapshot.ts lib/control-plane/snapshot.test.ts app/api/p/[projectId]/control-plane/route.ts app/api/p/[projectId]/control-plane/route.test.ts lib/api-client.ts
+git add -- lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/orchestra.ts lib/control-plane/orchestra.test.ts lib/control-plane/continuity.ts lib/control-plane/continuity.test.ts lib/control-plane/snapshot.ts lib/control-plane/snapshot.test.ts app/api/p/[projectId]/control-plane/route.ts app/api/p/[projectId]/control-plane/route.test.ts lib/api-client.ts
+git commit --only -m "feat: expose control-plane observations" -- lib/control-plane/types.ts lib/control-plane/types.test.ts lib/control-plane/orchestra.ts lib/control-plane/orchestra.test.ts lib/control-plane/continuity.ts lib/control-plane/continuity.test.ts lib/control-plane/snapshot.ts lib/control-plane/snapshot.test.ts app/api/p/[projectId]/control-plane/route.ts app/api/p/[projectId]/control-plane/route.test.ts lib/api-client.ts
 git show --stat --oneline HEAD
 ```
 
@@ -1200,6 +1307,8 @@ Document this exact table and expand each row with the implemented diagnostic co
 
 State plainly that the Stage 1 GET request has a 7000 ms aggregate deadline; Stage 2 adds the polling/query consumer and joins this snapshot with the existing Beads React Query cache. The only Stage 1 invalidation stream is the orchestra watcher; the existing Beads stream remains separate. No source grants dispatch authority.
 
+Document continuity separately as a derived diagnostic, not a sixth authority source. Its inputs are the versioned checkpoint projected from existing orchestra `active_work` plus exact Herdr session liveness. Define the three diagnostic codes and state that unknown/unavailable Herdr evidence produces `supervisor_continuity_unproven`, never a fabricated idle verdict. The checkpoint's `nextAction` is supervisor-declared coordination state, not a Scotty-created task or automatic dispatch authorization.
+
 - [ ] **Step 2: Run the complete unit and lint gates**
 
 ```powershell
@@ -1239,6 +1348,9 @@ Verify behavior, not only tests:
 - unknown projects retain the existing 404 envelope, Demo calls no adapters and creates no stream, and a never-settling adapter cannot exceed the 7000 ms snapshot deadline;
 - no Board/List, workbench query, visible component, or Beads status changed;
 - all code commits postdate the approved audit/design and supervisor Gate 0 resolution.
+- every approved incomplete plan used for supervision has a version-1 checkpoint with current stage, exact next action, bound session for the active phase, transition deadline, owner-update deadline, and explicit pause/blocker when applicable;
+- the incident fixture (Task 5 complete, plan 5/9, no live worker/reviewer, no pause/blocker, overdue transition/update) emits `supervisor_continuity_stalled` with the exact declared next action, while live review, explicit pause/block, completion, pre-deadline handoff, and unavailable Herdr do not produce a false stall;
+- the Stage 1 Bead cannot close while `better-palia-maps-82d3z` remains open; after the merged Scotty runtime exposes diagnostics, its separate Better Palia Maps change must wire the normal `supervisor-check` exit gate to inspect this endpoint and require either a live dispatch/review or an explicit pause/blocker checkpoint.
 
 - [ ] **Step 6: Commit documentation and any validation-only correction**
 
