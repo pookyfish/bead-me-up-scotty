@@ -1,6 +1,7 @@
 import type { SignalSseDeps, SubscribeSignal } from "./signal-sse";
 
 type Mode = "request-abort" | "reader-cancel" | "shutdown" | "enqueue-failure";
+type ThrowingCleanup = "heartbeat" | "unsubscribe" | "unregister";
 
 class BoundedResponseReader {
   private readonly reader: ReadableStreamDefaultReader<Uint8Array>;
@@ -38,7 +39,11 @@ class BoundedResponseReader {
   }
 }
 
-export function signalHarness(options: { mode?: Mode; subscribeThrows?: boolean } = {}) {
+export function signalHarness(options: {
+  mode?: Mode;
+  subscribeThrows?: boolean;
+  cleanupThrows?: ThrowingCleanup;
+} = {}) {
   const controller = new AbortController();
   let emit: ((payload: string) => void) | undefined;
   let unsubscribe = 0;
@@ -51,7 +56,10 @@ export function signalHarness(options: { mode?: Mode; subscribeThrows?: boolean 
   const subscribe: SubscribeSignal = (nextEmit) => {
     if (options.subscribeThrows) throw new Error("subscribe failed");
     emit = nextEmit;
-    return () => { unsubscribe += 1; };
+    return () => {
+      unsubscribe += 1;
+      if (options.cleanupThrows === "unsubscribe") throw new Error("unsubscribe failed");
+    };
   };
 
   const deps: SignalSseDeps = {
@@ -62,10 +70,14 @@ export function signalHarness(options: { mode?: Mode; subscribeThrows?: boolean 
     },
     clearInterval: (timer) => {
       if (timers.delete(timer as unknown as number)) clearedHeartbeat += 1;
+      if (options.cleanupThrows === "heartbeat") throw new Error("clear heartbeat failed");
     },
     registerSseStream: (close) => {
       shutdown = close;
-      return () => { unregister += 1; };
+      return () => {
+        unregister += 1;
+        if (options.cleanupThrows === "unregister") throw new Error("unregister failed");
+      };
     },
   };
 

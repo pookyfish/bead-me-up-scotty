@@ -1,7 +1,7 @@
-import { subscribeBeadsChange } from "@/lib/beads-watch";
-import { fail } from "@/lib/api";
-import { ConfigError, getProject } from "@/lib/config";
-import { createSignalSseResponse } from "@/lib/signal-sse";
+import { fail } from "../../../../../../lib/api";
+import { subscribeBeadsChange } from "../../../../../../lib/beads-watch";
+import { ConfigError, getProject } from "../../../../../../lib/config";
+import { createSignalSseResponse } from "../../../../../../lib/signal-sse";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createSignalSseResponse } from "./signal-sse";
 import { signalHarness } from "./signal-sse-test-helpers";
 
@@ -47,6 +47,57 @@ describe("signal SSE lifecycle", () => {
     expect(harness.unregisterCount()).toBe(1);
     expect(harness.clearedHeartbeatCount()).toBe(1);
     expect(harness.openTimerCount()).toBe(0);
+  });
+
+  it.each(["heartbeat", "unsubscribe", "unregister"] as const)("continues idempotent cleanup when %s cleanup throws", async (cleanupThrows) => {
+    const harness = signalHarness({ cleanupThrows });
+    const response = createSignalSseResponse(harness.request, harness.subscribe, harness.deps);
+    const reader = harness.readerFor(response);
+    try {
+      await expect(harness.trigger("shutdown")).resolves.toBeUndefined();
+      await expect(harness.trigger("shutdown")).resolves.toBeUndefined();
+      expect(harness.unsubscribeCount()).toBe(1);
+      expect(harness.unregisterCount()).toBe(1);
+      expect(harness.clearedHeartbeatCount()).toBe(1);
+      expect(harness.openTimerCount()).toBe(0);
+    } finally {
+      await reader.cancel();
+      await harness.dispose();
+    }
+  });
+
+  it.each(["request-abort", "reader-cancel"] as const)("does not leak cleanup errors through %s", async (mode) => {
+    const harness = signalHarness({ cleanupThrows: "unsubscribe" });
+    const response = createSignalSseResponse(harness.request, harness.subscribe, harness.deps);
+    const reader = harness.readerFor(response);
+    try {
+      await expect(harness.trigger(mode)).resolves.toBeUndefined();
+      expect(harness.unregisterCount()).toBe(1);
+      expect(harness.clearedHeartbeatCount()).toBe(1);
+    } finally {
+      await reader.cancel();
+      await harness.dispose();
+    }
+  });
+
+  it("cleans up after an actual controller enqueue failure without cancelling first", async () => {
+    const harness = signalHarness();
+    const response = createSignalSseResponse(harness.request, harness.subscribe, harness.deps);
+    const reader = harness.readerFor(response);
+    const enqueue = vi.spyOn(ReadableStreamDefaultController.prototype, "enqueue").mockImplementationOnce(() => {
+      throw new Error("enqueue failed");
+    });
+    try {
+      expect(() => harness.emit("orchestra")).not.toThrow();
+      expect(harness.unsubscribeCount()).toBe(1);
+      expect(harness.unregisterCount()).toBe(1);
+      expect(harness.clearedHeartbeatCount()).toBe(1);
+      expect(harness.openTimerCount()).toBe(0);
+    } finally {
+      enqueue.mockRestore();
+      await reader.cancel();
+      await harness.dispose();
+    }
   });
 
   it("cleans registration when subscribe throws", async () => {

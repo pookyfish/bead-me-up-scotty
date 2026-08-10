@@ -18,6 +18,14 @@ export const defaultSignalSseDeps: Required<SignalSseDeps> = {
   registerSseStream,
 };
 
+function suppressCleanupError(cleanup: () => void): void {
+  try {
+    cleanup();
+  } catch {
+    // A stream must finish every cleanup step even if an external cleanup callback fails.
+  }
+}
+
 export function createSignalSseResponse(
   request: Request,
   subscribe: SubscribeSignal,
@@ -41,24 +49,21 @@ export function createSignalSseResponse(
         if (closed) return;
         closed = true;
         if (heartbeat !== undefined) {
-          clearHeartbeat(heartbeat);
+          const currentHeartbeat = heartbeat;
           heartbeat = undefined;
+          suppressCleanupError(() => clearHeartbeat(currentHeartbeat));
         }
         if (listening) {
-          request.signal.removeEventListener("abort", close);
           listening = false;
+          suppressCleanupError(() => request.signal.removeEventListener("abort", close));
         }
         const currentUnsubscribe = unsubscribe;
         unsubscribe = undefined;
-        currentUnsubscribe?.();
+        if (currentUnsubscribe) suppressCleanupError(currentUnsubscribe);
         const currentUnregister = unregister;
         unregister = undefined;
-        currentUnregister?.();
-        try {
-          controller.close();
-        } catch {
-          // A cancelled reader or shutdown may have already closed the controller.
-        }
+        if (currentUnregister) suppressCleanupError(currentUnregister);
+        suppressCleanupError(() => controller.close());
       };
 
       const send = (chunk: string) => {

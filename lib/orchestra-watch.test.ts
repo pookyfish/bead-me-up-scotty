@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { vi } from "vitest";
+import path from "node:path";
 vi.mock("server-only", () => ({}));
 import { subscribeOrchestraChange, type OrchestraWatchDeps } from "./orchestra-watch";
 
@@ -7,6 +8,8 @@ function watchHarness(options: { exists?: boolean } = {}) {
   let watchCount = 0;
   let closeCount = 0;
   let listener: ((event: string, filename: string | Buffer | null) => void) | undefined;
+  let watchedPath: string | undefined;
+  let watchedOptions: { recursive?: boolean; persistent?: boolean } | undefined;
   const timers = new Map<number, () => void>();
   let nextTimer = 0;
   const deps: OrchestraWatchDeps = {
@@ -20,6 +23,8 @@ function watchHarness(options: { exists?: boolean } = {}) {
     existsSync: () => options.exists ?? true,
     watch: (_path, _options, nextListener) => {
       watchCount += 1;
+      watchedPath = _path;
+      watchedOptions = _options;
       listener = nextListener;
       return { close: () => { closeCount += 1; }, on: () => undefined } as never;
     },
@@ -36,6 +41,9 @@ function watchHarness(options: { exists?: boolean } = {}) {
     flush() { for (const callback of [...timers.values()]) callback(); timers.clear(); },
     watchCount: () => watchCount,
     closeCount: () => closeCount,
+    watchedPath: () => watchedPath,
+    watchedOptions: () => watchedOptions,
+    openTimerCount: () => timers.size,
   };
 }
 
@@ -44,11 +52,18 @@ describe("orchestra watcher", () => {
     const fs = watchHarness();
     const a = subscribeOrchestraChange("project", () => {}, fs.deps);
     const b = subscribeOrchestraChange("project", () => {}, fs.deps);
-    expect(fs.watchCount()).toBe(1);
-    a();
-    expect(fs.closeCount()).toBe(0);
-    b();
-    expect(fs.closeCount()).toBe(1);
+    try {
+      expect(fs.watchCount()).toBe(1);
+      expect(fs.watchedPath()).toBe(path.join("C:/repo", ".orchestra"));
+      expect(fs.watchedOptions()).toEqual({ recursive: false, persistent: false });
+      a();
+      expect(fs.closeCount()).toBe(0);
+      b();
+      expect(fs.closeCount()).toBe(1);
+    } finally {
+      a();
+      b();
+    }
   });
 
   it("filters unrelated files and coalesces state changes", () => {
@@ -71,5 +86,14 @@ describe("orchestra watcher", () => {
     const unsubscribe = subscribeOrchestraChange("project", () => {}, fs.deps);
     unsubscribe();
     expect(fs.watchCount()).toBe(0);
+  });
+
+  it("clears a pending debounce when the final subscriber leaves", () => {
+    const fs = watchHarness();
+    const unsubscribe = subscribeOrchestraChange("project", () => {}, fs.deps);
+    fs.change("state.json");
+    expect(fs.openTimerCount()).toBe(1);
+    unsubscribe();
+    expect(fs.openTimerCount()).toBe(0);
   });
 });
