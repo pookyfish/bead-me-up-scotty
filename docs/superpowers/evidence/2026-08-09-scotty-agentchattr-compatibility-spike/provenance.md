@@ -35,13 +35,29 @@ Line references below identify behavior discovered through pinned GitHub raw fil
 
 | Area | Pinned source path and lines | Evidence and spike implication |
 | --- | --- | --- |
-| Direct server and bind policy | `run.py:27-31, 125-162`; `config.toml:3` | The direct entry point accepts MCP-port and network-related flags, derives the web bind host from configuration, and starts the FastAPI/uvicorn server. The default configuration uses `127.0.0.1`; non-localhost binding requires the upstream network override. The future spike must use only the direct server path through Runtime Manager and re-check the bind immediately before start. |
-| Local request/origin policy | `app.py:176-193` | The application includes localhost/loopback origin and client-address checks. This is localhost-convenience evidence only, not proof of a multi-user authorization boundary or authenticated MCP mutation. |
-| MCP surface | `mcp_bridge.py:193-408` (`chat_send`); `mcp_bridge.py:559-658` (`chat_read`); `mcp_bridge.py:930-951` (tool/server wiring); `README.md:309-354` (manual client examples) | The pinned source and upstream documentation identify `chat_send` and `chat_read`, and a loopback MCP HTTP example. The plan must prove authentication and the actual tool schemas from a manually configured client; this review found no separately versioned server/API/MCP protocol declaration in the inspected root/version, README, `run.py`, `app.py`, `mcp_bridge.py`, or `config.toml`. Record that independent version evidence as **absent**, not inferred from `VERSION`. |
-| Message, trigger, and loop behavior | `app.py:664-718`; `router.py:83-101`; `config.toml:99`; `README.md:116-123, 232, 283-285` | Upstream routes new messages/mentions and has its own configurable hop guard plus `/continue` behavior. Its configured default is four hops, not Scotty's required six-message guard. The future spike therefore needs a separate pure Scotty guard and pre-send interceptor; upstream control text cannot reset it. |
-| Trigger queue and wrapper | `agents.py:1-78`; `wrapper.py:454-545, 574-901` | Upstream contains a trigger-queue writer and wrapper queue watcher/heartbeat path. Their presence is a compatibility risk, not permission to use them. The spike must prove those paths are disabled or unused continuously; no launcher/wrapper process is permitted. |
-| Windows pane injection/direct subprocess | `wrapper_windows.py:144-191, 256-330, 411-424`; `wrapper.py:1-17` | The pinned Windows wrapper uses console-input injection and starts a direct agent subprocess. This conflicts with Scotty's Herdr-only pane-control boundary. The wrapper is prohibited, and any detected injection/subprocess child invalidates the no-spawn result. |
+| Direct server and bind policy | `run.py:22-28, 114-148, 154-162`; `config.toml:1-4` | The direct entry point accepts the data/web/MCP port overrides, derives the web bind host from configuration, and starts the FastAPI/uvicorn server. The default configuration uses `127.0.0.1`; non-localhost binding requires the upstream network override. The future spike must use only the direct server path through Runtime Manager and re-check the bind immediately before start. |
+| Local request/origin policy | `app.py:170-198` | The application includes localhost/loopback origin and client-address checks. This is localhost-convenience evidence only, not proof of a multi-user authorization boundary or authenticated MCP mutation. |
+| MCP surface | `mcp_bridge.py:182-220` (identity resolution and `chat_send`); `mcp_bridge.py:559-658` (`chat_read`); `mcp_bridge.py:929-962` (tool list, loopback MCP server, HTTP/SSE runners); `README.md:309-354` (manual client examples) | The pinned source and upstream documentation identify `chat_send` and `chat_read`, and a loopback MCP HTTP example. The plan must prove authentication and the actual tool schemas from a manually configured client; this review found no separately versioned server/API/MCP protocol declaration in the inspected root/version, README, `run.py`, `app.py`, `mcp_bridge.py`, or `config.toml`. Record that independent version evidence as **absent**, not inferred from `VERSION`. |
+| Message, trigger, and loop behavior | `app.py:664-720`; `router.py:83-88`; `config.toml:96-102`; `README.md:116-123, 232, 283-285` | Upstream routes new messages/mentions and has its own configurable hop guard plus `/continue` behavior. Its configured default is four hops, not Scotty's required six-message guard. The future spike therefore needs a separate pure Scotty guard and pre-send interceptor; upstream control text cannot reset it. |
+| Trigger queue and wrapper | `agents.py:32-54, 56-78`; `wrapper.py:1-19, 454-545, 574-901` | Upstream contains a trigger-queue writer and wrapper queue watcher/heartbeat path. Their presence is a compatibility risk, not permission to use them. The spike must prove those paths are disabled or unused continuously; no launcher/wrapper process is permitted. |
+| Windows pane injection/direct subprocess | `wrapper_windows.py:140-195, 256-335, 410-429`; `wrapper.py:1-19` | The pinned Windows wrapper uses console-input injection and starts a direct agent subprocess. This conflicts with Scotty's Herdr-only pane-control boundary. The wrapper is prohibited, and any detected injection/subprocess child invalidates the no-spawn result. |
 | Jobs and Rules | `mcp_bridge.py:23-27, 112-123`; `README.md:128-142, 295` | Upstream exposes Jobs/Rules-related state/tooling. Scotty must not create, read as authority, or use either for work state/policy. They are a negative test/monitor target only. |
+
+## Citation reproducibility and range/EOF check
+
+**Method:** The exact raw URL below was retrieved as UTF-8 text. Line numbers were calculated after normalizing CRLF/CR to LF, preserving interior blank lines, and discarding only the final empty split segment created by a terminal LF. The GitHub Contents API blob SHA binds each path to the approved commit. Every cited range above was checked as `1 <= start <= end <= total lines` under this method.
+
+| Path | Raw URL | Blob SHA | Total lines | Verified cited ranges |
+| --- | --- | --- | ---: | --- |
+| `run.py` | `https://raw.githubusercontent.com/bcurts/agentchattr/c24f605c9b24fb7a98003f7930e2d5e7a7f7d297/run.py` | `b14bc75c9efbb89947bc9a5183c1c435923a24fb` | 167 | `22-28`, `114-148`, `154-162` |
+| `mcp_bridge.py` | `https://raw.githubusercontent.com/bcurts/agentchattr/c24f605c9b24fb7a98003f7930e2d5e7a7f7d297/mcp_bridge.py` | `d6974dba703711790392392aa06d4e6a3f764664` | 963 | `23-27`, `112-123`, `182-220`, `559-658`, `929-962` |
+| `config.toml` | `https://raw.githubusercontent.com/bcurts/agentchattr/c24f605c9b24fb7a98003f7930e2d5e7a7f7d297/config.toml` | `4788f4cdbf73dc6cb17852f519132f0a47f87187` | 149 | `1-4`, `96-102` |
+| `app.py` | `https://raw.githubusercontent.com/bcurts/agentchattr/c24f605c9b24fb7a98003f7930e2d5e7a7f7d297/app.py` | `60a6434e29311fbe55eecb306d1703fb4b6206c5` | 2644 | `170-198`, `664-720` |
+| `router.py` | `https://raw.githubusercontent.com/bcurts/agentchattr/c24f605c9b24fb7a98003f7930e2d5e7a7f7d297/router.py` | `814e2c9ffcdf55dfd19da411b00e66ff1f83d4c1` | 102 | `83-88` |
+| `agents.py` | `https://raw.githubusercontent.com/bcurts/agentchattr/c24f605c9b24fb7a98003f7930e2d5e7a7f7d297/agents.py` | `ca7e2a83260f5ede012222eb8f9237118661f6fd` | 78 | `32-54`, `56-78` |
+| `wrapper.py` | `https://raw.githubusercontent.com/bcurts/agentchattr/c24f605c9b24fb7a98003f7930e2d5e7a7f7d297/wrapper.py` | `c7fde4204fb4c976cf87fc16b79e5e4e2b091bda` | 918 | `1-19`, `454-545`, `574-901` |
+| `wrapper_windows.py` | `https://raw.githubusercontent.com/bcurts/agentchattr/c24f605c9b24fb7a98003f7930e2d5e7a7f7d297/wrapper_windows.py` | `7a1065e4079c58d84000b3f4b515e67ddb1a3ba2` | 438 | `140-195`, `256-335`, `410-429` |
+| `README.md` | `https://raw.githubusercontent.com/bcurts/agentchattr/c24f605c9b24fb7a98003f7930e2d5e7a7f7d297/README.md` | `3848361bed2f4660e46589b93b4b61919e9ad30a` | 624 | `116-123`, `128-142`, `232`, `283-285`, `295`, `309-354` |
 
 ## Windows compatibility conclusion and limitations
 
@@ -51,10 +67,12 @@ No read-only source inspection in this artifact proves all of the following: an 
 
 ## Independent review record
 
-| Item | Required before executable work |
+| Item | Reviewer entry required before executable work |
 | --- | --- |
-| Reviewer identity and UTC approval | **Pending — no executable work authorized.** |
-| Pin/current comparison repeated | **Pending.** |
-| License/MIT obligations confirmed | **Pending.** |
-| Windows direct-server/no-wrapper boundary approved | **Pending.** |
-| Result | **HOLD: provenance captured; independent approval has not occurred.** |
+| Reviewer identity |  |
+| Approval UTC |  |
+| Pin/current comparison conclusion | **Pending.** |
+| License/MIT obligations conclusion | **Pending.** |
+| Windows direct-server/no-wrapper conclusion | **Pending.** |
+| Approval decision (`approved` / `hold` / `rejected`) | **Pending.** |
+| Current status | **HOLD: provenance captured; independent approval has not occurred; no executable work authorized.** |
