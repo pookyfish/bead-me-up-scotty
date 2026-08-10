@@ -99,16 +99,15 @@ describe("committed version-2 evidence artifacts", () => {
     expect(fixture.records.every((record) => !("displayName" in record))).toBe(true);
   });
 
-  it("covers the approved message contexts without changing replay identity", () => {
+  it("pins the committed replay cursors, restart reset, and tombstone linkage", () => {
     const fixture = messageFixtureSchema.parse(committedMessageFixture);
-    const byCaseId = new Map(fixture.records.map((record) => [record.caseId, record]));
     const replayCases = [
       "message-initial-page",
       "message-overlap-page",
       "message-retry-replay",
       "message-post-restart",
       "message-tombstone",
-    ];
+    ] as const;
     const durableTuple = (record: (typeof fixture.records)[number]) => JSON.stringify([
       record.providerInstanceId,
       record.channelId,
@@ -118,16 +117,50 @@ describe("committed version-2 evidence artifacts", () => {
       record.parentUid,
       record.threadId,
     ]);
+    const assertReplayParity = (records: typeof fixture.records) => {
+      const byCaseId = new Map(records.map((record) => [record.caseId, record]));
+      const replayRecords = replayCases.map((caseId) => byCaseId.get(caseId)!);
+      const [initial, overlap, retry, postRestart, tombstone] = replayRecords;
+
+      expect(replayRecords.map((record) => record.observationContext)).toEqual([
+        "initial_page", "overlap_page", "retry_replay", "post_restart", "tombstone",
+      ]);
+      expect(replayRecords.map((record) => record.cursorId)).toEqual([100, 101, 101, 1, 2]);
+      expect(retry.cursorId).toBe(overlap.cursorId);
+      expect(postRestart.cursorId).toBeLessThan(retry.cursorId);
+      expect(tombstone.messageState).toBe("deleted");
+      expect(new Set(replayRecords.map((record) => record.stableMessageUid))).toEqual(
+        new Set(["message-synthetic-replay-001"]),
+      );
+      expect(durableTuple(tombstone)).toBe(durableTuple(initial));
+      expect(replayRecords.slice(0, -1).some((record) => record.messageState === "present"
+        && durableTuple(record) === durableTuple(tombstone))).toBe(true);
+    };
+    const mutate = (
+      caseId: (typeof replayCases)[number],
+      mutation: Partial<(typeof fixture.records)[number]>,
+    ) => fixture.records.map((record) => record.caseId === caseId
+      ? { ...record, ...mutation } as (typeof fixture.records)[number]
+      : record);
+
+    assertReplayParity(fixture.records);
+    expect(() => assertReplayParity(mutate("message-retry-replay", { cursorId: 102 }))).toThrow();
+    expect(() => assertReplayParity(mutate("message-post-restart", { cursorId: 102 }))).toThrow();
+    expect(() => assertReplayParity(mutate("message-tombstone", { messageState: "present" }))).toThrow();
+    expect(() => assertReplayParity(mutate("message-tombstone", {
+      stableMessageUid: "message-synthetic-broken-link",
+    }))).toThrow();
+  });
+
+  it("covers equal-time, queue-only, peer-acceptance, and unknown-axis observations", () => {
+    const fixture = messageFixtureSchema.parse(committedMessageFixture);
+    const byCaseId = new Map(fixture.records.map((record) => [record.caseId, record]));
     const equalTimeAlpha = byCaseId.get("message-equal-time-alpha");
     const equalTimeBeta = byCaseId.get("message-equal-time-beta");
     const queueOnly = byCaseId.get("message-queue-only");
     const peerAcceptance = byCaseId.get("message-peer-acceptance");
     const unknownAxes = byCaseId.get("message-unknown-axes");
 
-    expect(new Set(replayCases.map((caseId) => durableTuple(byCaseId.get(caseId)!))).size).toBe(1);
-    expect(replayCases.map((caseId) => byCaseId.get(caseId)?.observationContext)).toEqual([
-      "initial_page", "overlap_page", "retry_replay", "post_restart", "tombstone",
-    ]);
     expect(equalTimeAlpha?.observedAt).toBe(equalTimeBeta?.observedAt);
     expect(queueOnly).toMatchObject({
       transportState: "queued",
