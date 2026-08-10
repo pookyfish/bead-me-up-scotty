@@ -1017,6 +1017,50 @@ it.each([
   }));
 });
 
+it("uses stable plain-language fields for an invalid checkpoint", () => {
+  expect(evaluateContinuityFixture("invalid-checkpoint")).toContainEqual({
+    code: "supervisor_continuity_unproven",
+    severity: "info",
+    workKey: "codex-scotty-control-plane-foundation-20260809",
+    beadId: "better-palia-maps-l4cq3.1",
+    stage: "invalid supervision checkpoint",
+    message: "Supervision checkpoint for better-palia-maps-l4cq3.1 is invalid, so approved-plan continuity cannot be proven. Next action: replace the invalid SUPERVISION-CHECKPOINT/v1 record before supervisor exit",
+    nextAction: "replace the invalid SUPERVISION-CHECKPOINT/v1 record before supervisor exit",
+  });
+});
+
+it.each([
+  "supervisor_session_id",
+  "worker_session_id",
+  "reviewer_session_id",
+  "supervisorSessionId",
+  "workerSessionId",
+  "reviewerSessionId",
+])("rejects legacy flat v1 key %s instead of accepting ambiguous liveness", async (legacyKey) => {
+  const orchestra = await observeOrchestra("C:/repo", fakeFs({
+    json: orchestraStateWithRawSupervision({
+      ...validRawSupervision(),
+      [legacyKey]: "legacy-flat-session",
+    }),
+  }));
+  expect(orchestra.data?.activeWork[WORK_KEY].supervision).toEqual({
+    status: "invalid",
+    code: "invalid_checkpoint",
+  });
+  expect(evaluateSupervisorContinuity({
+    orchestra,
+    herdr: availableHerdr([herdrSession({
+      sessionId: "legacy-flat-session",
+      status: "working",
+    })]),
+    now: new Date("2026-08-09T21:00:00.000Z"),
+  })).toContainEqual(expect.objectContaining({
+    code: "supervisor_continuity_unproven",
+    stage: "invalid supervision checkpoint",
+    nextAction: "replace the invalid SUPERVISION-CHECKPOINT/v1 record before supervisor exit",
+  }));
+});
+
 it("survives handoff and compaction with the new exact supervisor binding", async () => {
   const orchestra = await observeOrchestra("C:/repo", fakeFs({
     json: orchestraStateWithCheckpoint({
@@ -1137,7 +1181,47 @@ npm run test:unit -- lib/control-plane/orchestra.test.ts lib/control-plane/conti
 
 - [ ] **Step 3: Implement the deadline-bounded snapshot using `Promise.allSettled`**
 
-First extend the bounded orchestra projection. An `active_work` record may carry this optional snake-case `supervision` object; unknown fields remain ignored:
+First extend the bounded orchestra projection. An `active_work` record may carry this optional snake-case `supervision` object. This is the exact accepted on-disk version-1 shape; raw orchestra JSON uses snake_case while the client-safe TypeScript projection below maps it to camelCase:
+
+```json
+{
+  "supervision": {
+    "schema_version": 1,
+    "objective_status": "approved_incomplete",
+    "objective": "Complete the approved Scotty control-plane observation foundation.",
+    "plan_path": "docs/superpowers/plans/2026-08-09-scotty-control-plane-observation-foundation.md",
+    "completed_stages": 6,
+    "total_stages": 9,
+    "stage": "Task 7 implementation",
+    "phase": "implementation",
+    "supervisor_binding": {
+      "source": "herdr",
+      "surface": "herdr",
+      "session_id": "supervisor-session-after-handoff"
+    },
+    "worker_binding": {
+      "source": "herdr",
+      "surface": "herdr",
+      "session_id": "task-7-worker-session"
+    },
+    "reviewer_binding": null,
+    "next_action": "complete Task 7, then dispatch its independent reviewer",
+    "last_transition_at": "2026-08-09T21:00:00.000Z",
+    "last_owner_update_at": "2026-08-09T21:00:00.000Z",
+    "transition_due_at": "2026-08-09T21:15:00.000Z",
+    "owner_update_due_at": "2026-08-09T21:10:00.000Z",
+    "pause_reason": null,
+    "blocker": null,
+    "handoff_generation": 1
+  }
+}
+```
+
+Each binding is either `null` or exactly `{ "source": <declared-source>, "surface": <declared-surface>, "session_id": <nonempty-exact-id> }`. At `schema_version: 1`, the flat experimental keys `supervisor_session_id`, `worker_session_id`, and `reviewer_session_id` are forbidden, as are `supervisorSessionId`, `workerSessionId`, and `reviewerSessionId`. Detect any of those six keys before stripping unknown fields and project the whole checkpoint as invalid; do not auto-migrate, accept, or infer a nested binding from them. Other unknown non-legacy fields remain ignored.
+
+The registered supervisor/orchestration writer owns migration. Before Task 7 review it must replace `C:\Better Palia Maps\.orchestra\state.json -> active_work["codex-scotty-control-plane-foundation-20260809"].supervision` with the complete nested snake_case object above, using the current objective/stage/bindings/deadlines, and post the same fields in the `SUPERVISION-CHECKPOINT/v1` comment on Bead `better-palia-maps-l4cq3.1`. The Stage 1 reader remains read-only and never rewrites legacy data.
+
+Then define the client-safe projection:
 
 ```ts
 export type ExactSessionBinding =
@@ -1201,7 +1285,7 @@ export interface ControlPlaneDiagnostic {
   beadId: string | null;
   stage: string;
   message: string;
-  nextAction: string | null;
+  nextAction: string;
 }
 
 export function evaluateSupervisorContinuity(input: {
@@ -1211,7 +1295,30 @@ export function evaluateSupervisorContinuity(input: {
 }): ControlPlaneDiagnostic[];
 ```
 
-Evaluate every current `activeWork` entry that carries a present versioned checkpoint independently. A healthy/live implementation lane must not suppress a fault on another planning, transition, or review lane. Do not inspect terminal/legacy `integration_queue` history or invent checkpoints for unversioned records. If the orchestra observation has no usable projected data, emit one `supervisor_continuity_unproven` diagnostic with `workKey: "orchestra"`, stage `coordination observation`, and next action `restore a valid orchestra observation before supervisor exit`; never let missing coordination evidence produce an empty, passing diagnostic set. Return no continuity diagnostic at all for a valid `paused`, `blocked`, or `complete` checkpoint, even if it retains an old due time. For `planning` and `handoff`, require `supervisorBinding`; for `implementation` and `correction`, require `workerBinding`; for `review`, require `reviewerBinding`; `transition` intentionally declares that no execution owner is active and needs no binding. Never fall back to the top-level orchestra supervisor, actor/provider/display name, role, pane title, or another phase's binding.
+Evaluate every current `activeWork` entry that carries a present versioned checkpoint independently. A healthy/live implementation lane must not suppress a fault on another planning, transition, or review lane. Do not inspect terminal/legacy `integration_queue` history or invent checkpoints for unversioned records. Every emitted continuity diagnostic must have a nonempty, control-character-free plain-language `stage`, `message`, and `nextAction`; enforce those fields in `controlPlaneDiagnosticSchema`. If the orchestra observation has no usable projected data, emit one `supervisor_continuity_unproven` diagnostic with `workKey: "orchestra"`, stage `coordination observation`, message `Coordination observation is unavailable, so supervisor continuity cannot be proven. Next action: restore a valid orchestra observation before supervisor exit`, and next action `restore a valid orchestra observation before supervisor exit`; never let missing coordination evidence produce an empty, passing diagnostic set. Return no continuity diagnostic at all for a valid `paused`, `blocked`, or `complete` checkpoint, even if it retains an old due time. For `planning` and `handoff`, require `supervisorBinding`; for `implementation` and `correction`, require `workerBinding`; for `review`, require `reviewerBinding`; `transition` intentionally declares that no execution owner is active and needs no binding. Never fall back to the top-level orchestra supervisor, actor/provider/display name, role, pane title, or another phase's binding.
+
+For `{ status: "invalid", code: "invalid_checkpoint" }`, never copy raw malformed fields. Synthesize these exact stable values, using `beadId ?? workKey` only in the message subject:
+
+```ts
+const INVALID_CHECKPOINT_STAGE = "invalid supervision checkpoint";
+const INVALID_CHECKPOINT_NEXT_ACTION =
+  "replace the invalid SUPERVISION-CHECKPOINT/v1 record before supervisor exit";
+
+function invalidCheckpointDiagnostic(workKey: string, beadId: string | null): ControlPlaneDiagnostic {
+  const subject = beadId ?? workKey;
+  return {
+    code: "supervisor_continuity_unproven",
+    severity: "info",
+    workKey,
+    beadId,
+    stage: INVALID_CHECKPOINT_STAGE,
+    message: `Supervision checkpoint for ${subject} is invalid, so approved-plan continuity cannot be proven. Next action: ${INVALID_CHECKPOINT_NEXT_ACTION}`,
+    nextAction: INVALID_CHECKPOINT_NEXT_ACTION,
+  };
+}
+```
+
+The invalid-checkpoint orchestra and evaluator tests must assert the exact full diagnostic, then pass it through the Better Palia process fixture and assert exit `3` plus the exact `Next action: replace the invalid SUPERVISION-CHECKPOINT/v1 record before supervisor exit` output. This keeps malformed checkpoint evidence blockable without weakening the exit checker's nonempty output contract.
 
 Resolve a binding by its complete `{ source, surface, sessionId }` identity. In Stage 1 only `{ source: "herdr", surface: "herdr" }` has a liveness source. A complete available Herdr observation is conclusive: an exact matching `working` session is live; an exact `idle`, `blocked`, or `done` session, or no exact match, is not working; an exact match with status `unknown` is unproven. A missing required phase binding, an invalid checkpoint sentinel, any non-Herdr binding, or unavailable/degraded Herdr observation is `supervisor_continuity_unproven`, never stalled. This is an explicit extension seam: a later declared source may become conclusive only by adding its own provenance-bearing observation and exact resolver.
 
@@ -1281,9 +1388,9 @@ npm run test:unit -- app/api/p/[projectId]/control-plane/route.test.ts
 npm run lint
 ```
 
-The route test must prove unknown projects return the existing 404 envelope and Demo returns a source-empty snapshot without adapter calls. The focused continuity coverage must include exact plain-language stalled output; external/Collaboration bindings; exact Herdr `unknown`; missing phase binding; unavailable/degraded Herdr; every approved-incomplete count/deadline invariant; terminal-state suppression of all three codes; invalid-checkpoint unproven behavior; control-character/path rejection; and the post-handoff serialized checkpoint with a new exact supervisor binding and incremented generation. Expected: all PASS. The resource-heavy full build remains reserved for Task 9.
+The route test must prove unknown projects return the existing 404 envelope and Demo returns a source-empty snapshot without adapter calls. The focused continuity coverage must include exact plain-language stalled output; external/Collaboration bindings; exact Herdr `unknown`; missing phase binding; unavailable/degraded Herdr; every approved-incomplete count/deadline invariant; terminal-state suppression of all three codes; the exact stable invalid-checkpoint diagnostic; legacy flat version-1 bindings rejected as invalid/unproven; control-character/path rejection; and the post-handoff serialized checkpoint with a new exact supervisor binding and incremented generation. Expected: all PASS. The resource-heavy full build remains reserved for Task 9.
 
-Before Task 7 review, the registered supervisor must migrate this plan's live orchestra checkpoint to the qualified version-1 shape and post the same non-secret checkpoint as a `SUPERVISION-CHECKPOINT/v1` comment on Bead `better-palia-maps-l4cq3.1`. The Bead comment is the durable handoff/audit record; `.orchestra/state.json` is the observed coordination projection. Stage 1 code writes neither one.
+Before Task 7 review, the registered supervisor must perform the exact writer-owned migration named in Step 3: replace the live orchestra checkpoint with the complete nested snake_case version-1 shape, including `objective` and `*_binding.{source,surface,session_id}`, remove every flat experimental session key, and post the same non-secret fields as a `SUPERVISION-CHECKPOINT/v1` comment on Bead `better-palia-maps-l4cq3.1`. The Bead comment is the durable handoff/audit record; `.orchestra/state.json` is the observed coordination projection. Stage 1 code writes neither one. The legacy-flat fixture must remain invalid/unproven after this migration; the reader never performs it implicitly.
 
 - [ ] **Step 6: Commit the snapshot API**
 
@@ -1508,11 +1615,11 @@ Verify behavior, not only tests:
 - unknown projects retain the existing 404 envelope, Demo calls no adapters and creates no stream, and a never-settling adapter cannot exceed the 7000 ms snapshot deadline;
 - no Board/List, workbench query, visible component, or Beads status changed;
 - all code commits postdate the approved audit/design and supervisor Gate 0 resolution.
-- every approved incomplete plan used for supervision has a valid version-1 checkpoint with coherent incomplete counts, current stage, exact next action, surface-qualified binding for the active phase, canonical transition and owner-update deadlines, and explicit pause/blocker when applicable;
+- every approved incomplete plan used for supervision has the exact nested snake_case version-1 checkpoint on disk, with coherent incomplete counts, current stage, exact next action, surface-qualified binding for the active phase, canonical transition and owner-update deadlines, and explicit pause/blocker when applicable; flat experimental session keys are rejected as invalid/unproven and are absent from the migrated live checkpoint and durable comment;
 - the incident fixture (Task 5 complete, plan 5/9, no live worker/reviewer, no pause/blocker, overdue transition/update) emits `supervisor_continuity_stalled` with the exact plain-language message and declared next action; external/Collaboration bindings, exact Herdr `unknown`, missing phase bindings, invalid checkpoints, and unavailable/degraded Herdr are unproven rather than stalled; paused, blocked, and complete suppress all three continuity codes;
 - the post-handoff/compaction fixture projects and serializes the incremented generation plus new exact supervisor binding, then proves liveness without actor/provider/display-name matching;
 - all current checkpointed `active_work` records are evaluated independently: the live Stage 1 implementation fixture does not hide the overdue AgentChattr awaiting-spec-review checkpoint or its exact next action, while terminal/legacy integration history remains outside the evaluator;
-- both Better Palia Maps `supervisor-check` skill entrypoints invoke the executable fresh-snapshot exit gate before final status; fixture-backed process tests prove stalled/overdue/unproven exit nonzero with exact `nextAction`, safe live/paused/blocked/complete exit zero, endpoint failure/staleness fail closed, and a second invocation refetches after remediation;
+- both Better Palia Maps `supervisor-check` skill entrypoints declare exactly two ordered executable gate invocations; the workflow fixture parses those declarations and spawns both processes, proving initial blocking, intervening remediation, a second fresh GET, and final exit `0` immediately before `## Report`; fixture-backed process tests also prove stalled/overdue/unproven exit nonzero with exact `nextAction`, safe live/paused/blocked/complete exit zero, endpoint failure/staleness fail closed, invalid-checkpoint stable output, and no stale `.agents` `kno`/`.knots` commands;
 - the Stage 1 Bead and `better-palia-maps-82d3z` remain open until the Better Palia gate is committed, pushed, merged to `master`, and verified against a fresh Scotty snapshot.
 
 - [ ] **Step 6: Commit documentation and any validation-only correction**
@@ -1647,10 +1754,30 @@ test("malformed and stale snapshot sources exit 3", async () => {
   });
 });
 
+test("invalid checkpoint diagnostics preserve their stable action through the process gate", async () => {
+  const nextAction = "replace the invalid SUPERVISION-CHECKPOINT/v1 record before supervisor exit";
+  await withSnapshotServer([
+    () => snapshotWithDiagnostics([{
+      code: "supervisor_continuity_unproven",
+      severity: "info",
+      workKey: "fixture-work",
+      beadId: "better-palia-maps-l4cq3.1",
+      stage: "invalid supervision checkpoint",
+      message: `Supervision checkpoint for better-palia-maps-l4cq3.1 is invalid, so approved-plan continuity cannot be proven. Next action: ${nextAction}`,
+      nextAction,
+    }]),
+  ], async ({ endpoint }) => {
+    const result = await runChecker(endpoint);
+    assert.equal(result.status, 3);
+    assert.ok(result.stdout.includes(`Next action: ${nextAction}`));
+  });
+});
+
 test("a blocking diagnostic without an exact nextAction exits 3 as unproven", async () => {
   await withSnapshotServer([
     () => snapshotWithDiagnostics([{
       code: "supervisor_continuity_stalled",
+      stage: "fixture stage",
       message: "Missing declared action",
       nextAction: null,
     }]),
@@ -1658,6 +1785,9 @@ test("a blocking diagnostic without an exact nextAction exits 3 as unproven", as
     const result = await runChecker(endpoint);
     assert.equal(result.status, 3);
     assert.match(result.stderr, /SUPERVISOR CONTINUITY UNPROVEN/);
+    assert.ok(result.stderr.includes(
+      "Next action: restore a valid fresh Scotty continuity snapshot before supervisor exit",
+    ));
   });
 });
 
@@ -1666,10 +1796,33 @@ test("unreachable snapshot source exits 3", async () => {
   assert.equal(result.status, 3);
 });
 
-test("both normal supervisor-check skills invoke the executable gate", () => {
-  const command = "node scripts/orchestration/supervisor-continuity-exit-check.cjs --endpoint http://127.0.0.1:1701/api/p/better-palia-maps/control-plane";
-  assert.match(read(".claude/skills/supervisor-check/skill.md"), new RegExp(escapeRegExp(command)));
-  assert.match(read(".agents/skills/supervisor-check/skill.md"), new RegExp(escapeRegExp(command)));
+for (const skillPath of [
+  ".claude/skills/supervisor-check/skill.md",
+  ".agents/skills/supervisor-check/skill.md",
+]) {
+  test(`${skillPath} runs an initial gate and a final fresh gate immediately before report`, async () => {
+    await withSnapshotServer([
+      () => snapshotWithDiagnostics([
+        continuityDiagnostic(
+          "supervisor_continuity_stalled",
+          "dispatch the declared reviewer before continuing",
+        ),
+      ]),
+      () => snapshotWithDiagnostics([], { mode: "live-reviewer-after-remediation" }),
+    ], async ({ endpoint, requestCount }) => {
+      const results = await runDeclaredSupervisorContinuityGates(skillPath, endpoint);
+      assert.deepEqual(results.map(({ status }) => status), [2, 0]);
+      assert.equal(requestCount(), 2);
+      assert.match(results[1].stdout, /Supervisor continuity check passed at /);
+    });
+  });
+}
+
+test("the .agents supervisor-check skill contains no stale Knots commands", () => {
+  const skill = read(".agents/skills/supervisor-check/skill.md");
+  assert.doesNotMatch(skill, /(?:^|\s)kno(?:\.exe)?\s+/im);
+  assert.doesNotMatch(skill, /\.knots[\\/]/i);
+  assert.doesNotMatch(skill, /=== KNOT PROGRESS ===/i);
 });
 ```
 
@@ -1678,6 +1831,12 @@ Define the process/server helpers in the same test file with these concrete cont
 ```js
 const http = require("node:http");
 const { spawn } = require("node:child_process");
+
+const GATE_COMMAND = "node scripts/orchestration/supervisor-continuity-exit-check.cjs --endpoint http://127.0.0.1:1701/api/p/better-palia-maps/control-plane";
+const INITIAL_GATE_HEADING = "## Initial continuity health gate";
+const HEALTH_CHECKS_HEADING = "## Existing orchestration health checks";
+const FINAL_GATE_HEADING = "## Final fresh-snapshot exit gate";
+const REPORT_HEADING = "## Report";
 
 function snapshotWithDiagnostics(diagnostics, extra = {}) {
   return { generatedAt: new Date().toISOString(), diagnostics, ...extra };
@@ -1695,9 +1854,9 @@ function continuityDiagnostic(code, nextAction) {
   };
 }
 
-function runChecker(endpoint) {
+function runChecker(endpoint, checker = CHECKER) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [CHECKER, "--endpoint", endpoint], {
+    const child = spawn(process.execPath, [checker, "--endpoint", endpoint], {
       cwd: ROOT,
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
@@ -1709,6 +1868,46 @@ function runChecker(endpoint) {
     child.once("error", reject);
     child.once("close", (status) => resolve({ status, stdout, stderr }));
   });
+}
+
+function declaredGateCommands(relativeSkillPath) {
+  const skill = read(relativeSkillPath);
+  const matches = [...skill.matchAll(new RegExp(`^${escapeRegExp(GATE_COMMAND)}$`, "gm"))];
+  assert.equal(matches.length, 2, `${relativeSkillPath} must declare exactly two gate invocations`);
+  const headingIndex = (heading) => {
+    const match = new RegExp(`^${escapeRegExp(heading)}$`, "m").exec(skill);
+    assert.ok(match, `${relativeSkillPath} is missing ${heading}`);
+    return match.index;
+  };
+  const initial = headingIndex(INITIAL_GATE_HEADING);
+  const checks = headingIndex(HEALTH_CHECKS_HEADING);
+  const final = headingIndex(FINAL_GATE_HEADING);
+  const report = headingIndex(REPORT_HEADING);
+  assert.ok(initial < matches[0].index && matches[0].index < checks);
+  assert.ok(checks < final && final < matches[1].index && matches[1].index < report);
+  const afterFinalCommand = skill.slice(matches[1].index + GATE_COMMAND.length, report);
+  assert.match(afterFinalCommand, /^\r?\n```\r?\n\r?\n$/);
+  return matches.map((match) => match[0]);
+}
+
+async function runDeclaredSupervisorContinuityGates(relativeSkillPath, endpoint) {
+  const commands = declaredGateCommands(relativeSkillPath);
+  const results = [];
+  for (const command of commands) {
+    const [executable, checker, endpointFlag, configuredEndpoint, ...extra] = command.split(/\s+/);
+    assert.deepEqual(
+      { executable, checker, endpointFlag, configuredEndpoint, extra },
+      {
+        executable: "node",
+        checker: "scripts/orchestration/supervisor-continuity-exit-check.cjs",
+        endpointFlag: "--endpoint",
+        configuredEndpoint: "http://127.0.0.1:1701/api/p/better-palia-maps/control-plane",
+        extra: [],
+      },
+    );
+    results.push(await runChecker(endpoint, checker));
+  }
+  return results;
 }
 
 async function withSnapshotServer(responseFactories, body) {
@@ -1741,7 +1940,7 @@ Run:
 node --test tests/supervisor-continuity-exit-check.test.cjs
 ```
 
-Expected RED: the checker does not exist and both skill command assertions fail.
+Expected RED: the checker does not exist; neither skill declares the required ordered two-gate workflow; and the `.agents` skill still contains stale `.knots`/`kno` commands.
 
 - [ ] **Step 10: Implement the read-only executable exit check**
 
@@ -1753,6 +1952,8 @@ const BLOCK_EXIT_CODES = new Set([
   "supervisor_owner_update_overdue",
   "supervisor_continuity_unproven",
 ]);
+const EXIT_CHECK_UNPROVEN_NEXT_ACTION =
+  "restore a valid fresh Scotty continuity snapshot before supervisor exit";
 
 function assessSupervisorContinuity(snapshot) {
   if (snapshot == null || typeof snapshot !== "object" || !Array.isArray(snapshot.diagnostics)) {
@@ -1763,6 +1964,9 @@ function assessSupervisorContinuity(snapshot) {
       throw new Error("Scotty snapshot contains a malformed diagnostic.");
     }
     if (!BLOCK_EXIT_CODES.has(item.code)) return false;
+    if (typeof item.stage !== "string" || item.stage.trim() === "") {
+      throw new Error("Scotty continuity diagnostic has no stage.");
+    }
     if (typeof item.message !== "string" || item.message.trim() === "") {
       throw new Error("Scotty continuity diagnostic has no message.");
     }
@@ -1832,6 +2036,7 @@ async function runSupervisorContinuityExitCheck({
     diagnostics = assessSupervisorContinuity(snapshot);
   } catch (error) {
     stderr.write(`SUPERVISOR CONTINUITY UNPROVEN: ${error.message}\n`);
+    stderr.write(`Next action: ${EXIT_CHECK_UNPROVEN_NEXT_ACTION}\n`);
     return 3;
   }
   if (diagnostics.length === 0) {
@@ -1841,15 +2046,14 @@ async function runSupervisorContinuityExitCheck({
   stdout.write("SUPERVISOR CONTINUITY BLOCKED\n");
   for (const diagnostic of diagnostics) {
     stdout.write(`${diagnostic.message}\n`);
-    if (diagnostic.nextAction != null) {
-      stdout.write(`Next action: ${diagnostic.nextAction}\n`);
-    }
+    stdout.write(`Next action: ${diagnostic.nextAction}\n`);
   }
   return diagnostics.some(({ code }) => code === "supervisor_continuity_unproven") ? 3 : 2;
 }
 
 module.exports = {
   BLOCK_EXIT_CODES,
+  EXIT_CHECK_UNPROVEN_NEXT_ACTION,
   assessSupervisorContinuity,
   fetchFreshSnapshot,
   parseEndpoint,
@@ -1857,17 +2061,19 @@ module.exports = {
 };
 ```
 
-Parse `process.argv.slice(2)` as exactly `--endpoint <value>`; all other forms print `SUPERVISOR CONTINUITY UNPROVEN: expected --endpoint <loopback-url>` and exit `3`. The `require.main === module` wrapper awaits `runSupervisorContinuityExitCheck({ endpoint })` and assigns the returned integer to `process.exitCode`. It performs no retry cache, state write, Beads command, prompt, dispatch, or runtime control. Each invocation makes one new GET; remediation requires a second invocation and therefore a fresh snapshot.
+Parse `process.argv.slice(2)` as exactly `--endpoint <value>`; all other forms print `SUPERVISOR CONTINUITY UNPROVEN: expected --endpoint <loopback-url>`, then `Next action: restore a valid fresh Scotty continuity snapshot before supervisor exit`, and exit `3`. Acquisition/schema/freshness failures use that same stable fallback action; projected invalid checkpoints instead arrive as well-formed unproven diagnostics carrying their more specific replacement action. The `require.main === module` wrapper awaits `runSupervisorContinuityExitCheck({ endpoint })` and assigns the returned integer to `process.exitCode`. It performs no retry cache, state write, Beads command, prompt, dispatch, or runtime control. Each invocation makes one new GET; remediation requires a second invocation and therefore a fresh snapshot.
 
 - [ ] **Step 11: Wire both normal Better Palia supervisor-check paths**
 
-Update `.claude/skills/supervisor-check/skill.md` and the stale `.agents/skills/supervisor-check/skill.md` to use the current Beads/schema-v2 workflow. In both files add the exact executable command as the first continuity health check and again as the final exit gate:
+Update `.claude/skills/supervisor-check/skill.md` and the stale `.agents/skills/supervisor-check/skill.md` to use the current Beads/schema-v2 workflow. Remove `.agents` commands that invoke `kno`, touch `.knots`, or report `KNOT PROGRESS`; do not retain retired task-tracker commands beside the new gate.
+
+Give both skill files the same ordered headings: `## Initial continuity health gate`, `## Existing orchestration health checks`, `## Final fresh-snapshot exit gate`, then `## Report`. Under the initial heading invoke this exact command before any other health work, and under the final heading invoke it again after all checks/remediation. The final command's closing fence must be followed immediately by `## Report`, with no intervening command or status claim:
 
 ```powershell
 node scripts/orchestration/supervisor-continuity-exit-check.cjs --endpoint http://127.0.0.1:1701/api/p/better-palia-maps/control-plane
 ```
 
-State the executable semantics, not merely a reminder: exit `2` requires the supervisor to perform the printed `nextAction` (dispatch/review/owner update) or record a truthful explicit pause/blocker checkpoint and matching Bead comment; exit `3` means continuity is unproven and must be repaired or reported as the concrete blocker. Before returning final status, invoke the command again. Do not finish the supervisor turn unless the fresh rerun exits `0`; never make the script dispatch or mutate state itself.
+State the executable semantics before the final command, not after it: an initial exit `2` requires the supervisor to perform the printed `nextAction` (dispatch/review/owner update) or record a truthful explicit pause/blocker checkpoint and matching Bead comment; initial exit `3` means continuity is unproven and must be repaired or reported as the concrete blocker. The remaining orchestration checks and any remediation happen between the two invocations. The final invocation is a new process and new GET; do not reuse the first result. Do not enter `## Report`, emit a successful status, or finish the supervisor turn unless that immediately preceding fresh invocation exits `0`. The script itself never dispatches or mutates state.
 
 - [ ] **Step 12: Validate, commit, push, and merge the Better Palia gate**
 
@@ -1880,7 +2086,7 @@ node --test tests/orchestration-protocol-freshness.test.cjs
 git diff --check -- scripts/orchestration/supervisor-continuity-exit-check.cjs tests/supervisor-continuity-exit-check.test.cjs .claude/skills/supervisor-check/skill.md .agents/skills/supervisor-check/skill.md
 ```
 
-Expected: all PASS. Review the full diff for task-database duplication, mutations, non-loopback access, secret output, and unrelated stale-skill changes. Commit only the four locked files with an explicit pathspec:
+Expected: all PASS. Review the full diff for task-database duplication, mutations, non-loopback access, secret output, exactly two correctly ordered gate invocations in each skill, and complete removal of stale `.agents` `.knots`/`kno` commands without unrelated skill churn. Commit only the four locked files with an explicit pathspec:
 
 ```powershell
 git add -- scripts/orchestration/supervisor-continuity-exit-check.cjs tests/supervisor-continuity-exit-check.test.cjs .claude/skills/supervisor-check/skill.md .agents/skills/supervisor-check/skill.md
