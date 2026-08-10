@@ -185,10 +185,63 @@ describe("observeHerdr", () => {
   it.each([
     ["ENOENT", "not_configured"],
     ["ETIMEDOUT", "timeout"],
+    ["ABORT_ERR", "timeout"],
   ])("maps %s without claiming agents are idle", async (code, expected) => {
     const result = await observeHerdr("C:/repo", failingExec(code));
 
     expect(result.error?.code).toBe(expected);
+    expect(result.data).toBeUndefined();
+  });
+
+  it("preserves AbortError timeout classification", async () => {
+    const deps: HerdrDependencies = {
+      execFile: async () => {
+        const error = new Error("The operation was aborted");
+        error.name = "AbortError";
+        throw error;
+      },
+      now: () => new Date(OBSERVED_AT),
+    };
+
+    const result = await observeHerdr("C:/repo", deps);
+
+    expect(result.error?.code).toBe("timeout");
+    expect(result.data).toBeUndefined();
+  });
+
+  it("maps the real Node execFile killed-timeout shape to timeout", async () => {
+    const deps: HerdrDependencies = {
+      execFile: async () => {
+        throw Object.assign(new Error("Command failed after timeout"), {
+          code: null,
+          killed: true,
+          signal: "SIGTERM",
+        });
+      },
+      now: () => new Date(OBSERVED_AT),
+    };
+
+    const result = await observeHerdr("C:/repo", deps);
+
+    expect(result.error?.code).toBe("timeout");
+    expect(result.data).toBeUndefined();
+  });
+
+  it("does not classify an ordinary nonzero exit as timeout", async () => {
+    const deps: HerdrDependencies = {
+      execFile: async () => {
+        throw Object.assign(new Error("Command failed with exit code 1"), {
+          code: 1,
+          killed: false,
+          signal: null,
+        });
+      },
+      now: () => new Date(OBSERVED_AT),
+    };
+
+    const result = await observeHerdr("C:/repo", deps);
+
+    expect(result.error?.code).toBe("unavailable");
     expect(result.data).toBeUndefined();
   });
 

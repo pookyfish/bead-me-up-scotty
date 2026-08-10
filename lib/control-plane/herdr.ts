@@ -120,6 +120,13 @@ function errorCode(error: unknown): string | undefined {
   return isRecord(error) && typeof error.code === "string" ? error.code : undefined;
 }
 
+function isExecFileTimeout(error: unknown): boolean {
+  return isRecord(error) &&
+    error.code === null &&
+    error.killed === true &&
+    error.signal === "SIGTERM";
+}
+
 function failureDetails(error: unknown): {
   code: ObservationError["code"];
   message: string;
@@ -134,6 +141,7 @@ function failureDetails(error: unknown): {
   if (
     code === "ETIMEDOUT" ||
     code === "ABORT_ERR" ||
+    isExecFileTimeout(error) ||
     (error instanceof Error && error.name === "AbortError")
   ) {
     return {
