@@ -494,6 +494,29 @@ describe("AgentChattr compatibility spike evidence contract", () => {
     }
   });
 
+  it("rejects forward-slash drive roots after arbitrary separators without rejecting approved sanitized process evidence", () => {
+    for (const unsafe of [
+      { note: "artifact|C:/ProgramData/AgentChattr/config.toml" },
+      { note: "artifact=D:/AgentChattr/config.toml" },
+      { nested: { detail: "artifact::E:/AgentChattr/config.toml" } },
+      { nested: { detail: "artifact→z:/AgentChattr/config.toml" } },
+    ]) {
+      const manifest = validManifest();
+      Object.assign(manifest.evidence[0], unsafe);
+      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
+        expect.objectContaining({ code: "raw_sensitive_evidence", classification: "fail" }),
+      );
+    }
+
+    const sanitized = validManifest();
+    Object.assign(sanitized.evidence[0].processRecords[0], {
+      sanitizedArgvTemplate:
+        "agentchattr.exe --data-dir <data-dir> --port <port> --secret <secret>",
+      argvHash: `sha256:${"a".repeat(64)}`,
+    });
+    expect(validateEvidenceManifest(sanitized).issues).toEqual([]);
+  });
+
   it("restricts evidence classifications and rejects inferred message, work, lease, and task authority", () => {
     const invalidClassification = validManifest();
     invalidClassification.evidence[0].classification = "delivered";
@@ -560,6 +583,30 @@ describe("AgentChattr compatibility spike evidence contract", () => {
     const neutral = validManifest();
     Object.assign(neutral.evidence[0], {
       transport: { deliveryReceipt: "unknown", readConfirmation: false },
+    });
+    expect(validateEvidenceManifest(neutral).issues).toEqual([]);
+  });
+
+  it("rejects compound delivery and read authority families independent of prefixes and identifier boundaries", () => {
+    for (const inferred of [
+      { upstreamDeliveryReceiptState: "delivered" },
+      { UPSTREAMDELIVERYRECEIPTSTATE: "delivered" },
+      { upstreamdeliveryreceiptstate: "delivered" },
+      { "upstream-delivery_receipt.state": "delivered" },
+      { nested: { gatewayReadConfirmationStatus: true } },
+      { nested: { GATEWAYREADCONFIRMATIONSTATUS: true } },
+    ]) {
+      const manifest = validManifest();
+      Object.assign(manifest.evidence[0], inferred);
+      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
+        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
+      );
+    }
+
+    const neutral = validManifest();
+    Object.assign(neutral.evidence[0], {
+      upstreamDeliveryReceiptState: "unknown",
+      nested: { GATEWAYREADCONFIRMATIONSTATUS: false },
     });
     expect(validateEvidenceManifest(neutral).issues).toEqual([]);
   });

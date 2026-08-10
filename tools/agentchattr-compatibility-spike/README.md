@@ -66,10 +66,12 @@ read, work, lease, task, approval, handoff, or identity authority are rejected,
 including normalized aliases such as `delivery`, `read`, `lease`, `approval`,
 and `handoff` at any nesting depth. Redaction likewise examines neutral-field
 values for credential assignments, absolute paths, raw invocations, and both
-headered and headerless configuration content, including `=`/`:` formats and
-paths embedded after punctuation. Transport authority keys are tokenized across
-camel case and separators so receipt/confirmation/acknowledgement aliases do
-not bypass the explicit neutral/unknown allowlist.
+  headered and headerless configuration content, including `=`/`:` formats and
+  backslash or forward-slash drive roots embedded after punctuation. Transport
+  authority keys are matched by semantic family across camel case, separators,
+  arbitrary prefixes, and concatenated case variants so receipt, confirmation,
+  and acknowledgement aliases do not bypass the explicit neutral/unknown
+  allowlist.
 
 ## Operator stop conditions
 

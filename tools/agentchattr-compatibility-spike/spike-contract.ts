@@ -61,17 +61,24 @@ function normalizedKey(key: string): string {
   return key.replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
 
-function authoritySemanticKey(key: string): string {
-  const tokens = key
+function semanticKeyTokens(key: string): string[] {
+  return key
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .toLowerCase()
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
-  const prefixes = new Set(["current", "reported", "inferred", "observed", "message", "transport"]);
-  const suffixes = new Set(["state", "status", "flag", "result", "authority"]);
-  while (tokens.length > 0 && prefixes.has(tokens[0])) tokens.shift();
-  while (tokens.length > 0 && suffixes.has(tokens[tokens.length - 1])) tokens.pop();
-  return tokens.join("");
+}
+
+function hasSemanticFamily(key: string, roots: readonly string[], context: readonly string[]): boolean {
+  const tokens = new Set(semanticKeyTokens(key));
+  const compact = normalizedKey(key);
+  return roots.some(
+    (root) =>
+      tokens.has(root) ||
+      compact === root ||
+      (root.length >= 6 && compact.includes(root)) ||
+      context.some((term) => compact.includes(`${root}${term}`) || compact.includes(`${term}${root}`)),
+  );
 }
 
 function isApprovedArgvTemplate(value: unknown, container: UnknownRecord): boolean {
@@ -132,7 +139,7 @@ function containsRawSensitiveEvidence(value: unknown): boolean {
         /(?:^|\s)--(?:token|secret|password)(?:=|\s+)(?!<(?:secret)>)/i.test(nested) ||
         /\b(?:token|secret|password|api[_-]?key|access[_-]?key|auth[_-]?key)\s*[:=]\s*(?!<secret>)[^\s,;}\]]+/i.test(nested) ||
         /\bBearer\s+[A-Za-z0-9._~+/=-]+/i.test(nested) ||
-        /(?:[A-Za-z]:\\|\\\\[^\\]+\\|\/(?:home|users|var|opt|etc|tmp)\/)/i.test(nested) ||
+        /(?:^|[^a-z0-9+.-])[a-z]:[\\/]|\\\\[^\\]+\\|\/(?:home|users|var|opt|etc|tmp)\//i.test(nested) ||
         /\b[a-z0-9_.-]+\.(?:exe|cmd|bat|ps1|py)\s+(?:--|-|\/)/i.test(nested) ||
         /\b(?:python|node|pwsh|powershell)\s+[^\r\n]+/i.test(nested) ||
         /^\s*\[[^\]]+\]\s*[\r\n]+[a-z0-9_.-]+\s*=/i.test(nested) ||
@@ -149,31 +156,33 @@ function containsInferredAuthorityStatus(value: unknown): boolean {
   return Object.entries(value).some(([key, nested]) => {
     const normalized = normalizedKey(key);
     const status = typeof nested === "string" ? nested.toLowerCase().replace(/[\s-]+/g, "_") : nested;
-    const semantic = authoritySemanticKey(key);
+    const stateContext = ["state", "status", "flag", "result", "authority"];
     if (
       normalized === "messagestatus" ||
-      /^(?:delivery|delivered|read)(?:receipt|confirmation|acknowledgement|evidence|observation)?$/.test(semantic) ||
-      /^(?:receipt|confirmation|acknowledgement)(?:delivery|read)$/.test(semantic) ||
-      ["acceptance", "accepted", "queued"].includes(semantic)
+      hasSemanticFamily(
+        key,
+        ["delivery", "delivered", "read", "acceptance", "accepted", "queued"],
+        ["receipt", "confirmation", "acknowledgement", "acknowledgment", "evidence", "observation", ...stateContext],
+      )
     ) {
       return ![false, null, "none", "unknown", "unsupported", "unobserved", "not_observed"].includes(status as never);
     }
-    if (semantic.startsWith("work")) {
+    if (hasSemanticFamily(key, ["work"], ["started", ...stateContext])) {
       return ![false, null, "none", "not_started", "unknown", "unsupported"].includes(status as never);
     }
-    if (semantic.startsWith("lease")) {
+    if (hasSemanticFamily(key, ["lease"], ["claim", "claimed", "owner", ...stateContext])) {
       return ![false, null, "none", "unclaimed", "unknown", "unsupported"].includes(status as never);
     }
-    if (["task", "assignment", "taskassignment"].includes(semantic)) {
+    if (hasSemanticFamily(key, ["task", "assignment"], ["assignment", ...stateContext])) {
       return ![false, null, "none", "unassigned", "unknown", "unsupported"].includes(status as never);
     }
-    if (semantic.startsWith("approval") || semantic.startsWith("approved")) {
+    if (hasSemanticFamily(key, ["approval", "approved"], ["outcome", "granted", ...stateContext])) {
       return ![false, null, "none", "unknown", "unsupported", "not_granted", "not_approved"].includes(status as never);
     }
-    if (semantic.startsWith("handoff") || semantic.startsWith("handedoff")) {
+    if (hasSemanticFamily(key, ["handoff", "handedoff"], ["resolution", "complete", ...stateContext])) {
       return ![false, null, "none", "unknown", "unsupported", "pending", "not_complete"].includes(status as never);
     }
-    if (["identitybinding", "binding"].includes(semantic)) {
+    if (hasSemanticFamily(key, ["binding"], ["identity", "verified", ...stateContext])) {
       return ![false, null, "none", "unknown", "unsupported", "unbound", "unverified"].includes(status as never);
     }
     return containsInferredAuthorityStatus(nested);
