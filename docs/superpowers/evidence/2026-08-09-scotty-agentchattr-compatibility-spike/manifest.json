@@ -1,7 +1,9 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "spike": "agentchattr-compatibility",
   "stage": "1.5",
+  "manifestId": "agentchattr-spike-manifest-template",
+  "runId": "not-run",
   "executionState": "not_run",
   "upstream": {
     "repository": "https://github.com/bcurts/agentchattr.git",
@@ -16,42 +18,22 @@
     "state": "candidate_only_not_bound"
   },
   "resourceAdmission": {
+    "measurementState": "not_run",
     "availablePhysicalMemoryGiB": null,
     "aggregateWorkingSetPercent": null,
     "otherResourceHeavyJobActive": null,
-    "runtimeManagerCorrelationToken": null,
-    "admitted": null
+    "runtimeManagerCorrelationId": null,
+    "admissionResult": "not_run"
   },
   "safety": {
     "lifecycleOwner": "runtime-manager",
-    "wrappersDisabled": null,
-    "triggerQueueConsumerDisabled": null,
-    "terminalInjectionDisabled": null,
-    "autoWakeDisabled": null,
-    "jobsIgnored": null,
-    "persistentRulesUnused": null
+    "launcher": "not_run",
+    "wrapper": "not_run",
+    "triggerQueueConsumer": "not_run",
+    "terminalInjection": "not_run",
+    "autoWake": "not_run",
+    "jobsAuthority": "not_run",
+    "persistentRules": "not_run"
   },
-  "desktopResults": {
-    "claudeCodeDesktop": {
-      "status": "unknown",
-      "observedBy": null
-    },
-    "codexDesktop": {
-      "status": "unknown",
-      "observedBy": null
-    }
-  },
-  "evidence": [],
-  "evidenceClassifications": [
-    "pass",
-    "fail",
-    "unsupported",
-    "unknown"
-  ],
-  "promotionStates": [
-    "promotion_pending",
-    "reconciliation_conflict"
-  ],
-  "provenance": "docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/provenance.md",
-  "notes": "This is a redacted contract template only. No service, runtime registration, Desktop client, or MCP client has been invoked."
+  "evidence": []
 }

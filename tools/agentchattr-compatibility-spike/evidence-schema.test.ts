@@ -30,6 +30,10 @@ import {
 } from "./evidence-schema";
 import { z } from "zod";
 
+import committedManifest from "../../docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/manifest.json";
+import committedIdentityFixture from "./fixtures/identity-bindings.json";
+import committedMessageFixture from "./fixtures/message-contract.json";
+
 const digest = `sha256:${"a".repeat(64)}`;
 
 const invalidExtensions = [
@@ -44,6 +48,141 @@ const invalidExtensions = [
 ];
 
 const syntheticEvidenceSchema = withEvidenceBase("synthetic_fixture", {});
+
+describe("committed version-2 evidence artifacts", () => {
+  it("parses the committed identity fixture without migration fallback", () => {
+    expect(identityFixtureSchema.safeParse(committedIdentityFixture).success).toBe(true);
+  });
+
+  it("parses the committed message fixture without migration fallback", () => {
+    expect(messageFixtureSchema.safeParse(committedMessageFixture).success).toBe(true);
+  });
+
+  it("parses the committed manifest without migration fallback", () => {
+    expect(parseManifestV2(committedManifest).ok).toBe(true);
+  });
+
+  it("covers independent identity dimensions and zero, one, and multiple Bead relations", () => {
+    const fixture = identityFixtureSchema.parse(committedIdentityFixture);
+    const alpha = fixture.records.filter((record) => record.actorId === "actor-synthetic-alpha");
+    const coordinationActors = new Set(
+      fixture.records
+        .filter((record) => record.logicalSessionId === "session-synthetic-coordination")
+        .map((record) => record.actorId),
+    );
+    const beadCount = (logicalSessionId: string) => fixture.sessionBeadLinks
+      .filter((link) => link.logicalSessionId === logicalSessionId).length;
+    const sharedMetadataActors = new Set(
+      fixture.records
+        .filter((record) => record.modelProvider === "provider-synthetic-shared"
+          && record.modelId === "model-synthetic-shared")
+        .map((record) => record.actorId),
+    );
+
+    expect(new Set(fixture.records.map((record) => record.bindingState))).toEqual(
+      new Set(["verified", "unverified", "stale", "revoked"]),
+    );
+    expect(new Set(alpha.map((record) => record.executionSurface))).toEqual(
+      new Set(["herdr", "codex_desktop"]),
+    );
+    expect(new Set(alpha.map((record) => record.orchestrationRole))).toEqual(
+      new Set(["worker", "reviewer"]),
+    );
+    expect(new Set(alpha.map((record) => record.logicalSessionId))).toEqual(
+      new Set(["session-synthetic-coordination"]),
+    );
+    expect(coordinationActors.size).toBe(2);
+    expect(sharedMetadataActors.size).toBe(2);
+    expect(beadCount("session-synthetic-zero-beads")).toBe(0);
+    expect(beadCount("session-synthetic-one-bead")).toBe(1);
+    expect(beadCount("session-synthetic-coordination")).toBe(2);
+    expect(fixture.records.every((record) => !("displayName" in record))).toBe(true);
+  });
+
+  it("covers the approved message contexts without changing replay identity", () => {
+    const fixture = messageFixtureSchema.parse(committedMessageFixture);
+    const byCaseId = new Map(fixture.records.map((record) => [record.caseId, record]));
+    const replayCases = [
+      "message-initial-page",
+      "message-overlap-page",
+      "message-retry-replay",
+      "message-post-restart",
+      "message-tombstone",
+    ];
+    const durableTuple = (record: (typeof fixture.records)[number]) => JSON.stringify([
+      record.providerInstanceId,
+      record.channelId,
+      record.stableMessageUid,
+      record.senderExternalId,
+      record.contentChecksum,
+      record.parentUid,
+      record.threadId,
+    ]);
+    const equalTimeAlpha = byCaseId.get("message-equal-time-alpha");
+    const equalTimeBeta = byCaseId.get("message-equal-time-beta");
+    const queueOnly = byCaseId.get("message-queue-only");
+    const peerAcceptance = byCaseId.get("message-peer-acceptance");
+    const unknownAxes = byCaseId.get("message-unknown-axes");
+
+    expect(new Set(replayCases.map((caseId) => durableTuple(byCaseId.get(caseId)!))).size).toBe(1);
+    expect(replayCases.map((caseId) => byCaseId.get(caseId)?.observationContext)).toEqual([
+      "initial_page", "overlap_page", "retry_replay", "post_restart", "tombstone",
+    ]);
+    expect(equalTimeAlpha?.observedAt).toBe(equalTimeBeta?.observedAt);
+    expect(queueOnly).toMatchObject({
+      transportState: "queued",
+      receiverAcknowledgementState: "not_applicable",
+      readState: "not_observed",
+    });
+    expect(peerAcceptance).toMatchObject({
+      collaborationIntent: "peer_acceptance",
+      collaborationSequence: 0,
+    });
+    expect(unknownAxes).toMatchObject({
+      transportState: "unknown",
+      receiverAcknowledgementState: "unknown",
+      readState: "unknown",
+    });
+  });
+
+  it("keeps the committed manifest as the exact executable-free not-run envelope", () => {
+    expect(committedManifest).toEqual({
+      schemaVersion: 2,
+      spike: "agentchattr-compatibility",
+      stage: "1.5",
+      manifestId: "agentchattr-spike-manifest-template",
+      runId: "not-run",
+      executionState: "not_run",
+      upstream: {
+        repository: "https://github.com/bcurts/agentchattr.git",
+        commit: "c24f605c9b24fb7a98003f7930e2d5e7a7f7d297",
+        tag: "v0.5.0",
+        version: "0.5.0",
+        licenseSha256: "a1abc583f6725867ed3564f1bcd201d78603612330665433a733a640721f40f3",
+      },
+      endpoint: { host: "127.0.0.1", port: 43123, state: "candidate_only_not_bound" },
+      resourceAdmission: {
+        measurementState: "not_run",
+        availablePhysicalMemoryGiB: null,
+        aggregateWorkingSetPercent: null,
+        otherResourceHeavyJobActive: null,
+        runtimeManagerCorrelationId: null,
+        admissionResult: "not_run",
+      },
+      safety: {
+        lifecycleOwner: "runtime-manager",
+        launcher: "not_run",
+        wrapper: "not_run",
+        triggerQueueConsumer: "not_run",
+        terminalInjection: "not_run",
+        autoWake: "not_run",
+        jobsAuthority: "not_run",
+        persistentRules: "not_run",
+      },
+      evidence: [],
+    });
+  });
+});
 
 function validEvidence() {
   return {

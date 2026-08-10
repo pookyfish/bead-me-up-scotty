@@ -1,87 +1,349 @@
 {
-  "schemaVersion": 1,
-  "deliveryVocabulary": [
-    "accepted",
-    "queued",
-    "delivered",
-    "read",
-    "failed",
-    "unknown",
-    "unsupported"
-  ],
-  "loopGuardContract": {
-    "scope": "per-channel",
-    "initialState": "active(0)",
-    "sixthAutonomousRequest": "allowed-after-recording-paused(6)-before-MCP",
-    "seventhAutonomousRequest": "rejected-before-MCP-and-remains-paused(6)",
-    "onlyReset": "directly-evidenced-authenticated-verified-human-origin",
-    "nonResetOrigins": [
-      "/continue",
-      "agent-origin",
-      "unauthenticated-event"
-    ]
-  },
-  "cases": [
+  "schemaVersion": 2,
+  "fixture": "message_contract",
+  "records": [
     {
-      "caseId": "overlap-deduplication",
-      "providerInstanceId": "spike-instance-synthetic",
-      "channelId": "channel-synthetic",
-      "stableMessageUid": "message-synthetic-001",
+      "caseId": "message-initial-page",
+      "kind": "message_observation",
+      "expectedResult": "pass",
+      "observedResult": "pass",
+      "classification": "pass",
+      "startedAt": "2026-08-10T08:05:00.000Z",
+      "observedAt": "2026-08-10T08:05:00.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "message-initial-page",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "artifacts": [
+        {
+          "kind": "message",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "providerInstanceId": "agentchattr-instance-synthetic",
+      "channelId": "channel-synthetic-coordination",
+      "stableMessageUid": "message-synthetic-replay-001",
+      "cursorId": 100,
+      "parentUid": null,
+      "threadId": null,
+      "senderExternalId": "external-synthetic-alpha-herdr",
+      "contentChecksum": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "directEvidenceArtifactHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "transportState": "submitted",
+      "receiverAcknowledgementState": "pending",
+      "readState": "unread",
+      "observationContext": "initial_page",
+      "messageState": "present"
+    },
+    {
+      "caseId": "message-overlap-page",
+      "kind": "message_observation",
+      "expectedResult": "pass",
+      "observedResult": "pass",
+      "classification": "pass",
+      "startedAt": "2026-08-10T08:05:00.000Z",
+      "observedAt": "2026-08-10T08:05:01.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "message-overlap-page",
+        "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "artifacts": [
+        {
+          "kind": "message",
+          "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ],
+      "providerInstanceId": "agentchattr-instance-synthetic",
+      "channelId": "channel-synthetic-coordination",
+      "stableMessageUid": "message-synthetic-replay-001",
       "cursorId": 101,
       "parentUid": null,
       "threadId": null,
-      "senderExternalId": "external-synthetic-a-claude",
-      "delivery": "unknown",
-      "contentChecksum": "sha256:synthetic-content-001",
-      "workState": "not_started",
-      "leaseState": "none",
-      "expected": "Stable UID deduplicates an overlapping cursor page."
+      "senderExternalId": "external-synthetic-alpha-herdr",
+      "contentChecksum": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "directEvidenceArtifactHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "transportState": "server_accepted",
+      "receiverAcknowledgementState": "pending",
+      "readState": "unread",
+      "observationContext": "overlap_page",
+      "messageState": "present"
     },
     {
-      "caseId": "retry-replay",
-      "providerInstanceId": "spike-instance-synthetic",
-      "channelId": "channel-synthetic",
-      "stableMessageUid": "message-synthetic-002",
-      "cursorId": 102,
-      "parentUid": "message-synthetic-001",
-      "threadId": "thread-synthetic-1",
-      "senderExternalId": "external-synthetic-a-codex",
-      "delivery": "unknown",
-      "contentChecksum": "sha256:synthetic-content-002",
-      "workState": "not_started",
-      "leaseState": "none",
-      "expected": "Retry and replay retain the stable UID; cursor remains pagination-only."
-    },
-    {
-      "caseId": "restart-and-tombstone",
-      "providerInstanceId": "spike-instance-synthetic",
-      "channelId": "channel-synthetic",
-      "stableMessageUid": "message-synthetic-003",
-      "cursorId": 103,
+      "caseId": "message-retry-replay",
+      "kind": "message_observation",
+      "expectedResult": "pass",
+      "observedResult": "pass",
+      "classification": "pass",
+      "startedAt": "2026-08-10T08:05:00.000Z",
+      "observedAt": "2026-08-10T08:05:02.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "message-retry-replay",
+        "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "artifacts": [
+        {
+          "kind": "message",
+          "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      ],
+      "providerInstanceId": "agentchattr-instance-synthetic",
+      "channelId": "channel-synthetic-coordination",
+      "stableMessageUid": "message-synthetic-replay-001",
+      "cursorId": 101,
       "parentUid": null,
       "threadId": null,
-      "senderExternalId": "external-synthetic-b",
-      "delivery": "unknown",
-      "contentChecksum": "sha256:synthetic-content-003",
-      "workState": "not_started",
-      "leaseState": "none",
-      "expected": "Restart and deletion/tombstone semantics are evidence questions, never inferred."
+      "senderExternalId": "external-synthetic-alpha-herdr",
+      "contentChecksum": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "directEvidenceArtifactHash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "transportState": "server_accepted",
+      "receiverAcknowledgementState": "acknowledged",
+      "readState": "unread",
+      "observationContext": "retry_replay",
+      "messageState": "present"
     },
     {
-      "caseId": "equal-timestamps-and-queue",
-      "providerInstanceId": "spike-instance-synthetic",
-      "channelId": "channel-synthetic",
-      "stableMessageUid": "message-synthetic-004",
-      "cursorId": 104,
+      "caseId": "message-post-restart",
+      "kind": "message_observation",
+      "expectedResult": "pass",
+      "observedResult": "pass",
+      "classification": "pass",
+      "startedAt": "2026-08-10T08:05:00.000Z",
+      "observedAt": "2026-08-10T08:05:03.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "message-post-restart",
+        "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "artifacts": [
+        {
+          "kind": "message",
+          "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ],
+      "providerInstanceId": "agentchattr-instance-synthetic",
+      "channelId": "channel-synthetic-coordination",
+      "stableMessageUid": "message-synthetic-replay-001",
+      "cursorId": 1,
       "parentUid": null,
       "threadId": null,
-      "senderExternalId": "external-synthetic-unverified",
-      "delivery": "queued",
-      "directUpstreamEvidence": "sha256:synthetic-queue-acknowledgement",
-      "contentChecksum": "sha256:synthetic-content-004",
-      "workState": "not_started",
-      "leaseState": "none",
-      "expected": "Queued is only a direct message-state observation and never work or a lease."
+      "senderExternalId": "external-synthetic-alpha-herdr",
+      "contentChecksum": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "directEvidenceArtifactHash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "transportState": "server_accepted",
+      "receiverAcknowledgementState": "acknowledged",
+      "readState": "read",
+      "observationContext": "post_restart",
+      "messageState": "present"
+    },
+    {
+      "caseId": "message-tombstone",
+      "kind": "message_observation",
+      "expectedResult": "pass",
+      "observedResult": "pass",
+      "classification": "pass",
+      "startedAt": "2026-08-10T08:05:00.000Z",
+      "observedAt": "2026-08-10T08:06:00.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "message-tombstone",
+        "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "artifacts": [
+        {
+          "kind": "message",
+          "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      ],
+      "providerInstanceId": "agentchattr-instance-synthetic",
+      "channelId": "channel-synthetic-coordination",
+      "stableMessageUid": "message-synthetic-replay-001",
+      "cursorId": 2,
+      "parentUid": null,
+      "threadId": null,
+      "senderExternalId": "external-synthetic-alpha-herdr",
+      "contentChecksum": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "directEvidenceArtifactHash": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+      "transportState": "unknown",
+      "receiverAcknowledgementState": "not_applicable",
+      "readState": "not_observed",
+      "observationContext": "tombstone",
+      "messageState": "deleted"
+    },
+    {
+      "caseId": "message-equal-time-alpha",
+      "kind": "message_observation",
+      "expectedResult": "pass",
+      "observedResult": "pass",
+      "classification": "pass",
+      "startedAt": "2026-08-10T08:07:00.000Z",
+      "observedAt": "2026-08-10T08:07:00.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "message-equal-time-alpha",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "artifacts": [
+        {
+          "kind": "message",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "providerInstanceId": "agentchattr-instance-synthetic",
+      "channelId": "channel-synthetic-coordination",
+      "stableMessageUid": "message-synthetic-equal-001",
+      "cursorId": 200,
+      "parentUid": null,
+      "threadId": null,
+      "senderExternalId": "external-synthetic-alpha-herdr",
+      "contentChecksum": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "directEvidenceArtifactHash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "transportState": "server_accepted",
+      "receiverAcknowledgementState": "not_applicable",
+      "readState": "not_observed",
+      "observationContext": "initial_page",
+      "messageState": "present"
+    },
+    {
+      "caseId": "message-equal-time-beta",
+      "kind": "message_observation",
+      "expectedResult": "pass",
+      "observedResult": "pass",
+      "classification": "pass",
+      "startedAt": "2026-08-10T08:07:00.000Z",
+      "observedAt": "2026-08-10T08:07:00.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "message-equal-time-beta",
+        "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "artifacts": [
+        {
+          "kind": "message",
+          "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "providerInstanceId": "agentchattr-instance-synthetic",
+      "channelId": "channel-synthetic-coordination",
+      "stableMessageUid": "message-synthetic-equal-002",
+      "cursorId": 201,
+      "parentUid": "message-synthetic-equal-001",
+      "threadId": "thread-synthetic-equal",
+      "senderExternalId": "external-synthetic-alpha-herdr",
+      "contentChecksum": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "directEvidenceArtifactHash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "transportState": "server_accepted",
+      "receiverAcknowledgementState": "not_applicable",
+      "readState": "not_observed",
+      "observationContext": "initial_page",
+      "messageState": "present"
+    },
+    {
+      "caseId": "message-queue-only",
+      "kind": "message_observation",
+      "expectedResult": "pass",
+      "observedResult": "pass",
+      "classification": "pass",
+      "startedAt": "2026-08-10T08:08:00.000Z",
+      "observedAt": "2026-08-10T08:08:00.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "message-queue-only",
+        "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "artifacts": [
+        {
+          "kind": "message",
+          "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ],
+      "providerInstanceId": "agentchattr-instance-synthetic",
+      "channelId": "channel-synthetic-coordination",
+      "stableMessageUid": "message-synthetic-queue-001",
+      "cursorId": 202,
+      "parentUid": null,
+      "threadId": null,
+      "senderExternalId": "external-synthetic-alpha-herdr",
+      "contentChecksum": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "directEvidenceArtifactHash": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "transportState": "queued",
+      "receiverAcknowledgementState": "not_applicable",
+      "readState": "not_observed",
+      "observationContext": "initial_page",
+      "messageState": "present"
+    },
+    {
+      "caseId": "message-peer-acceptance",
+      "kind": "message_observation",
+      "expectedResult": "pass",
+      "observedResult": "pass",
+      "classification": "pass",
+      "startedAt": "2026-08-10T08:09:00.000Z",
+      "observedAt": "2026-08-10T08:09:00.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "message-peer-acceptance",
+        "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "artifacts": [
+        {
+          "kind": "message",
+          "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      ],
+      "providerInstanceId": "agentchattr-instance-synthetic",
+      "channelId": "channel-synthetic-coordination",
+      "stableMessageUid": "message-synthetic-peer-001",
+      "cursorId": 203,
+      "parentUid": null,
+      "threadId": null,
+      "senderExternalId": "external-synthetic-alpha-herdr",
+      "contentChecksum": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "collaborationIntent": "peer_acceptance",
+      "collaborationSessionId": "collaboration-synthetic-acceptance",
+      "collaborationSequence": 0,
+      "directEvidenceArtifactHash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "transportState": "server_accepted",
+      "receiverAcknowledgementState": "pending",
+      "readState": "unread",
+      "observationContext": "initial_page",
+      "messageState": "present"
+    },
+    {
+      "caseId": "message-unknown-axes",
+      "kind": "message_observation",
+      "expectedResult": "unknown",
+      "observedResult": "unknown",
+      "classification": "unknown",
+      "startedAt": "2026-08-10T08:10:00.000Z",
+      "observedAt": "2026-08-10T08:10:00.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "message-unknown-axes",
+        "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "artifacts": [
+        {
+          "kind": "message",
+          "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ],
+      "providerInstanceId": "agentchattr-instance-synthetic",
+      "channelId": "channel-synthetic-coordination",
+      "stableMessageUid": "message-synthetic-unknown-001",
+      "cursorId": 204,
+      "parentUid": null,
+      "threadId": null,
+      "senderExternalId": "external-synthetic-alpha-herdr",
+      "contentChecksum": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "directEvidenceArtifactHash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "transportState": "unknown",
+      "receiverAcknowledgementState": "unknown",
+      "readState": "unknown",
+      "observationContext": "initial_page",
+      "messageState": "unknown"
     }
   ]
 }

@@ -7,6 +7,8 @@ import {
   requestAutonomousSend,
   validateEvidenceManifest,
 } from "./spike-contract";
+import committedIdentityFixture from "./fixtures/identity-bindings.json";
+import committedMessageFixture from "./fixtures/message-contract.json";
 
 const hashes = {
   a: `sha256:${"a".repeat(64)}`,
@@ -381,6 +383,15 @@ describe("typed manifest aggregation and opaque extensions", () => {
 });
 
 describe("typed message, identity, collaboration, and promotion invariants", () => {
+  it("accepts the committed synthetic identity and message records together", () => {
+    const records = [
+      ...committedIdentityFixture.records,
+      ...committedMessageFixture.records,
+    ];
+
+    expect(validateEvidenceManifest(validManifestV2(records)).issues).toEqual([]);
+  });
+
   it("accepts exact overlap, replay, and post-restart observations of one durable message tuple", () => {
     const initial = messageObservation("stable");
     const overlap = { ...initial, caseId: "message-stable-overlap", observationContext: "overlap_page" };

@@ -1,119 +1,224 @@
 {
-  "schemaVersion": 1,
-  "bindings": [
+  "schemaVersion": 2,
+  "fixture": "identity_bindings",
+  "records": [
     {
-      "bindingId": "binding-actor-a-claude",
-      "actorId": "actor-synthetic-a",
-      "logicalSessionId": "session-coordination",
-      "providerModel": "claude-code",
-      "executionSurface": "claude-code-desktop",
-      "role": "participant",
-      "runtimeSessionRef": "runtime-session-synthetic-a",
-      "herdrPaneRef": "pane-synthetic-a",
-      "upstreamInstanceId": "spike-instance-synthetic",
-      "upstreamSessionId": "upstream-session-claude-a",
-      "senderExternalId": "external-synthetic-a-claude",
-      "displayName": "Synthetic Operator",
-      "beadsActorId": "beads-actor-synthetic-a",
-      "boundAtUtc": "2026-08-10T08:00:00.000Z",
-      "boundBy": "synthetic-operator",
-      "validity": "verified"
+      "caseId": "identity-alpha-herdr-worker",
+      "kind": "identity_binding",
+      "expectedResult": "pass",
+      "observedResult": "pass",
+      "classification": "pass",
+      "startedAt": "2026-08-10T08:00:00.000Z",
+      "observedAt": "2026-08-10T08:00:00.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "identity-alpha-herdr-worker",
+        "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "artifacts": [
+        {
+          "kind": "identity",
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "actorId": "actor-synthetic-alpha",
+      "logicalSessionId": "session-synthetic-coordination",
+      "executionSurface": "herdr",
+      "orchestrationRole": "worker",
+      "modelProvider": "provider-synthetic-shared",
+      "modelId": "model-synthetic-shared",
+      "herdrSessionRef": "herdr-session-synthetic-alpha",
+      "agentChattrInstanceId": "agentchattr-instance-synthetic",
+      "agentChattrSessionId": "agentchattr-session-synthetic-alpha-herdr",
+      "agentChattrExternalId": "external-synthetic-alpha-herdr",
+      "beadsActorId": "beads-actor-synthetic-alpha",
+      "validFrom": "2026-08-10T07:50:00.000Z",
+      "validUntil": "2026-08-10T08:30:00.000Z",
+      "bindingState": "verified"
     },
     {
-      "bindingId": "binding-actor-a-codex",
-      "actorId": "actor-synthetic-a",
-      "logicalSessionId": "session-coordination",
-      "providerModel": "codex",
-      "executionSurface": "codex-desktop",
-      "role": "reviewer",
-      "runtimeSessionRef": "runtime-session-synthetic-b",
-      "upstreamInstanceId": "spike-instance-synthetic",
-      "upstreamSessionId": "upstream-session-codex-a",
-      "senderExternalId": "external-synthetic-a-codex",
-      "displayName": "Synthetic Operator",
-      "beadsActorId": "beads-actor-synthetic-a",
-      "boundAtUtc": "2026-08-10T08:00:01.000Z",
-      "boundBy": "synthetic-operator",
-      "validity": "verified"
+      "caseId": "identity-alpha-desktop-reviewer",
+      "kind": "identity_binding",
+      "expectedResult": "pass",
+      "observedResult": "pass",
+      "classification": "pass",
+      "startedAt": "2026-08-10T08:30:00.000Z",
+      "observedAt": "2026-08-10T08:30:00.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "identity-alpha-desktop-reviewer",
+        "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "artifacts": [
+        {
+          "kind": "identity",
+          "digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "actorId": "actor-synthetic-alpha",
+      "logicalSessionId": "session-synthetic-coordination",
+      "executionSurface": "codex_desktop",
+      "orchestrationRole": "reviewer",
+      "modelProvider": "provider-synthetic-shared",
+      "modelId": "model-synthetic-shared",
+      "herdrSessionRef": null,
+      "agentChattrInstanceId": "agentchattr-instance-synthetic",
+      "agentChattrSessionId": "agentchattr-session-synthetic-alpha-desktop",
+      "agentChattrExternalId": "external-synthetic-alpha-desktop",
+      "beadsActorId": "beads-actor-synthetic-alpha",
+      "validFrom": "2026-08-10T08:30:00.000Z",
+      "validUntil": "2026-08-10T09:00:00.000Z",
+      "bindingState": "verified"
     },
     {
-      "bindingId": "binding-actor-b-reviewer",
-      "actorId": "actor-synthetic-b",
-      "logicalSessionId": "session-coordination",
-      "providerModel": "codex",
-      "executionSurface": "codex-desktop",
-      "role": "reviewer",
-      "runtimeSessionRef": "runtime-session-synthetic-c",
-      "upstreamInstanceId": "spike-instance-synthetic",
-      "upstreamSessionId": "upstream-session-codex-b",
-      "senderExternalId": "external-synthetic-b",
-      "displayName": "Synthetic Reviewer",
-      "beadsActorId": "beads-actor-synthetic-b",
-      "boundAtUtc": "2026-08-10T08:00:02.000Z",
-      "boundBy": "synthetic-operator",
-      "validity": "verified"
+      "caseId": "identity-beta-shared-session",
+      "kind": "identity_binding",
+      "expectedResult": "pass",
+      "observedResult": "pass",
+      "classification": "pass",
+      "startedAt": "2026-08-10T08:00:01.000Z",
+      "observedAt": "2026-08-10T08:00:01.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "identity-beta-shared-session",
+        "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      },
+      "artifacts": [
+        {
+          "kind": "identity",
+          "digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ],
+      "actorId": "actor-synthetic-beta",
+      "logicalSessionId": "session-synthetic-coordination",
+      "executionSurface": "herdr",
+      "orchestrationRole": "worker",
+      "modelProvider": "provider-synthetic-shared",
+      "modelId": "model-synthetic-shared",
+      "herdrSessionRef": "herdr-session-synthetic-beta",
+      "agentChattrInstanceId": "agentchattr-instance-synthetic",
+      "agentChattrSessionId": "agentchattr-session-synthetic-beta",
+      "agentChattrExternalId": "external-synthetic-beta",
+      "beadsActorId": "beads-actor-synthetic-beta",
+      "validFrom": "2026-08-10T07:50:00.000Z",
+      "validUntil": "2026-08-10T09:00:00.000Z",
+      "bindingState": "verified"
     },
     {
-      "bindingId": "binding-session-unassigned",
-      "actorId": "actor-synthetic-c",
-      "logicalSessionId": "session-unassigned",
-      "providerModel": "claude-code",
-      "executionSurface": "claude-code-desktop",
-      "role": "observer",
-      "runtimeSessionRef": "runtime-session-synthetic-d",
-      "upstreamInstanceId": "spike-instance-synthetic",
-      "upstreamSessionId": "upstream-session-claude-c",
-      "senderExternalId": "external-synthetic-c",
-      "displayName": "Synthetic Observer",
-      "beadsActorId": "beads-actor-synthetic-c",
-      "boundAtUtc": "2026-08-10T08:00:03.000Z",
-      "boundBy": "synthetic-operator",
-      "validity": "verified"
+      "caseId": "identity-gamma-unverified-zero-beads",
+      "kind": "identity_binding",
+      "expectedResult": "unknown",
+      "observedResult": "unknown",
+      "classification": "unknown",
+      "startedAt": "2026-08-10T08:00:02.000Z",
+      "observedAt": "2026-08-10T08:00:02.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "identity-gamma-unverified-zero-beads",
+        "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "artifacts": [
+        {
+          "kind": "identity",
+          "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      ],
+      "actorId": "actor-synthetic-gamma",
+      "logicalSessionId": "session-synthetic-zero-beads",
+      "executionSurface": "claude_code_desktop",
+      "orchestrationRole": "observer",
+      "modelProvider": "provider-synthetic-gamma",
+      "modelId": "model-synthetic-gamma",
+      "herdrSessionRef": null,
+      "agentChattrInstanceId": "agentchattr-instance-synthetic",
+      "agentChattrSessionId": "agentchattr-session-synthetic-gamma",
+      "agentChattrExternalId": "external-synthetic-gamma",
+      "beadsActorId": "beads-actor-synthetic-gamma",
+      "validFrom": "2026-08-10T08:00:02.000Z",
+      "validUntil": null,
+      "bindingState": "unverified"
     },
     {
-      "bindingId": "binding-stale",
-      "actorId": "actor-synthetic-stale",
-      "logicalSessionId": "session-reclaimed",
-      "providerModel": "codex",
-      "executionSurface": "codex-desktop",
-      "role": "participant",
-      "runtimeSessionRef": "runtime-session-stale",
-      "upstreamInstanceId": "spike-instance-prior",
-      "upstreamSessionId": "upstream-session-stale",
-      "senderExternalId": "external-synthetic-stale",
-      "displayName": "Synthetic Reclaimed Name",
-      "beadsActorId": "beads-actor-synthetic-stale",
-      "boundAtUtc": "2026-08-09T08:00:00.000Z",
-      "boundBy": "synthetic-operator",
-      "validity": "revoked",
-      "revokedAtUtc": "2026-08-10T07:59:00.000Z"
+      "caseId": "identity-delta-stale-one-bead",
+      "kind": "identity_binding",
+      "expectedResult": "unknown",
+      "observedResult": "unknown",
+      "classification": "unknown",
+      "startedAt": "2026-08-10T08:00:03.000Z",
+      "observedAt": "2026-08-10T08:00:03.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "identity-delta-stale-one-bead",
+        "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "artifacts": [
+        {
+          "kind": "identity",
+          "digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ],
+      "actorId": "actor-synthetic-delta",
+      "logicalSessionId": "session-synthetic-one-bead",
+      "executionSurface": "codex_desktop",
+      "orchestrationRole": "reviewer",
+      "modelProvider": "provider-synthetic-delta",
+      "modelId": "model-synthetic-delta",
+      "herdrSessionRef": null,
+      "agentChattrInstanceId": "agentchattr-instance-synthetic",
+      "agentChattrSessionId": "agentchattr-session-synthetic-delta",
+      "agentChattrExternalId": "external-synthetic-delta",
+      "beadsActorId": "beads-actor-synthetic-delta",
+      "validFrom": "2026-08-10T07:00:00.000Z",
+      "validUntil": "2026-08-10T07:30:00.000Z",
+      "bindingState": "stale"
     },
     {
-      "bindingId": "binding-unverified",
-      "actorId": "actor-synthetic-unverified",
-      "logicalSessionId": "session-unverified",
-      "providerModel": "claude-code",
-      "executionSurface": "claude-code-desktop",
-      "role": "participant",
-      "runtimeSessionRef": "runtime-session-unverified",
-      "upstreamInstanceId": "spike-instance-synthetic",
-      "upstreamSessionId": "upstream-session-unverified",
-      "senderExternalId": "external-synthetic-unverified",
-      "displayName": "Synthetic Unverified",
-      "beadsActorId": "beads-actor-synthetic-unverified",
-      "boundAtUtc": "2026-08-10T08:00:04.000Z",
-      "boundBy": "synthetic-operator",
-      "validity": "unverified"
+      "caseId": "identity-epsilon-revoked",
+      "kind": "identity_binding",
+      "expectedResult": "fail",
+      "observedResult": "fail",
+      "classification": "fail",
+      "startedAt": "2026-08-10T08:00:04.000Z",
+      "observedAt": "2026-08-10T08:00:04.000Z",
+      "provenance": {
+        "sourceKind": "synthetic_fixture",
+        "sourceRef": "identity-epsilon-revoked",
+        "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+      },
+      "artifacts": [
+        {
+          "kind": "identity",
+          "digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      ],
+      "actorId": "actor-synthetic-epsilon",
+      "logicalSessionId": "session-synthetic-zero-beads",
+      "executionSurface": "herdr",
+      "orchestrationRole": "worker",
+      "modelProvider": "provider-synthetic-epsilon",
+      "modelId": "model-synthetic-epsilon",
+      "herdrSessionRef": "herdr-session-synthetic-epsilon",
+      "agentChattrInstanceId": "agentchattr-instance-synthetic",
+      "agentChattrSessionId": "agentchattr-session-synthetic-epsilon",
+      "agentChattrExternalId": "external-synthetic-epsilon",
+      "beadsActorId": "beads-actor-synthetic-epsilon",
+      "validFrom": "2026-08-09T07:00:00.000Z",
+      "validUntil": "2026-08-09T07:30:00.000Z",
+      "bindingState": "revoked"
     }
   ],
   "sessionBeadLinks": [
     {
-      "logicalSessionId": "session-coordination",
-      "beadId": "synthetic-spike-bead"
+      "logicalSessionId": "session-synthetic-coordination",
+      "beadId": "bead-synthetic-coordination"
     },
     {
-      "logicalSessionId": "session-coordination",
-      "beadId": "synthetic-review-bead"
+      "logicalSessionId": "session-synthetic-coordination",
+      "beadId": "bead-synthetic-review"
+    },
+    {
+      "logicalSessionId": "session-synthetic-one-bead",
+      "beadId": "bead-synthetic-single"
     }
   ]
 }
