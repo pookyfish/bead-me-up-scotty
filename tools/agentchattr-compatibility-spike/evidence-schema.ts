@@ -409,7 +409,7 @@ export const monitorIntervalSchema = withEvidenceBase("monitor_interval", {
 });
 
 const teardownProofSchema = z.strictObject({
-  state: z.enum(["restored", "not_present", "not_restored", "unknown"]),
+  state: z.enum(["restored", "not_applicable", "not_restored", "unknown"]),
   evidenceHash: sha256Schema,
 });
 
@@ -438,18 +438,18 @@ export const teardownSchema = withEvidenceBase("teardown", {
     evidenceHash: sha256Schema,
   }),
   disposableRoot: z.strictObject({
-    disposition: z.enum(["deleted", "retained", "unknown"]),
-    ownership: z.enum(["confirmed", "not_owned", "unknown"]),
+    state: z.enum(["deleted", "retained", "unknown"]),
+    ownership: z.enum(["owned", "not_owned", "unknown"]),
   }),
 }).superRefine((record, context) => {
   const hasSuccessfulProof = (record.serviceDeregistration.state === "deregistered" || record.serviceDeregistration.state === "not_registered")
     && record.baselineInventoryRestoration.state === "restored_exact"
-    && (record.desktopProfileConfigRestoration.state === "restored" || record.desktopProfileConfigRestoration.state === "not_present")
+    && (record.desktopProfileConfigRestoration.state === "restored" || record.desktopProfileConfigRestoration.state === "not_applicable")
     && (record.credentialRemoval.state === "removed" || record.credentialRemoval.state === "not_present")
     && (record.listenerRemoval.state === "removed" || record.listenerRemoval.state === "not_present")
     && record.finalMonitorCapture.state === "captured"
-    && ((record.disposableRoot.disposition === "deleted" && record.disposableRoot.ownership === "confirmed")
-      || (record.disposableRoot.disposition === "retained" && record.disposableRoot.ownership === "not_owned"));
+    && ((record.disposableRoot.state === "deleted" && record.disposableRoot.ownership === "owned")
+      || (record.disposableRoot.state === "retained" && record.disposableRoot.ownership === "not_owned"));
   if (!hasSuccessfulProof && (record.observedResult === "pass" || record.classification === "pass")) {
     context.addIssue({
       code: "custom",

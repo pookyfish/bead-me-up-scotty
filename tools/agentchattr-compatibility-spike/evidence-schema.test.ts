@@ -520,7 +520,7 @@ function validTeardown() {
     credentialRemoval: { state: "removed", evidenceHash: digest },
     listenerRemoval: { state: "removed", evidenceHash: digest },
     finalMonitorCapture: { state: "captured", evidenceHash: digest },
-    disposableRoot: { disposition: "deleted", ownership: "confirmed" },
+    disposableRoot: { state: "deleted", ownership: "owned" },
   };
 }
 
@@ -667,20 +667,23 @@ describe("operational boundaries and Herdr observations", () => {
     const knownCleanNoOp = {
       ...validTeardown(),
       serviceDeregistration: { serviceName: "agentchattr-spike", state: "not_registered", evidenceHash: digest },
-      desktopProfileConfigRestoration: { state: "not_present", evidenceHash: digest },
+      desktopProfileConfigRestoration: { state: "not_applicable", evidenceHash: digest },
       credentialRemoval: { state: "not_present", evidenceHash: digest },
       listenerRemoval: { state: "not_present", evidenceHash: digest },
     };
     const retainedUnowned = {
       ...validTeardown(),
-      disposableRoot: { disposition: "retained", ownership: "not_owned" },
+      disposableRoot: { state: "retained", ownership: "not_owned" },
     };
 
     expect(teardownSchema.safeParse(fullyActioned).success).toBe(true);
     expect(teardownSchema.safeParse(knownCleanNoOp).success).toBe(true);
     expect(teardownSchema.safeParse(retainedUnowned).success).toBe(true);
-    expect(teardownSchema.safeParse({ ...validTeardown(), disposableRoot: { disposition: "deleted", ownership: "not_owned" } }).success).toBe(false);
-    expect(teardownSchema.safeParse({ ...validTeardown(), disposableRoot: { disposition: "retained", ownership: "confirmed" } }).success).toBe(false);
+    expect(teardownSchema.safeParse({ ...validTeardown(), disposableRoot: { state: "deleted", ownership: "not_owned" } }).success).toBe(false);
+    expect(teardownSchema.safeParse({ ...validTeardown(), disposableRoot: { state: "retained", ownership: "owned" } }).success).toBe(false);
+    expect(teardownSchema.safeParse({ ...validTeardown(), disposableRoot: { state: "retained", ownership: "unknown" } }).success).toBe(false);
+    expect(teardownSchema.safeParse({ ...validTeardown(), disposableRoot: { state: "unknown", ownership: "not_owned" } }).success).toBe(false);
+    expect(teardownSchema.safeParse({ ...validTeardown(), disposableRoot: { state: "unknown", ownership: "unknown" } }).success).toBe(false);
   });
 
   it("requires every teardown proof to be certain and successful before either result axis can pass", () => {
@@ -697,10 +700,11 @@ describe("operational boundaries and Herdr observations", () => {
       { listenerRemoval: { state: "unknown", evidenceHash: digest } },
       { finalMonitorCapture: { state: "missing", evidenceHash: digest } },
       { finalMonitorCapture: { state: "unknown", evidenceHash: digest } },
-      { disposableRoot: { disposition: "deleted", ownership: "not_owned" } },
-      { disposableRoot: { disposition: "retained", ownership: "confirmed" } },
-      { disposableRoot: { disposition: "unknown", ownership: "confirmed" } },
-      { disposableRoot: { disposition: "deleted", ownership: "unknown" } },
+      { disposableRoot: { state: "deleted", ownership: "not_owned" } },
+      { disposableRoot: { state: "retained", ownership: "owned" } },
+      { disposableRoot: { state: "retained", ownership: "unknown" } },
+      { disposableRoot: { state: "unknown", ownership: "not_owned" } },
+      { disposableRoot: { state: "unknown", ownership: "unknown" } },
     ];
 
     for (const proof of invalidProofs) {
