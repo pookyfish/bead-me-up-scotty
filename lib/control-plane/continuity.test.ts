@@ -94,6 +94,7 @@ describe("supervisor continuity", () => {
   it.each([
     { source: "codex-collaboration", surface: "collaboration", sessionId: "c" },
     { source: "claude-desktop", surface: "desktop", sessionId: "d" },
+    { source: "codex-desktop", surface: "desktop", sessionId: "cd" },
     { source: "external", surface: "external", sessionId: "e" },
   ] as const)("keeps non-Herdr bindings unproven", (binding) => {
     const diagnostics = evaluateSupervisorContinuity({ orchestra: orchestra(checkpointFor("implementation", binding)), herdr, now });
@@ -139,5 +140,14 @@ describe("supervisor continuity", () => {
     const live = herdrWith(session("old", "idle"), session("new", "working"));
     const later = new Date("2026-08-09T20:35:00.000Z");
     expect(evaluateSupervisorContinuity({ orchestra: orchestra(checkpointFor("handoff", binding)), herdr: live, now: later }).some(({ code }) => code === "supervisor_continuity_stalled" || code === "supervisor_continuity_unproven")).toBe(false);
+  });
+
+  it("evaluates an independent stalled lane beside a live lane", () => {
+    const liveBinding = { source: "herdr" as const, surface: "herdr" as const, sessionId: "live" };
+    const data = orchestra(checkpointFor("implementation", liveBinding)).data!;
+    data.activeWork.stalled = { ...data.activeWork.work, beadId: "stalled", supervision: checkpointFor("transition") as never };
+    const diagnostics = evaluateSupervisorContinuity({ orchestra: availableObservation("orchestra", "coordination", data, ["observe"], { observedAt: now.toISOString() }), herdr: herdrWith(session("live", "working")), now });
+    expect(diagnostics).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_stalled", workKey: "stalled" }));
+    expect(diagnostics).not.toContainEqual(expect.objectContaining({ workKey: "work", code: "supervisor_continuity_stalled" }));
   });
 });

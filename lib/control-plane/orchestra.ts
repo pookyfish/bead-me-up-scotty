@@ -282,29 +282,36 @@ function parseSnapshot(raw: Record<string, unknown>): {
     }
   }
 
-  const parsedActiveWorkSection = parseMapSection(raw.active_work, rawActiveWorkSchema, null);
-  const unsafeActiveWorkEntries = parsedActiveWorkSection.entries.filter(([key, record]) =>
-    !safeActiveWorkText(key) || (record.bead_id !== undefined && record.bead_id !== null && !safeActiveWorkText(record.bead_id)),
-  );
-  const activeWorkSection = { ...parsedActiveWorkSection, rejected: parsedActiveWorkSection.rejected + unsafeActiveWorkEntries.length };
+  const rawActiveWorkEntries = isRecord(raw.active_work)
+    ? Object.entries(raw.active_work)
+    : [["", undefined] as [string, unknown]];
+  const activeWorkSection = {
+    total: isRecord(raw.active_work) ? rawActiveWorkEntries.length : 1,
+    rejected: isRecord(raw.active_work) ? 0 : 1,
+  };
   let invalidCheckpoints = 0;
-  const safeKeys = new Set(activeWorkSection.entries.filter(([key]) => safeActiveWorkText(key)).map(([key]) => key));
+  let activeWorkNestedTruncation = false;
+  const safeKeys = new Set(rawActiveWorkEntries.map(([key]) => key).filter(safeActiveWorkText));
   let unsafeEntryIndex = 0;
-  const activeWorkEntries = activeWorkSection.entries.map(([rawKey, record]) => {
-    const unsafe = !safeActiveWorkText(rawKey) || (record.bead_id !== undefined && record.bead_id !== null && !safeActiveWorkText(record.bead_id));
+  const activeWorkEntries = rawActiveWorkEntries.map(([rawKey, rawRecord]) => {
+    const parsedRecord = rawActiveWorkSchema.safeParse(rawRecord);
+    const record = parsedRecord.success ? parsedRecord.data : undefined;
+    const unsafe = !parsedRecord.success || !safeActiveWorkText(rawKey) || (record?.bead_id !== undefined && record?.bead_id !== null && !safeActiveWorkText(record.bead_id));
+    if (unsafe) activeWorkSection.rejected += 1;
+    if ((record?.files_touching?.length ?? 0) > STRING_LIST_LIMIT) activeWorkNestedTruncation = true;
     let key = rawKey;
     if (!safeActiveWorkText(key)) {
       do { unsafeEntryIndex += 1; key = `invalid-active-work-${unsafeEntryIndex}`; } while (safeKeys.has(key));
       safeKeys.add(key);
     }
-    const supervision = unsafe ? { status: "invalid" as const, code: "invalid_checkpoint" as const } : projectSupervision(record.supervision);
+    const supervision = unsafe ? { status: "invalid" as const, code: "invalid_checkpoint" as const } : projectSupervision(record?.supervision);
     if (supervision?.status === "invalid") invalidCheckpoints += 1;
     return [key, {
-      beadId: !unsafe && safeActiveWorkText(record.bead_id) ? record.bead_id : null,
-      status: nullable(record.status),
-      repo: nullable(record.repo),
-      branch: nullable(record.branch),
-      filesTouching: boundedList(record.files_touching),
+      beadId: !unsafe && safeActiveWorkText(record?.bead_id) ? record.bead_id : null,
+      status: nullable(record?.status),
+      repo: nullable(record?.repo),
+      branch: nullable(record?.branch),
+      filesTouching: boundedList(record?.files_touching),
       supervision,
     }] as const;
   });
@@ -381,9 +388,6 @@ function parseSnapshot(raw: Record<string, unknown>): {
       reason: nullable(record.reason),
     }));
 
-  const activeWorkNestedTruncation = activeWorkSection.entries.some(
-    ([, record]) => (record.files_touching?.length ?? 0) > STRING_LIST_LIMIT,
-  );
   const conflictNestedTruncation = unresolvedConflictEntries.some(
     (record) => (record.files?.length ?? 0) > STRING_LIST_LIMIT,
   );
@@ -406,7 +410,7 @@ function parseSnapshot(raw: Record<string, unknown>): {
     sections: {
       activeWork: sectionStats(
         activeWorkSection.total,
-        activeWorkSection.entries.length,
+        activeWorkEntries.length,
         activeWorkSection.rejected,
         activeWorkNestedTruncation,
       ),

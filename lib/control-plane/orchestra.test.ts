@@ -395,6 +395,31 @@ describe("observeOrchestra", () => {
     expect(second.data?.activeWork).toEqual(first.data?.activeWork);
   });
 
+  it("retains an unsafe-key entry even when a sibling field is malformed", async () => {
+    const result = await observeOrchestra("C:/unsafe-malformed", fakeFs({
+      json: { ...orchestraMixedFixture, active_work: { "bad\u0000key": { ...orchestraMixedFixture.active_work["valid-entry"], status: 7, supervision: rawCheckpoint() } } },
+    }));
+    expect(result.error?.code).toBe("incomplete_observation");
+    expect(evaluateSupervisorContinuity({ orchestra: result, herdr: continuityHerdr, now: continuityNow })).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_unproven", workKey: "invalid-active-work-1" }));
+  });
+
+  it("retains a safe-key malformed record as an invalid checkpoint", async () => {
+    const result = await observeOrchestra("C:/safe-malformed", fakeFs({
+      json: { ...orchestraMixedFixture, active_work: { safe: { ...orchestraMixedFixture.active_work["valid-entry"], status: 7, supervision: rawCheckpoint() } } },
+    }));
+    expect(result.error?.code).toBe("incomplete_observation");
+    expect(result.data?.activeWork.safe.supervision).toEqual({ status: "invalid", code: "invalid_checkpoint" });
+    expect(evaluateSupervisorContinuity({ orchestra: result, herdr: continuityHerdr, now: continuityNow })).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_unproven", workKey: "safe" }));
+  });
+
+  it("turns a malformed whole active-work section into one stable unproven sentinel", async () => {
+    const result = await observeOrchestra("C:/whole-malformed", fakeFs({ json: { ...orchestraMixedFixture, active_work: [] } }));
+    expect(result.error?.code).toBe("incomplete_observation");
+    expect(evaluateSupervisorContinuity({ orchestra: result, herdr: continuityHerdr, now: continuityNow })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: "supervisor_continuity_unproven", workKey: "invalid-active-work-1", stage: "invalid supervision checkpoint" }),
+    ]));
+  });
+
   it("keeps a control-bearing active-work bead ID fail-closed", async () => {
     const result = await observeOrchestra("C:/unsafe-bead", fakeFs({
       json: { ...orchestraMixedFixture, active_work: { safe: { ...orchestraMixedFixture.active_work["valid-entry"], bead_id: "bad\u0000bead" } } },
@@ -446,5 +471,17 @@ describe("observeOrchestra", () => {
       json: { ...orchestraMixedFixture, active_work: { safe: { ...orchestraMixedFixture.active_work["valid-entry"], supervision: rawCheckpoint({ phase: "implementation", worker_binding: { source: "herdr", surface: "herdr", session_id: "" } }) } } },
     }));
     expect(result.data?.activeWork.safe.supervision).toEqual({ status: "invalid", code: "invalid_checkpoint" });
+  });
+
+  it.each(["/absolute/plan.md", "\\\\server\\share\\plan.md", "docs/../plan.md", "docs/./plan.md"])("projects raw unsafe path %s as invalid", async (planPath) => {
+    const result = await observeOrchestra("C:/path-matrix", fakeFs({ json: { ...orchestraMixedFixture, active_work: { safe: { ...orchestraMixedFixture.active_work["valid-entry"], supervision: rawCheckpoint({ plan_path: planPath }) } } } }));
+    expect(result.data?.activeWork.safe.supervision).toEqual({ status: "invalid", code: "invalid_checkpoint" });
+    expect(evaluateSupervisorContinuity({ orchestra: result, herdr: continuityHerdr, now: continuityNow })).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_unproven", stage: "invalid supervision checkpoint" }));
+  });
+
+  it("projects checkpoint control characters as invalid without leaking them", async () => {
+    const result = await observeOrchestra("C:/control-checkpoint", fakeFs({ json: { ...orchestraMixedFixture, active_work: { safe: { ...orchestraMixedFixture.active_work["valid-entry"], supervision: rawCheckpoint({ next_action: "bad\u0000action" }) } } } }));
+    expect(result.data?.activeWork.safe.supervision).toEqual({ status: "invalid", code: "invalid_checkpoint" });
+    expect(JSON.stringify(result)).not.toContain("bad\u0000action");
   });
 });
