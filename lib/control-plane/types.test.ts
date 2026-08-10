@@ -3,6 +3,7 @@ import {
   availableObservation,
   failedObservation,
   herdrSnapshotSchema,
+  hookCoverageSnapshotSchema,
   observationSchema,
   orchestraSnapshotSchema,
   runtimeManagerSnapshotSchema,
@@ -153,5 +154,30 @@ describe("control-plane observation contract", () => {
     expect(parsed.services?.scotty).not.toHaveProperty("headers");
     expect(parsed.services?.scotty.occupant).not.toHaveProperty("commandLine");
     expect(parsed.services?.scotty.record).not.toHaveProperty("token");
+  });
+
+  it("keeps hook coverage wire data redacted to configuration evidence", () => {
+    const parsed = hookCoverageSnapshotSchema.parse({
+      scope: "project-only",
+      claudeSettingsPresent: true,
+      codexHookConfigPresent: false,
+      references: [{
+        provider: "claude",
+        event: "SessionStart",
+        executableBasename: "node",
+        fileRef: ".claude/hooks/actor-stamp.cjs",
+        fileScope: "project",
+        exists: true,
+        command: "must not cross the wire boundary",
+        env: { token: "must not cross the wire boundary" },
+      }],
+      missingConfiguredFiles: [],
+      codexGlobalCoverage: "unknown",
+      rawConfig: "must not cross the wire boundary",
+    });
+
+    expect(parsed).not.toHaveProperty("rawConfig");
+    expect(parsed.references[0]).not.toHaveProperty("command");
+    expect(parsed.references[0]).not.toHaveProperty("env");
   });
 });

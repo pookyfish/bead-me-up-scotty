@@ -354,6 +354,42 @@ export const runtimeManagerSnapshotSchema: z.ZodType<RuntimeManagerSnapshot> = z
   services: z.record(z.string(), runtimeManagerServiceSchema).nullable(),
 });
 
+export interface HookReference {
+  provider: "claude" | "codex";
+  event: string;
+  executableBasename: string | null;
+  fileRef: string | null;
+  fileScope: "project" | "external" | "unknown";
+  exists: boolean | null;
+}
+
+export interface HookCoverageSnapshot {
+  scope: "project-only";
+  claudeSettingsPresent: boolean;
+  codexHookConfigPresent: boolean;
+  references: HookReference[];
+  missingConfiguredFiles: string[];
+  codexGlobalCoverage: "unknown";
+}
+
+const hookReferenceSchema: z.ZodType<HookReference> = z.object({
+  provider: z.enum(["claude", "codex"]),
+  event: z.string(),
+  executableBasename: z.string().nullable(),
+  fileRef: z.string().nullable(),
+  fileScope: z.enum(["project", "external", "unknown"]),
+  exists: z.boolean().nullable(),
+});
+
+export const hookCoverageSnapshotSchema: z.ZodType<HookCoverageSnapshot> = z.object({
+  scope: z.literal("project-only"),
+  claudeSettingsPresent: z.boolean(),
+  codexHookConfigPresent: z.boolean(),
+  references: z.array(hookReferenceSchema),
+  missingConfiguredFiles: z.array(z.string()),
+  codexGlobalCoverage: z.literal("unknown"),
+});
+
 export function availableObservation<T>(
   source: SourceId,
   authority: string,
