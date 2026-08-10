@@ -397,6 +397,15 @@ export const monitorIntervalSchema = withEvidenceBase("monitor_interval", {
   finalEvidenceHash: sha256Schema,
   gapState: z.enum(["no_gap", "gap_detected", "unknown"]),
   finalCaptureState: z.enum(["captured", "missing", "unknown"]),
+}).superRefine((record, context) => {
+  if ((record.observedResult === "pass" || record.classification === "pass")
+    && (record.gapState !== "no_gap" || record.finalCaptureState !== "captured")) {
+    context.addIssue({
+      code: "custom",
+      message: "Passing monitor evidence requires a gap-free final capture.",
+      path: ["classification"],
+    });
+  }
 });
 
 const teardownProofSchema = z.strictObject({
@@ -433,20 +442,18 @@ export const teardownSchema = withEvidenceBase("teardown", {
     ownership: z.enum(["owned", "not_owned", "unknown"]),
   }),
 }).superRefine((record, context) => {
-  const hasUnknownResult = [
-    record.serviceDeregistration.state,
-    record.baselineInventoryRestoration.state,
-    record.desktopProfileConfigRestoration.state,
-    record.credentialRemoval.state,
-    record.listenerRemoval.state,
-    record.finalMonitorCapture.state,
-    record.disposableRoot.state,
-    record.disposableRoot.ownership,
-  ].includes("unknown");
-  if (hasUnknownResult && (record.observedResult === "pass" || record.classification === "pass")) {
+  const hasSuccessfulProof = record.serviceDeregistration.state === "deregistered"
+    && record.baselineInventoryRestoration.state === "restored_exact"
+    && record.desktopProfileConfigRestoration.state === "restored"
+    && record.credentialRemoval.state === "removed"
+    && record.listenerRemoval.state === "removed"
+    && record.finalMonitorCapture.state === "captured"
+    && record.disposableRoot.state === "deleted"
+    && record.disposableRoot.ownership === "owned";
+  if (!hasSuccessfulProof && (record.observedResult === "pass" || record.classification === "pass")) {
     context.addIssue({
       code: "custom",
-      message: "Uncertain teardown evidence cannot be represented as pass.",
+      message: "Passing teardown evidence requires every successful teardown proof.",
       path: ["classification"],
     });
   }

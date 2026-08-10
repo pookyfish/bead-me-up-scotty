@@ -550,6 +550,21 @@ describe("operational boundaries and Herdr observations", () => {
     expect(monitorIntervalSchema.safeParse({ ...validMonitorInterval(), intervalMs: 2001 }).success).toBe(false);
     expect(monitorIntervalSchema.safeParse({ ...validMonitorInterval(), eventCount: -1 }).success).toBe(false);
     expect(monitorIntervalSchema.safeParse({ ...validMonitorInterval(), baselineEvidenceHash: "process-output" }).success).toBe(false);
+    expect(monitorIntervalSchema.safeParse({ ...validMonitorInterval(), monitorKind: "telemetry" }).success).toBe(false);
+  });
+
+  it("requires a gap-free final capture before either monitor result axis can pass", () => {
+    const invalidProofs = [
+      { gapState: "gap_detected" },
+      { gapState: "unknown" },
+      { finalCaptureState: "missing" },
+      { finalCaptureState: "unknown" },
+    ];
+
+    for (const proof of invalidProofs) {
+      expect(monitorIntervalSchema.safeParse({ ...validMonitorInterval(), ...proof, classification: "pass", observedResult: "unknown" }).success).toBe(false);
+      expect(monitorIntervalSchema.safeParse({ ...validMonitorInterval(), ...proof, classification: "unknown", observedResult: "pass" }).success).toBe(false);
+    }
   });
 
   it("parses direct snapshots, telemetry lifecycle evidence, and direct trace summaries without authority", () => {
@@ -568,14 +583,38 @@ describe("operational boundaries and Herdr observations", () => {
     }
   });
 
-  it("keeps Herdr targets, native contracts, and token quality closed", () => {
+  it("keeps every Herdr target shape, native contract, and token quality closed", () => {
     const lifecycle = validLifecycleEvent();
     const trace = validTraceSummary();
+    const targets = [
+      { targetKind: "workspace", workspaceId: "workspace-1" },
+      { targetKind: "tab", workspaceId: "workspace-1", tabId: "tab-1" },
+      { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" },
+      { targetKind: "terminal", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1", terminalId: "terminal-1" },
+      { targetKind: "agent_session", agentSessionId: "agent-session-1" },
+    ];
+    const incompleteTargets = [
+      { targetKind: "workspace" },
+      { targetKind: "tab", tabId: "tab-1" },
+      { targetKind: "pane", workspaceId: "workspace-1", paneId: "pane-1" },
+      { targetKind: "terminal", workspaceId: "workspace-1", tabId: "tab-1", terminalId: "terminal-1" },
+      { targetKind: "agent_session" },
+    ];
 
+    for (const target of targets) {
+      expect(runtimeObservationSchema.safeParse({ ...lifecycle, observation: { ...lifecycle.observation, target } }).success).toBe(true);
+      expect(runtimeObservationSchema.safeParse({ ...lifecycle, observation: { ...lifecycle.observation, target: { ...target, unexpected: "extra" } } }).success).toBe(false);
+    }
+    for (const target of incompleteTargets) {
+      expect(runtimeObservationSchema.safeParse({ ...lifecycle, observation: { ...lifecycle.observation, target } }).success).toBe(false);
+    }
     expect(runtimeObservationSchema.safeParse({ ...lifecycle, nativeContract: { versionKind: "herdr_protocol", protocol: 0 } }).success).toBe(false);
     expect(runtimeObservationSchema.safeParse({ ...lifecycle, nativeContract: { versionKind: "named", name: "herdr-telemetry", version: "v1", protocol: 1 } }).success).toBe(false);
-    expect(runtimeObservationSchema.safeParse({ ...lifecycle, observation: { ...lifecycle.observation, target: { targetKind: "pane", workspaceId: "workspace-1", paneId: "pane-1" } } }).success).toBe(false);
+    expect(runtimeObservationSchema.safeParse({ ...trace, observation: { ...trace.observation, tokenCount: 1200, tokenCountQuality: "reported" } }).success).toBe(true);
+    expect(runtimeObservationSchema.safeParse({ ...trace, observation: { ...trace.observation, tokenCount: 1200, tokenCountQuality: "estimated" } }).success).toBe(true);
+    expect(runtimeObservationSchema.safeParse({ ...trace, observation: { ...trace.observation, tokenCount: null, tokenCountQuality: "unknown" } }).success).toBe(true);
     expect(runtimeObservationSchema.safeParse({ ...trace, observation: { ...trace.observation, tokenCount: null, tokenCountQuality: "reported" } }).success).toBe(false);
+    expect(runtimeObservationSchema.safeParse({ ...trace, observation: { ...trace.observation, tokenCount: null, tokenCountQuality: "estimated" } }).success).toBe(false);
     expect(runtimeObservationSchema.safeParse({ ...trace, observation: { ...trace.observation, tokenCount: 12, tokenCountQuality: "unknown" } }).success).toBe(false);
   });
 
@@ -620,12 +659,41 @@ describe("operational boundaries and Herdr observations", () => {
     }
   });
 
-  it("requires complete teardown proof and cannot call uncertainty a pass", () => {
+  it("allows an unknown observed result only with complete teardown proof", () => {
     const valid = validTeardown();
 
     expect(teardownSchema.safeParse(valid).success).toBe(true);
-    expect(teardownSchema.safeParse({ ...valid, classification: "pass", observedResult: "unknown", disposableRoot: { state: "unknown", ownership: "unknown" } }).success).toBe(false);
-    expect(teardownSchema.safeParse({ ...valid, desktopProfileConfigRestoration: { state: "unknown", evidenceHash: digest }, classification: "pass", observedResult: "pass" }).success).toBe(false);
+    expect(teardownSchema.safeParse({ ...valid, observedResult: "unknown" }).success).toBe(true);
     expect(teardownSchema.safeParse({ ...valid, listenerRemoval: { state: "removed", evidenceHash: digest, commandLine: "netstat" } }).success).toBe(false);
+  });
+
+  it("requires every teardown proof to be successful before either result axis can pass", () => {
+    const invalidProofs = [
+      { serviceDeregistration: { serviceName: "agentchattr-spike", state: "not_registered", evidenceHash: digest } },
+      { serviceDeregistration: { serviceName: "agentchattr-spike", state: "failed", evidenceHash: digest } },
+      { serviceDeregistration: { serviceName: "agentchattr-spike", state: "unknown", evidenceHash: digest } },
+      { baselineInventoryRestoration: { state: "not_restored", baselineEvidenceHash: digest, finalEvidenceHash: digest } },
+      { baselineInventoryRestoration: { state: "unknown", baselineEvidenceHash: digest, finalEvidenceHash: digest } },
+      { desktopProfileConfigRestoration: { state: "not_restored", evidenceHash: digest } },
+      { desktopProfileConfigRestoration: { state: "not_applicable", evidenceHash: digest } },
+      { desktopProfileConfigRestoration: { state: "unknown", evidenceHash: digest } },
+      { credentialRemoval: { state: "not_present", evidenceHash: digest } },
+      { credentialRemoval: { state: "failed", evidenceHash: digest } },
+      { credentialRemoval: { state: "unknown", evidenceHash: digest } },
+      { listenerRemoval: { state: "not_present", evidenceHash: digest } },
+      { listenerRemoval: { state: "failed", evidenceHash: digest } },
+      { listenerRemoval: { state: "unknown", evidenceHash: digest } },
+      { finalMonitorCapture: { state: "missing", evidenceHash: digest } },
+      { finalMonitorCapture: { state: "unknown", evidenceHash: digest } },
+      { disposableRoot: { state: "retained", ownership: "owned" } },
+      { disposableRoot: { state: "unknown", ownership: "owned" } },
+      { disposableRoot: { state: "deleted", ownership: "not_owned" } },
+      { disposableRoot: { state: "deleted", ownership: "unknown" } },
+    ];
+
+    for (const proof of invalidProofs) {
+      expect(teardownSchema.safeParse({ ...validTeardown(), ...proof, classification: "pass", observedResult: "unknown" }).success).toBe(false);
+      expect(teardownSchema.safeParse({ ...validTeardown(), ...proof, classification: "unknown", observedResult: "pass" }).success).toBe(false);
+    }
   });
 });
