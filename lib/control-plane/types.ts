@@ -308,6 +308,52 @@ export const herdrSnapshotSchema: z.ZodType<HerdrSnapshot> = z.object({
   sessions: z.array(herdrSessionObservationSchema),
 });
 
+export interface RuntimeManagerService {
+  description: string;
+  port: number;
+  stateful: boolean;
+  running: boolean;
+  verdict: "adopted" | "foreign" | "down" | "unknown";
+  occupant: { pid: number; exe: string; startTime?: string } | null;
+  record: { startedBy?: string; reason?: string; since?: string } | null;
+  inflightOp: string | null;
+}
+
+export interface RuntimeManagerSnapshot {
+  epoch: number;
+  managerPid: number;
+  services: Record<string, RuntimeManagerService> | null;
+}
+
+const runtimeManagerOccupantSchema = z.object({
+  pid: z.number().int().positive(),
+  exe: z.string(),
+  startTime: z.string().optional(),
+});
+
+const runtimeManagerRecordSchema = z.object({
+  startedBy: z.string().optional(),
+  reason: z.string().optional(),
+  since: z.string().optional(),
+});
+
+const runtimeManagerServiceSchema: z.ZodType<RuntimeManagerService> = z.object({
+  description: z.string(),
+  port: z.number().int().min(1).max(65_535),
+  stateful: z.boolean(),
+  running: z.boolean(),
+  verdict: z.enum(["adopted", "foreign", "down", "unknown"]),
+  occupant: runtimeManagerOccupantSchema.nullable(),
+  record: runtimeManagerRecordSchema.nullable(),
+  inflightOp: z.string().nullable(),
+});
+
+export const runtimeManagerSnapshotSchema: z.ZodType<RuntimeManagerSnapshot> = z.object({
+  epoch: z.number().int().nonnegative(),
+  managerPid: z.number().int().positive(),
+  services: z.record(z.string(), runtimeManagerServiceSchema).nullable(),
+});
+
 export function availableObservation<T>(
   source: SourceId,
   authority: string,

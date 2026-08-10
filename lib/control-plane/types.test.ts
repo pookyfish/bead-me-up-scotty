@@ -5,6 +5,7 @@ import {
   herdrSnapshotSchema,
   observationSchema,
   orchestraSnapshotSchema,
+  runtimeManagerSnapshotSchema,
 } from "./types";
 
 describe("control-plane observation contract", () => {
@@ -112,5 +113,45 @@ describe("control-plane observation contract", () => {
     expect(parsed.sessions[0]).not.toHaveProperty("actor");
     expect(parsed.sessions[0]).not.toHaveProperty("role");
     expect(parsed.sessions[0]).not.toHaveProperty("task");
+  });
+
+  it("keeps Runtime Manager service observations closed to transport details", () => {
+    const parsed = runtimeManagerSnapshotSchema.parse({
+      epoch: 13,
+      managerPid: 7,
+      services: {
+        scotty: {
+          description: "Beads dashboard on :1701",
+          port: 1701,
+          stateful: false,
+          running: true,
+          verdict: "foreign",
+          occupant: {
+            pid: 101,
+            exe: "node.exe",
+            startTime: "20260810010000.000000-420",
+            commandLine: "must not cross the wire boundary",
+          },
+          record: {
+            startedBy: "rmctl",
+            reason: "verification",
+            since: "2026-08-10T01:00:00.000Z",
+            token: "must not cross the wire boundary",
+          },
+          inflightOp: null,
+          raw_body: "must not cross the wire boundary",
+          headers: { authorization: "must not cross the wire boundary" },
+        },
+      },
+      token: "must not cross the wire boundary",
+      raw_body: "must not cross the wire boundary",
+    });
+
+    expect(parsed.services?.scotty.verdict).toBe("foreign");
+    expect(parsed).not.toHaveProperty("token");
+    expect(parsed).not.toHaveProperty("raw_body");
+    expect(parsed.services?.scotty).not.toHaveProperty("headers");
+    expect(parsed.services?.scotty.occupant).not.toHaveProperty("commandLine");
+    expect(parsed.services?.scotty.record).not.toHaveProperty("token");
   });
 });
