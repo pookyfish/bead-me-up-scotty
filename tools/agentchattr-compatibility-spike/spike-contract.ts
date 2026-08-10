@@ -87,6 +87,11 @@ function containsRawSensitiveEvidence(value: unknown): boolean {
   if (Array.isArray(value)) return value.some(containsRawSensitiveEvidence);
   if (!isRecord(value)) return false;
 
+  const rawConfigKeys = new Set(["host", "port", "bindhost", "datadir", "datafolder", "authenabled"]);
+  if (Object.keys(value).map(normalizedKey).filter((key) => rawConfigKeys.has(key)).length >= 2) {
+    return true;
+  }
+
   return Object.entries(value).some(([key, nested]) => {
     const normalized = normalizedKey(key);
     if (normalized === "sanitizedargvtemplate") {
@@ -96,20 +101,29 @@ function containsRawSensitiveEvidence(value: unknown): boolean {
       return !string(nested) || !/^sha256:[a-f0-9]{64}$/i.test(nested) || !isApprovedArgvTemplate(value.sanitizedArgvTemplate, value);
     }
     const sensitiveKey =
-      /(commandline|cmdline|rawcommand|launcharguments|launchparams|processargs|argv|invocation)/.test(normalized) ||
+      /(commandline|cmdline|rawcommand|launch(?:arguments|params|text)|processargs|argv|invocation)/.test(normalized) ||
       /(token|secret|credential|password|authorization|apikey|accesskey|authkey)/.test(normalized) ||
-      /(config|settingsdump)/.test(normalized) ||
+      /(config|configuration|settings|preferences)/.test(normalized) ||
       /(queue|pendingmessage|messagepayload)/.test(normalized) ||
-      /(absolutepath|userpath|datadirectory)/.test(normalized);
+      /(absolutepath|userpath|filepath|directory)/.test(normalized);
     if (sensitiveKey) return true;
     if (string(nested)) {
+      const nonemptyLines = nested
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0 && !/^[#;]/.test(line));
+      const isHeaderlessConfig =
+        nonemptyLines.length >= 2 &&
+        nonemptyLines.every((line) => /^[a-z_][a-z0-9_.-]*\s*=\s*[^=\r\n]+$/i.test(line));
       const sensitiveValue =
         /(?:^|\s)--(?:token|secret|password)(?:=|\s+)(?!<(?:secret)>)/i.test(nested) ||
+        /\b(?:token|secret|password|api[_-]?key|access[_-]?key|auth[_-]?key)\s*[:=]\s*(?!<secret>)[^\s,;}\]]+/i.test(nested) ||
         /\bBearer\s+[A-Za-z0-9._~+/=-]+/i.test(nested) ||
-        /(?:^|[\s"'])(?:[A-Za-z]:\\Users\\|\\\\[^\\]+\\|\/(?:home|users)\/)/i.test(nested) ||
+        /(?:^|[\s"'])(?:[A-Za-z]:\\|\\\\[^\\]+\\|\/(?:home|users|var|opt|etc|tmp)\/)/i.test(nested) ||
         /\b[a-z0-9_.-]+\.(?:exe|cmd|bat|ps1|py)\s+(?:--|-|\/)/i.test(nested) ||
         /\b(?:python|node|pwsh|powershell)\s+[^\r\n]+/i.test(nested) ||
-        /^\s*\[[^\]]+\]\s*[\r\n]+[a-z0-9_.-]+\s*=/i.test(nested);
+        /^\s*\[[^\]]+\]\s*[\r\n]+[a-z0-9_.-]+\s*=/i.test(nested) ||
+        isHeaderlessConfig;
       if (sensitiveValue) return true;
     }
     return containsRawSensitiveEvidence(nested);
@@ -122,20 +136,32 @@ function containsInferredAuthorityStatus(value: unknown): boolean {
   return Object.entries(value).some(([key, nested]) => {
     const normalized = normalizedKey(key);
     const status = typeof nested === "string" ? nested.toLowerCase().replace(/[\s-]+/g, "_") : nested;
-    if (/(messagestatus|deliverystatus|readstatus|acceptancestatus)/.test(normalized)) {
-      return ["accepted", "queued", "delivered", "read"].includes(String(status));
+    const semantic = normalized
+      .replace(/^(?:current|reported|inferred|observed|message|transport)+/, "")
+      .replace(/(?:state|status|flag|result|authority)$/, "");
+    if (
+      normalized === "messagestatus" ||
+      ["delivery", "delivered", "read", "readreceipt", "acceptance", "accepted", "queued"].includes(semantic)
+    ) {
+      return ![false, null, "none", "unknown", "unsupported", "unobserved", "not_observed"].includes(status as never);
     }
-    if (/(workstatus|workstate|workstarted)/.test(normalized)) {
+    if (semantic.startsWith("work")) {
       return ![false, null, "none", "not_started", "unknown", "unsupported"].includes(status as never);
     }
-    if (/(leasestatus|leasestate|leaseauthority)/.test(normalized)) {
+    if (semantic.startsWith("lease")) {
       return ![false, null, "none", "unclaimed", "unknown", "unsupported"].includes(status as never);
     }
-    if (/(taskauthority|taskstatus|assignmentauthority)/.test(normalized)) {
+    if (["task", "assignment", "taskassignment"].includes(semantic)) {
       return ![false, null, "none", "unassigned", "unknown", "unsupported"].includes(status as never);
     }
-    if (/(approvalstatus|handoffstatus|identitybindingstatus)/.test(normalized)) {
-      return ![false, null, "none", "unknown", "unsupported"].includes(status as never);
+    if (semantic.startsWith("approval") || semantic.startsWith("approved")) {
+      return ![false, null, "none", "unknown", "unsupported", "not_granted", "not_approved"].includes(status as never);
+    }
+    if (semantic.startsWith("handoff") || semantic.startsWith("handedoff")) {
+      return ![false, null, "none", "unknown", "unsupported", "pending", "not_complete"].includes(status as never);
+    }
+    if (["identitybinding", "binding"].includes(semantic)) {
+      return ![false, null, "none", "unknown", "unsupported", "unbound", "unverified"].includes(status as never);
     }
     return containsInferredAuthorityStatus(nested);
   });
@@ -498,7 +524,8 @@ export function validateIdentityFixture(value: unknown, attributedMessage?: unkn
         binding.providerModel === attributedMessage.providerModel &&
         binding.executionSurface === attributedMessage.executionSurface &&
         binding.role === attributedMessage.role &&
-        binding.runtimeSessionRef === attributedMessage.runtimeSessionRef,
+        binding.runtimeSessionRef === attributedMessage.runtimeSessionRef &&
+        binding.beadsActorId === attributedMessage.beadsActorId,
     );
     if (!exactCandidate || !exactStringSet(attributedMessage.relatedBeadIds, expectedBeads)) {
       issues.push({ code: "unbound_attributed_message", classification: "unknown" });

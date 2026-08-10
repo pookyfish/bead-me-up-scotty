@@ -194,6 +194,7 @@ describe("AgentChattr compatibility spike evidence contract", () => {
       executionSurface: "claude-code-desktop",
       role: "participant",
       runtimeSessionRef: "runtime-session-synthetic-a",
+      beadsActorId: "beads-actor-synthetic-a",
       relatedBeadIds: ["synthetic-review-bead", "synthetic-spike-bead"],
     };
 
@@ -210,6 +211,35 @@ describe("AgentChattr compatibility spike evidence contract", () => {
       validateIdentityFixture(identityFixture, {
         ...attributed,
         relatedBeadIds: ["synthetic-spike-bead"],
+      }).issues,
+    ).toContainEqual(
+      expect.objectContaining({ code: "unbound_attributed_message", classification: "unknown" }),
+    );
+  });
+
+  it("requires the attributed Beads actor to match the independently verified binding", () => {
+    const attributed = {
+      ...validMessage(),
+      attributed: true,
+      providerInstanceId: "spike-instance-synthetic",
+      senderExternalId: "external-synthetic-a-claude",
+      actorId: "actor-synthetic-a",
+      logicalSessionId: "session-coordination",
+      providerModel: "claude-code",
+      upstreamSessionId: "upstream-session-claude-a",
+      executionSurface: "claude-code-desktop",
+      role: "participant",
+      runtimeSessionRef: "runtime-session-synthetic-a",
+      relatedBeadIds: ["synthetic-review-bead", "synthetic-spike-bead"],
+    };
+
+    expect(validateIdentityFixture(identityFixture, attributed).issues).toContainEqual(
+      expect.objectContaining({ code: "unbound_attributed_message", classification: "unknown" }),
+    );
+    expect(
+      validateIdentityFixture(identityFixture, {
+        ...attributed,
+        beadsActorId: "beads-actor-synthetic-b",
       }).issues,
     ).toContainEqual(
       expect.objectContaining({ code: "unbound_attributed_message", classification: "unknown" }),
@@ -429,6 +459,26 @@ describe("AgentChattr compatibility spike evidence contract", () => {
     );
   });
 
+  it("rejects sensitive assignments, absolute paths, and headerless config embedded in neutral fields", () => {
+    const unsafeValues = [
+      { note: "token=plaintext" },
+      { artifactDescription: "C:\\ProgramData\\AgentChattr\\config.toml" },
+      { observation: "host=127.0.0.1\nport=43123" },
+      { nested: { metadata: "api_key: plaintext-value" } },
+      { nested: { launchText: "agentchattr.exe --port 43123" } },
+      { neutral: "# captured configuration\nhost=127.0.0.1\nport=43123" },
+      { neutral: { host: "127.0.0.1", port: 43123 } },
+    ];
+
+    for (const unsafe of unsafeValues) {
+      const manifest = validManifest();
+      Object.assign(manifest.evidence[0], unsafe);
+      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
+        expect.objectContaining({ code: "raw_sensitive_evidence", classification: "fail" }),
+      );
+    }
+  });
+
   it("restricts evidence classifications and rejects inferred message, work, lease, and task authority", () => {
     const invalidClassification = validManifest();
     invalidClassification.evidence[0].classification = "delivered";
@@ -449,5 +499,31 @@ describe("AgentChattr compatibility spike evidence contract", () => {
         expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
       );
     }
+  });
+
+  it("rejects nested semantic aliases for delivery, read, lease, approval, and handoff authority", () => {
+    for (const inferred of [
+      { delivery: "delivered" },
+      { read: true },
+      { nested: { lease: "claimed" } },
+      { nested: { approval: "granted" } },
+      { nested: { handoff: "complete" } },
+      { nested: { reportedLeaseClaim: "claimed" } },
+      { nested: { approvalOutcome: "granted" } },
+      { nested: { handoffResolution: "complete" } },
+    ]) {
+      const manifest = validManifest();
+      Object.assign(manifest.evidence[0], inferred);
+      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
+        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
+      );
+    }
+
+    const neutral = validManifest();
+    Object.assign(neutral.evidence[0], {
+      transport: { delivery: "unknown", read: false },
+      authority: { work: "not_started", lease: "none", approval: "unknown", handoff: "unknown" },
+    });
+    expect(validateEvidenceManifest(neutral).issues).toEqual([]);
   });
 });

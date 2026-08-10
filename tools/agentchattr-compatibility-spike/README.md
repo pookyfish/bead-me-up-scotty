@@ -39,7 +39,9 @@ surface, role, runtime session, upstream instance/session/external identity,
 provider/model, Beads actor, and explicit Bead cardinality remain separate.
 Display names, channel membership, replies, mentions, roles, and Bead IDs never
 create a binding. Only a complete verified exact binding may attribute a
-message; a missing or mismatched dimension remains unbound.
+message; attributed evidence must repeat the exact `beadsActorId`, and a
+missing or mismatched dimension remains unbound even within the same logical
+session.
 
 The per-channel loop guard begins at `active(0)`. The first five autonomous
 requests remain active; the sixth is allowed only after its pre-MCP decision
@@ -60,7 +62,11 @@ that same artifact.
 Evidence-record classification is limited to `pass`, `fail`, `unsupported`,
 and `unknown`. Delivery/read observations belong only to the message contract
 and require direct evidence. Evidence fields that claim inferred delivery,
-read, work, lease, task, approval, handoff, or identity authority are rejected.
+read, work, lease, task, approval, handoff, or identity authority are rejected,
+including normalized aliases such as `delivery`, `read`, `lease`, `approval`,
+and `handoff` at any nesting depth. Redaction likewise examines neutral-field
+values for credential assignments, absolute paths, raw invocations, and both
+headered and headerless configuration content.
 
 ## Operator stop conditions
 
