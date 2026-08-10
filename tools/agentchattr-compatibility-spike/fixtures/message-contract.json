@@ -9,6 +9,18 @@
     "unknown",
     "unsupported"
   ],
+  "loopGuardContract": {
+    "scope": "per-channel",
+    "initialState": "active(0)",
+    "sixthAutonomousRequest": "allowed-after-recording-paused(6)-before-MCP",
+    "seventhAutonomousRequest": "rejected-before-MCP-and-remains-paused(6)",
+    "onlyReset": "directly-evidenced-authenticated-verified-human-origin",
+    "nonResetOrigins": [
+      "/continue",
+      "agent-origin",
+      "unauthenticated-event"
+    ]
+  },
   "cases": [
     {
       "caseId": "overlap-deduplication",

@@ -42,11 +42,13 @@
     }
   },
   "evidence": [],
-  "resultClassifications": [
+  "evidenceClassifications": [
     "pass",
     "fail",
     "unsupported",
-    "unknown",
+    "unknown"
+  ],
+  "promotionStates": [
     "promotion_pending",
     "reconciliation_conflict"
   ],

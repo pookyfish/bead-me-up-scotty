@@ -16,6 +16,8 @@ export const DELIVERY_VOCABULARY = [
   "unsupported",
 ] as const;
 
+export const EVIDENCE_CLASSIFICATIONS = ["pass", "fail", "unsupported", "unknown"] as const;
+
 export type Classification = "pass" | "fail" | "unsupported" | "unknown";
 
 export type ContractIssue = {
@@ -29,16 +31,6 @@ export type ContractResult = {
 };
 
 type UnknownRecord = Record<string, unknown>;
-
-const prohibitedRawKeys = new Set([
-  "commandLine",
-  "rawCommandLine",
-  "token",
-  "rawToken",
-  "rawConfiguration",
-  "queueContents",
-  "absolutePath",
-]);
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -65,14 +57,88 @@ function result(issues: ContractIssue[]): ContractResult {
   return { classification: "pass", issues };
 }
 
-function containsRawEvidence(value: unknown): boolean {
-  if (Array.isArray(value)) {
-    return value.some(containsRawEvidence);
-  }
-  if (!isRecord(value)) {
-    return false;
-  }
-  return Object.entries(value).some(([key, nested]) => prohibitedRawKeys.has(key) || containsRawEvidence(nested));
+function normalizedKey(key: string): string {
+  return key.replace(/[^a-z0-9]/gi, "").toLowerCase();
+}
+
+function isApprovedArgvTemplate(value: unknown, container: UnknownRecord): boolean {
+  return (
+    string(value) &&
+    /^[a-z0-9_.-]+(?: --[a-z0-9-]+ <(?:data-dir|port|secret)>)+$/i.test(value) &&
+    value.includes("<data-dir>") &&
+    value.includes("<port>") &&
+    value.includes("<secret>") &&
+    string(container.argvHash) &&
+    /^sha256:[a-f0-9]{64}$/i.test(container.argvHash)
+  );
+}
+
+function hasRawCommandEvidence(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(hasRawCommandEvidence);
+  if (!isRecord(value)) return false;
+  return Object.entries(value).some(([key, nested]) => {
+    const normalized = normalizedKey(key);
+    if (normalized === "sanitizedargvtemplate" || normalized === "argvhash") return false;
+    return /(commandline|cmdline|rawcommand|launcharguments|launchparams|processargs|argv|invocation)/.test(normalized) || hasRawCommandEvidence(nested);
+  });
+}
+
+function containsRawSensitiveEvidence(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsRawSensitiveEvidence);
+  if (!isRecord(value)) return false;
+
+  return Object.entries(value).some(([key, nested]) => {
+    const normalized = normalizedKey(key);
+    if (normalized === "sanitizedargvtemplate") {
+      return !isApprovedArgvTemplate(nested, value);
+    }
+    if (normalized === "argvhash") {
+      return !string(nested) || !/^sha256:[a-f0-9]{64}$/i.test(nested) || !isApprovedArgvTemplate(value.sanitizedArgvTemplate, value);
+    }
+    const sensitiveKey =
+      /(commandline|cmdline|rawcommand|launcharguments|launchparams|processargs|argv|invocation)/.test(normalized) ||
+      /(token|secret|credential|password|authorization|apikey|accesskey|authkey)/.test(normalized) ||
+      /(config|settingsdump)/.test(normalized) ||
+      /(queue|pendingmessage|messagepayload)/.test(normalized) ||
+      /(absolutepath|userpath|datadirectory)/.test(normalized);
+    if (sensitiveKey) return true;
+    if (string(nested)) {
+      const sensitiveValue =
+        /(?:^|\s)--(?:token|secret|password)(?:=|\s+)(?!<(?:secret)>)/i.test(nested) ||
+        /\bBearer\s+[A-Za-z0-9._~+/=-]+/i.test(nested) ||
+        /(?:^|[\s"'])(?:[A-Za-z]:\\Users\\|\\\\[^\\]+\\|\/(?:home|users)\/)/i.test(nested) ||
+        /\b[a-z0-9_.-]+\.(?:exe|cmd|bat|ps1|py)\s+(?:--|-|\/)/i.test(nested) ||
+        /\b(?:python|node|pwsh|powershell)\s+[^\r\n]+/i.test(nested) ||
+        /^\s*\[[^\]]+\]\s*[\r\n]+[a-z0-9_.-]+\s*=/i.test(nested);
+      if (sensitiveValue) return true;
+    }
+    return containsRawSensitiveEvidence(nested);
+  });
+}
+
+function containsInferredAuthorityStatus(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsInferredAuthorityStatus);
+  if (!isRecord(value)) return false;
+  return Object.entries(value).some(([key, nested]) => {
+    const normalized = normalizedKey(key);
+    const status = typeof nested === "string" ? nested.toLowerCase().replace(/[\s-]+/g, "_") : nested;
+    if (/(messagestatus|deliverystatus|readstatus|acceptancestatus)/.test(normalized)) {
+      return ["accepted", "queued", "delivered", "read"].includes(String(status));
+    }
+    if (/(workstatus|workstate|workstarted)/.test(normalized)) {
+      return ![false, null, "none", "not_started", "unknown", "unsupported"].includes(status as never);
+    }
+    if (/(leasestatus|leasestate|leaseauthority)/.test(normalized)) {
+      return ![false, null, "none", "unclaimed", "unknown", "unsupported"].includes(status as never);
+    }
+    if (/(taskauthority|taskstatus|assignmentauthority)/.test(normalized)) {
+      return ![false, null, "none", "unassigned", "unknown", "unsupported"].includes(status as never);
+    }
+    if (/(approvalstatus|handoffstatus|identitybindingstatus)/.test(normalized)) {
+      return ![false, null, "none", "unknown", "unsupported"].includes(status as never);
+    }
+    return containsInferredAuthorityStatus(nested);
+  });
 }
 
 function hasExactPin(value: unknown): value is typeof APPROVED_UPSTREAM_PIN {
@@ -173,11 +239,20 @@ export function validateEvidenceManifest(value: unknown): ContractResult {
       if (evidence.teardownState !== "confirmed") {
         issues.push({ code: "teardown_not_confirmed", classification: "unknown" });
       }
+      if (!EVIDENCE_CLASSIFICATIONS.includes(evidence.classification as (typeof EVIDENCE_CLASSIFICATIONS)[number])) {
+        issues.push({ code: "invalid_evidence_classification", classification: "fail" });
+      }
+      if (containsInferredAuthorityStatus(evidence)) {
+        issues.push({ code: "inferred_authority_status", classification: "fail" });
+      }
       if (!Array.isArray(evidence.processRecords) || evidence.processRecords.some((record) => !isRecord(record) || !Number.isInteger(record.pid) || !string(record.executable) || /[\\/]/.test(record.executable) || !hasUtcTimestamp(record.startedAtUtc))) {
         issues.push({ code: "invalid_sanitized_process_record", classification: "fail" });
       }
-      if (containsRawEvidence(evidence)) {
+      if (hasRawCommandEvidence(evidence)) {
         issues.push({ code: "raw_command_line", classification: "fail" });
+      }
+      if (containsRawSensitiveEvidence(evidence)) {
+        issues.push({ code: "raw_sensitive_evidence", classification: "fail" });
       }
     }
   }
@@ -221,10 +296,72 @@ export function validateMessageContract(value: unknown): ContractResult {
   if (value.workState !== "not_started" || value.leaseState !== "none") {
     issues.push({ code: "message_implies_work_or_lease", classification: "fail" });
   }
-  if (typeof value.autonomousAgentMessages === "number" && value.autonomousAgentMessages > 6) {
-    issues.push({ code: "autonomous_send_limit_exceeded", classification: "fail" });
-  }
   return result(issues);
+}
+
+export type LoopGuardState = {
+  channelId: string;
+  phase: "active" | "paused";
+  autonomousCount: number;
+};
+
+export type AutonomousSendDecision = {
+  allowed: boolean;
+  rejectedBeforeMcp: boolean;
+  mcpInvocationAllowed: boolean;
+  recordedBeforeMcp: true;
+  state: LoopGuardState;
+};
+
+export function createLoopGuardState(channelId: string): LoopGuardState {
+  if (!string(channelId)) throw new Error("A loop guard requires a channel ID.");
+  return { channelId, phase: "active", autonomousCount: 0 };
+}
+
+export function requestAutonomousSend(state: LoopGuardState): AutonomousSendDecision {
+  if (state.phase === "paused" || state.autonomousCount >= 6) {
+    return {
+      allowed: false,
+      rejectedBeforeMcp: true,
+      mcpInvocationAllowed: false,
+      recordedBeforeMcp: true,
+      state: { ...state, phase: "paused", autonomousCount: 6 },
+    };
+  }
+
+  const autonomousCount = state.autonomousCount + 1;
+  return {
+    allowed: true,
+    rejectedBeforeMcp: false,
+    mcpInvocationAllowed: true,
+    recordedBeforeMcp: true,
+    state: {
+      ...state,
+      phase: autonomousCount === 6 ? "paused" : "active",
+      autonomousCount,
+    },
+  };
+}
+
+export function recordAuthenticatedHumanOrigin(
+  state: LoopGuardState,
+  evidence: unknown,
+): { reset: boolean; state: LoopGuardState } {
+  if (
+    state.phase !== "paused" ||
+    !isRecord(evidence) ||
+    evidence.origin !== "human" ||
+    evidence.authenticated !== true ||
+    evidence.identityVerified !== true ||
+    evidence.channelId !== state.channelId ||
+    !string(evidence.providerInstanceId) ||
+    !string(evidence.stableMessageUid) ||
+    !hasUtcTimestamp(evidence.observedAtUtc) ||
+    !string(evidence.directUpstreamEvidence)
+  ) {
+    return { reset: false, state };
+  }
+  return { reset: true, state: createLoopGuardState(state.channelId) };
 }
 
 export function validateMessagePages(pages: unknown): ContractResult {
@@ -252,6 +389,38 @@ export function validateMessagePages(pages: unknown): ContractResult {
   return result(issues);
 }
 
+const REQUIRED_BINDING_FIELDS = [
+  "bindingId",
+  "actorId",
+  "logicalSessionId",
+  "providerModel",
+  "executionSurface",
+  "role",
+  "runtimeSessionRef",
+  "upstreamInstanceId",
+  "upstreamSessionId",
+  "senderExternalId",
+  "displayName",
+  "beadsActorId",
+  "boundAtUtc",
+  "boundBy",
+] as const;
+
+function isCompleteVerifiedBinding(binding: UnknownRecord): boolean {
+  return (
+    binding.validity === "verified" &&
+    REQUIRED_BINDING_FIELDS.every((field) => string(binding[field])) &&
+    hasUtcTimestamp(binding.boundAtUtc) &&
+    (!String(binding.executionSurface).includes("herdr") || string(binding.herdrPaneRef))
+  );
+}
+
+function exactStringSet(value: unknown, expected: string[]): boolean {
+  if (!Array.isArray(value) || value.some((entry) => !string(entry))) return false;
+  const actual = [...new Set(value as string[])].sort();
+  return actual.length === expected.length && actual.every((entry, index) => entry === expected[index]);
+}
+
 export function validateIdentityFixture(value: unknown, attributedMessage?: unknown): ContractResult {
   const issues: ContractIssue[] = [];
   if (!isRecord(value) || !Array.isArray(value.bindings) || !Array.isArray(value.sessionBeadLinks)) {
@@ -264,6 +433,9 @@ export function validateIdentityFixture(value: unknown, attributedMessage?: unkn
   for (const binding of bindings) {
     if (string(binding.displayName) && !string(binding.actorId) && !string(binding.senderExternalId) && !string(binding.upstreamInstanceId)) {
       issues.push({ code: "display_name_only_binding", classification: "fail" });
+    }
+    if (binding.validity === "verified" && !isCompleteVerifiedBinding(binding)) {
+      issues.push({ code: "incomplete_verified_binding", classification: "fail" });
     }
   }
 
@@ -301,16 +473,55 @@ export function validateIdentityFixture(value: unknown, attributedMessage?: unkn
   }
 
   if (isRecord(attributedMessage) && attributedMessage.attributed === true) {
-    const candidate = bindings.find(
+    const externalCandidate = bindings.find(
       (binding) =>
         binding.upstreamInstanceId === attributedMessage.providerInstanceId &&
         binding.senderExternalId === attributedMessage.senderExternalId,
     );
-    if (!candidate || candidate.validity !== "verified") {
+    if (!externalCandidate || externalCandidate.validity !== "verified") {
       issues.push({ code: "unverified_binding", classification: "unknown" });
+    }
+    const expectedBeads = value.sessionBeadLinks
+      .filter(isRecord)
+      .filter((link) => link.logicalSessionId === attributedMessage.logicalSessionId && string(link.beadId))
+      .map((link) => link.beadId as string)
+      .filter((beadId, index, all) => all.indexOf(beadId) === index)
+      .sort();
+    const exactCandidate = bindings.find(
+      (binding) =>
+        isCompleteVerifiedBinding(binding) &&
+        binding.upstreamInstanceId === attributedMessage.providerInstanceId &&
+        binding.upstreamSessionId === attributedMessage.upstreamSessionId &&
+        binding.senderExternalId === attributedMessage.senderExternalId &&
+        binding.actorId === attributedMessage.actorId &&
+        binding.logicalSessionId === attributedMessage.logicalSessionId &&
+        binding.providerModel === attributedMessage.providerModel &&
+        binding.executionSurface === attributedMessage.executionSurface &&
+        binding.role === attributedMessage.role &&
+        binding.runtimeSessionRef === attributedMessage.runtimeSessionRef,
+    );
+    if (!exactCandidate || !exactStringSet(attributedMessage.relatedBeadIds, expectedBeads)) {
+      issues.push({ code: "unbound_attributed_message", classification: "unknown" });
     }
   }
   return result(issues);
+}
+
+function matchingPromotionEvidence(
+  promotion: UnknownRecord,
+  evidence: unknown,
+  timestampField: "acknowledgedAtUtc" | "verifiedAtUtc",
+): boolean {
+  return (
+    isRecord(evidence) &&
+    evidence.beadsArtifactId === promotion.beadsArtifactId &&
+    evidence.relatedBeadId === promotion.relatedBeadId &&
+    evidence.scottyDecisionId === promotion.scottyDecisionId &&
+    evidence.idempotencyKey === promotion.idempotencyKey &&
+    evidence.selectedValueChecksum === promotion.selectedValueChecksum &&
+    evidence[timestampField] === promotion[timestampField] &&
+    hasUtcTimestamp(evidence[timestampField])
+  );
 }
 
 export function validatePromotionResult(value: unknown): ContractResult {
@@ -325,8 +536,16 @@ export function validatePromotionResult(value: unknown): ContractResult {
   if (!string(value.idempotencyKey) || !/^agentchattr:[^:]+:[^:]+:[^:]+$/.test(value.idempotencyKey)) {
     issues.push({ code: "invalid_promotion_idempotency_key", classification: "fail" });
   }
-  if (value.result === "durable" && (!hasUtcTimestamp(value.acknowledgedAtUtc) || !hasUtcTimestamp(value.verifiedAtUtc))) {
-    issues.push({ code: "promotion_pending", classification: "unknown" });
+  if (value.result === "durable") {
+    const hasTopLevelTimestamps = hasUtcTimestamp(value.acknowledgedAtUtc) && hasUtcTimestamp(value.verifiedAtUtc);
+    if (!hasTopLevelTimestamps || !isRecord(value.acknowledgement) || !isRecord(value.reconciliation)) {
+      issues.push({ code: "promotion_pending", classification: "unknown" });
+    } else if (
+      !matchingPromotionEvidence(value, value.acknowledgement, "acknowledgedAtUtc") ||
+      !matchingPromotionEvidence(value, value.reconciliation, "verifiedAtUtc")
+    ) {
+      issues.push({ code: "reconciliation_conflict", classification: "fail" });
+    }
   }
   if (Array.isArray(value.attempts) && new Set(value.attempts.filter(string)).size > 1) {
     issues.push({ code: "promotion_retry_created_second_artifact", classification: "fail" });

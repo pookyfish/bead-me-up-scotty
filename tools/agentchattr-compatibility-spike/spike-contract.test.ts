@@ -4,6 +4,9 @@ import identityFixture from "./fixtures/identity-bindings.json";
 import messageFixture from "./fixtures/message-contract.json";
 import {
   APPROVED_UPSTREAM_PIN,
+  createLoopGuardState,
+  recordAuthenticatedHumanOrigin,
+  requestAutonomousSend,
   validateDesktopResults,
   validateEvidenceManifest,
   validateIdentityFixture,
@@ -123,6 +126,32 @@ describe("AgentChattr compatibility spike evidence contract", () => {
     );
   });
 
+  it("rejects alternate-key and embedded raw evidence while accepting the approved sanitized argv pair", () => {
+    const unsafeCases = [
+      { launchArgumentsText: "agentchattr.exe --port 43123 --secret plaintext" },
+      { authCredentialValue: "Bearer secret-value" },
+      { serviceSettingsDump: "[server]\nhost=127.0.0.1\nport=43123" },
+      { pendingMessagePayload: "private queued text" },
+      { evidenceNote: "captured at C:\\Users\\operator\\spike\\config.toml" },
+    ];
+
+    for (const unsafe of unsafeCases) {
+      const manifest = validManifest();
+      Object.assign(manifest.evidence[0], unsafe);
+      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
+        expect.objectContaining({ code: "raw_sensitive_evidence", classification: "fail" }),
+      );
+    }
+
+    const sanitized = validManifest();
+    Object.assign(sanitized.evidence[0].processRecords[0], {
+      sanitizedArgvTemplate:
+        "agentchattr.exe --data-dir <data-dir> --port <port> --secret <secret>",
+      argvHash: `sha256:${"a".repeat(64)}`,
+    });
+    expect(validateEvidenceManifest(sanitized).issues).toEqual([]);
+  });
+
   it("rejects an attributed message without an exact verified binding", () => {
     const fixture = {
       bindings: [
@@ -147,6 +176,43 @@ describe("AgentChattr compatibility spike evidence contract", () => {
 
     expect(validateIdentityFixture(fixture, { ...validMessage(), attributed: true }).issues).toContainEqual(
       expect.objectContaining({ code: "unverified_binding", classification: "unknown" }),
+    );
+  });
+
+  it("rejects attribution through a verified binding missing independently bound dimensions", () => {
+    const fixture = structuredClone(identityFixture);
+    Reflect.deleteProperty(fixture.bindings[0], "providerModel");
+    const attributed = {
+      ...validMessage(),
+      attributed: true,
+      providerInstanceId: "spike-instance-synthetic",
+      senderExternalId: "external-synthetic-a-claude",
+      actorId: "actor-synthetic-a",
+      logicalSessionId: "session-coordination",
+      providerModel: "claude-code",
+      upstreamSessionId: "upstream-session-claude-a",
+      executionSurface: "claude-code-desktop",
+      role: "participant",
+      runtimeSessionRef: "runtime-session-synthetic-a",
+      relatedBeadIds: ["synthetic-review-bead", "synthetic-spike-bead"],
+    };
+
+    const issues = validateIdentityFixture(fixture, attributed).issues;
+    expect(issues).toContainEqual(
+      expect.objectContaining({ code: "incomplete_verified_binding", classification: "fail" }),
+    );
+    expect(issues).toContainEqual(
+      expect.objectContaining({ code: "unbound_attributed_message", classification: "unknown" }),
+    );
+
+    expect(validateIdentityFixture(identityFixture, attributed).issues).toEqual([]);
+    expect(
+      validateIdentityFixture(identityFixture, {
+        ...attributed,
+        relatedBeadIds: ["synthetic-spike-bead"],
+      }).issues,
+    ).toContainEqual(
+      expect.objectContaining({ code: "unbound_attributed_message", classification: "unknown" }),
     );
   });
 
@@ -218,10 +284,54 @@ describe("AgentChattr compatibility spike evidence contract", () => {
     );
   });
 
-  it("rejects a seventh autonomous agent message", () => {
-    expect(validateMessageContract({ ...validMessage(), autonomousAgentMessages: 7 }).issues).toContainEqual(
-      expect.objectContaining({ code: "autonomous_send_limit_exceeded", classification: "fail" }),
-    );
+  it("allows the sixth autonomous send before MCP, rejects the seventh locally, and only resets on verified human proof", () => {
+    let state = createLoopGuardState("channel-disposable");
+    let sixth: ReturnType<typeof requestAutonomousSend> | undefined;
+    for (let index = 0; index < 6; index += 1) {
+      const decision = requestAutonomousSend(state);
+      expect(decision.allowed).toBe(true);
+      state = decision.state;
+      if (index === 5) sixth = decision;
+    }
+    expect(sixth).toMatchObject({
+      allowed: true,
+      rejectedBeforeMcp: false,
+      mcpInvocationAllowed: true,
+      state: { phase: "paused", autonomousCount: 6 },
+    });
+
+    const seventh = requestAutonomousSend(state);
+    expect(seventh).toMatchObject({
+      allowed: false,
+      rejectedBeforeMcp: true,
+      mcpInvocationAllowed: false,
+      state: { phase: "paused", autonomousCount: 6 },
+    });
+
+    const validHumanEvidence = {
+      origin: "human",
+      authenticated: true,
+      identityVerified: true,
+      providerInstanceId: "spike-instance-1",
+      channelId: "channel-disposable",
+      stableMessageUid: "human-message-1",
+      observedAtUtc: "2026-08-10T08:05:00.000Z",
+      directUpstreamEvidence: "sha256:authenticated-human-event",
+    };
+    for (const invalid of [
+      { ...validHumanEvidence, authenticated: false },
+      { ...validHumanEvidence, origin: "agent" },
+      { ...validHumanEvidence, origin: "/continue" },
+    ]) {
+      expect(recordAuthenticatedHumanOrigin(seventh.state, invalid)).toMatchObject({
+        reset: false,
+        state: { phase: "paused", autonomousCount: 6 },
+      });
+    }
+
+    expect(
+      recordAuthenticatedHumanOrigin(seventh.state, validHumanEvidence),
+    ).toMatchObject({ reset: true, state: { phase: "active", autonomousCount: 0 } });
   });
 
   it("rejects a queued mention marked as work or a lease", () => {
@@ -248,6 +358,45 @@ describe("AgentChattr compatibility spike evidence contract", () => {
     expect(validatePromotionResult(promotion).issues).toContainEqual(
       expect.objectContaining({ code: "promotion_pending", classification: "unknown" }),
     );
+  });
+
+  it("rejects durable promotion when acknowledgement or reconciliation identifies another Beads artifact", () => {
+    const promotion = {
+      relatedBeadId: "spike-bead-1",
+      scottyDecisionId: "decision-1",
+      artifactType: "approval",
+      selectedValueChecksum: "sha256:value",
+      idempotencyKey: "agentchattr:spike-instance-1:message-0001:approve",
+      beadsArtifactId: "beads-comment-1",
+      acknowledgedAtUtc: "2026-08-10T08:00:01.000Z",
+      verifiedAtUtc: "2026-08-10T08:00:02.000Z",
+      result: "durable",
+      acknowledgement: {
+        beadsArtifactId: "beads-comment-2",
+        relatedBeadId: "spike-bead-1",
+        scottyDecisionId: "decision-1",
+        idempotencyKey: "agentchattr:spike-instance-1:message-0001:approve",
+        selectedValueChecksum: "sha256:value",
+        acknowledgedAtUtc: "2026-08-10T08:00:01.000Z",
+      },
+      reconciliation: {
+        beadsArtifactId: "beads-comment-1",
+        relatedBeadId: "spike-bead-1",
+        scottyDecisionId: "decision-1",
+        idempotencyKey: "agentchattr:spike-instance-1:message-0001:approve",
+        selectedValueChecksum: "sha256:value",
+        verifiedAtUtc: "2026-08-10T08:00:02.000Z",
+      },
+      attempts: ["beads-comment-1", "beads-comment-1"],
+    };
+
+    expect(validatePromotionResult(promotion).issues).toContainEqual(
+      expect.objectContaining({ code: "reconciliation_conflict", classification: "fail" }),
+    );
+
+    const matching = structuredClone(promotion);
+    matching.acknowledgement.beadsArtifactId = "beads-comment-1";
+    expect(validatePromotionResult(matching).issues).toEqual([]);
   });
 
   it("rejects a retry that creates a second Beads artifact", () => {
@@ -278,5 +427,27 @@ describe("AgentChattr compatibility spike evidence contract", () => {
     expect(validateDesktopResults(results).issues).toContainEqual(
       expect.objectContaining({ code: "desktop_result_inferred", classification: "unknown" }),
     );
+  });
+
+  it("restricts evidence classifications and rejects inferred message, work, lease, and task authority", () => {
+    const invalidClassification = validManifest();
+    invalidClassification.evidence[0].classification = "delivered";
+    expect(validateEvidenceManifest(invalidClassification).issues).toContainEqual(
+      expect.objectContaining({ code: "invalid_evidence_classification", classification: "fail" }),
+    );
+
+    for (const inferred of [
+      { messageStatus: "delivered" },
+      { messageStatus: "read" },
+      { workStatus: "work_started" },
+      { leaseState: "claimed" },
+      { taskAuthority: "assigned" },
+    ]) {
+      const manifest = validManifest();
+      Object.assign(manifest.evidence[0], inferred);
+      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
+        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
+      );
+    }
   });
 });

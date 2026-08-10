@@ -21,7 +21,9 @@ binding without direct evidence.
 - Evidence retains only executable basenames, PID/start time, a sanitized argv
   template with `<data-dir>`, `<port>`, and `<secret>` placeholders, and its
   stable hash. Tokens, raw configuration, queue contents, absolute user paths,
-  and raw command lines must not be committed.
+  and raw command lines must not be committed. Validation is recursive and
+  checks both normalized key names and embedded values; alternate labels do not
+  bypass the boundary.
 
 ## Contract vocabulary
 
@@ -33,16 +35,32 @@ parent/thread linkage, external sender ID, content checksum, and one of:
 evidence. A mention or queued message never indicates work or a lease.
 
 Identity is explicit and many-to-many: actor, logical session, execution
-surface, role, runtime session, upstream instance/external identity, and Beads
-actor remain separate. Display names, channel membership, replies, mentions,
-roles, and Bead IDs never create a binding. Only a verified exact binding may
-attribute a message.
+surface, role, runtime session, upstream instance/session/external identity,
+provider/model, Beads actor, and explicit Bead cardinality remain separate.
+Display names, channel membership, replies, mentions, roles, and Bead IDs never
+create a binding. Only a complete verified exact binding may attribute a
+message; a missing or mismatched dimension remains unbound.
+
+The per-channel loop guard begins at `active(0)`. The first five autonomous
+requests remain active; the sixth is allowed only after its pre-MCP decision
+records `active(5) -> paused(6)`. A seventh request is rejected before MCP and
+remains paused. Only directly evidenced, authenticated, verified human-origin
+activity for that channel resets to `active(0)`; agent text, `/continue`, and
+unauthenticated events do not reset it.
 
 Promotions require a Bead ID, Scotty decision ID, artifact type, selected value
 checksum, canonical `agentchattr:<instance>:<message-uid>:<choice>` idempotency
 key, Beads artifact ID, and acknowledged/verified timestamps. Until that
 matching Beads evidence exists, the result is `promotion_pending` or
-`reconciliation_conflict`, never durable.
+`reconciliation_conflict`, never durable. Both acknowledgement and
+reconciliation must repeat the exact Beads artifact, Bead, decision,
+idempotency key, checksum, and corresponding timestamp; retries converge on
+that same artifact.
+
+Evidence-record classification is limited to `pass`, `fail`, `unsupported`,
+and `unknown`. Delivery/read observations belong only to the message contract
+and require direct evidence. Evidence fields that claim inferred delivery,
+read, work, lease, task, approval, handoff, or identity authority are rejected.
 
 ## Operator stop conditions
 
