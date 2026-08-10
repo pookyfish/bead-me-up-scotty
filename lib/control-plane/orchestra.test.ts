@@ -365,6 +365,36 @@ describe("observeOrchestra", () => {
     }));
   });
 
+  it("keeps a 2001-character raw active-work key fail-closed through continuity", async () => {
+    const result = await observeOrchestra("C:/oversized-key", fakeFs({
+      json: { ...orchestraMixedFixture, active_work: { ["x".repeat(2_001)]: orchestraMixedFixture.active_work["valid-entry"] } },
+    }));
+    expect(result.error?.code).toBe("incomplete_observation");
+    expect(result.data?.activeWork).toHaveProperty("invalid-active-work-1");
+    expect(evaluateSupervisorContinuity({ orchestra: result, herdr: continuityHerdr, now: continuityNow })).toEqual([{
+      code: "supervisor_continuity_unproven", severity: "info", workKey: "invalid-active-work-1", beadId: null, stage: "invalid supervision checkpoint",
+      message: "Supervision checkpoint for invalid-active-work-1 is invalid, so approved-plan continuity cannot be proven. Next action: replace the invalid SUPERVISION-CHECKPOINT/v1 record before supervisor exit",
+      nextAction: "replace the invalid SUPERVISION-CHECKPOINT/v1 record before supervisor exit",
+    }]);
+  });
+
+  it("allocates unique deterministic sentinels without overwriting a safe existing name", async () => {
+    const source = {
+      ...orchestraMixedFixture,
+      active_work: {
+        "invalid-active-work-1": orchestraMixedFixture.active_work["valid-entry"],
+        "bad\u0000one": orchestraMixedFixture.active_work["valid-entry"],
+        ["x".repeat(2_001)]: orchestraMixedFixture.active_work["valid-entry"],
+      },
+    };
+    const fs = fakeFs({ json: source });
+    const first = await observeOrchestra("C:/unique-unsafe", fs);
+    const second = await observeOrchestra("C:/unique-unsafe", fs);
+    expect(Object.keys(first.data?.activeWork ?? {}).sort()).toEqual(["invalid-active-work-1", "invalid-active-work-2", "invalid-active-work-3"]);
+    expect(evaluateSupervisorContinuity({ orchestra: first, herdr: continuityHerdr, now: continuityNow }).filter(({ code }) => code === "supervisor_continuity_unproven").map(({ workKey }) => workKey).sort()).toEqual(["invalid-active-work-2", "invalid-active-work-3"]);
+    expect(second.data?.activeWork).toEqual(first.data?.activeWork);
+  });
+
   it("keeps a control-bearing active-work bead ID fail-closed", async () => {
     const result = await observeOrchestra("C:/unsafe-bead", fakeFs({
       json: { ...orchestraMixedFixture, active_work: { safe: { ...orchestraMixedFixture.active_work["valid-entry"], bead_id: "bad\u0000bead" } } },

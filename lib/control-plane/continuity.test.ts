@@ -123,4 +123,21 @@ describe("supervisor continuity", () => {
     expect(diagnostics).toContainEqual(expect.objectContaining({ code: "supervisor_owner_update_overdue" }));
     expect(diagnostics).not.toContainEqual(expect.objectContaining({ code: "supervisor_continuity_stalled" }));
   });
+
+  it.each(["planning", "correction"] as const)("requires the declared %s phase binding", (phase) => {
+    expect(evaluateSupervisorContinuity({ orchestra: orchestra(checkpointFor(phase)), herdr, now })).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_unproven" }));
+  });
+
+  it("keeps unavailable Herdr evidence unproven", () => {
+    const unavailable = failedObservation("herdr", "managed-session-runtime", "unavailable", "unavailable", "No Herdr", undefined, [], { observedAt: now.toISOString(), freshness: "unknown" });
+    const binding = { source: "herdr" as const, surface: "herdr" as const, sessionId: "worker" };
+    expect(evaluateSupervisorContinuity({ orchestra: orchestra(checkpointFor("implementation", binding)), herdr: unavailable, now })).toContainEqual(expect.objectContaining({ code: "supervisor_continuity_unproven" }));
+  });
+
+  it("accepts a post-handoff new exact working supervisor session", () => {
+    const binding = { source: "herdr" as const, surface: "herdr" as const, sessionId: "new" };
+    const live = herdrWith(session("old", "idle"), session("new", "working"));
+    const later = new Date("2026-08-09T20:35:00.000Z");
+    expect(evaluateSupervisorContinuity({ orchestra: orchestra(checkpointFor("handoff", binding)), herdr: live, now: later }).some(({ code }) => code === "supervisor_continuity_stalled" || code === "supervisor_continuity_unproven")).toBe(false);
+  });
 });

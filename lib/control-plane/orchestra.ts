@@ -152,6 +152,7 @@ function parseArraySection<T>(
 function parseMapSection<T>(
   value: unknown,
   schema: z.ZodType<T>,
+  maxKeyLength: number | null = STRING_LIMIT,
 ): ParsedMapSection<T> {
   if (value === undefined) return { total: 0, rejected: 0, entries: [] };
   if (!isRecord(value)) return { total: 1, rejected: 1, entries: [] };
@@ -160,7 +161,7 @@ function parseMapSection<T>(
   const entries: Array<[string, T]> = [];
   let rejected = 0;
   for (const [key, record] of rawEntries) {
-    if (key.length > STRING_LIMIT) {
+    if (maxKeyLength !== null && key.length > maxKeyLength) {
       rejected += 1;
       continue;
     }
@@ -281,7 +282,7 @@ function parseSnapshot(raw: Record<string, unknown>): {
     }
   }
 
-  const parsedActiveWorkSection = parseMapSection(raw.active_work, rawActiveWorkSchema);
+  const parsedActiveWorkSection = parseMapSection(raw.active_work, rawActiveWorkSchema, null);
   const unsafeActiveWorkEntries = parsedActiveWorkSection.entries.filter(([key, record]) =>
     !safeActiveWorkText(key) || (record.bead_id !== undefined && record.bead_id !== null && !safeActiveWorkText(record.bead_id)),
   );
@@ -299,7 +300,7 @@ function parseSnapshot(raw: Record<string, unknown>): {
     const supervision = unsafe ? { status: "invalid" as const, code: "invalid_checkpoint" as const } : projectSupervision(record.supervision);
     if (supervision?.status === "invalid") invalidCheckpoints += 1;
     return [key, {
-      beadId: safeActiveWorkText(record.bead_id) ? record.bead_id : null,
+      beadId: !unsafe && safeActiveWorkText(record.bead_id) ? record.bead_id : null,
       status: nullable(record.status),
       repo: nullable(record.repo),
       branch: nullable(record.branch),
