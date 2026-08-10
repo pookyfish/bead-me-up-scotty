@@ -479,6 +479,21 @@ describe("AgentChattr compatibility spike evidence contract", () => {
     }
   });
 
+  it("rejects colon-format raw config and drive paths after non-whitespace separators", () => {
+    for (const unsafe of [
+      { note: "host: 127.0.0.1\nport: 43123" },
+      { note: "HOST : 127.0.0.1\nPORT : 43123" },
+      { note: "location=C:\\ProgramData\\AgentChattr\\config.toml" },
+      { nested: { detail: "artifact|c:\\ProgramData\\AgentChattr\\config.toml" } },
+    ]) {
+      const manifest = validManifest();
+      Object.assign(manifest.evidence[0], unsafe);
+      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
+        expect.objectContaining({ code: "raw_sensitive_evidence", classification: "fail" }),
+      );
+    }
+  });
+
   it("restricts evidence classifications and rejects inferred message, work, lease, and task authority", () => {
     const invalidClassification = validManifest();
     invalidClassification.evidence[0].classification = "delivered";
@@ -523,6 +538,28 @@ describe("AgentChattr compatibility spike evidence contract", () => {
     Object.assign(neutral.evidence[0], {
       transport: { delivery: "unknown", read: false },
       authority: { work: "not_started", lease: "none", approval: "unknown", handoff: "unknown" },
+    });
+    expect(validateEvidenceManifest(neutral).issues).toEqual([]);
+  });
+
+  it("rejects delivery receipt and read confirmation families across case and separators", () => {
+    for (const inferred of [
+      { deliveryReceipt: "delivered" },
+      { readConfirmation: true },
+      { nested: { reported_delivery_receipt: "delivered" } },
+      { nested: { "READ-CONFIRMATION": true } },
+      { nested: { transportDeliveryAcknowledgement: "accepted" } },
+    ]) {
+      const manifest = validManifest();
+      Object.assign(manifest.evidence[0], inferred);
+      expect(validateEvidenceManifest(manifest).issues).toContainEqual(
+        expect.objectContaining({ code: "inferred_authority_status", classification: "fail" }),
+      );
+    }
+
+    const neutral = validManifest();
+    Object.assign(neutral.evidence[0], {
+      transport: { deliveryReceipt: "unknown", readConfirmation: false },
     });
     expect(validateEvidenceManifest(neutral).issues).toEqual([]);
   });

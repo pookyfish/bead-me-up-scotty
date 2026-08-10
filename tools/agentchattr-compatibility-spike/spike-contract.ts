@@ -61,6 +61,19 @@ function normalizedKey(key: string): string {
   return key.replace(/[^a-z0-9]/gi, "").toLowerCase();
 }
 
+function authoritySemanticKey(key: string): string {
+  const tokens = key
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean);
+  const prefixes = new Set(["current", "reported", "inferred", "observed", "message", "transport"]);
+  const suffixes = new Set(["state", "status", "flag", "result", "authority"]);
+  while (tokens.length > 0 && prefixes.has(tokens[0])) tokens.shift();
+  while (tokens.length > 0 && suffixes.has(tokens[tokens.length - 1])) tokens.pop();
+  return tokens.join("");
+}
+
 function isApprovedArgvTemplate(value: unknown, container: UnknownRecord): boolean {
   return (
     string(value) &&
@@ -114,12 +127,12 @@ function containsRawSensitiveEvidence(value: unknown): boolean {
         .filter((line) => line.length > 0 && !/^[#;]/.test(line));
       const isHeaderlessConfig =
         nonemptyLines.length >= 2 &&
-        nonemptyLines.every((line) => /^[a-z_][a-z0-9_.-]*\s*=\s*[^=\r\n]+$/i.test(line));
+        nonemptyLines.every((line) => /^[a-z_][a-z0-9_.-]*\s*[:=]\s*[^\r\n]+$/i.test(line));
       const sensitiveValue =
         /(?:^|\s)--(?:token|secret|password)(?:=|\s+)(?!<(?:secret)>)/i.test(nested) ||
         /\b(?:token|secret|password|api[_-]?key|access[_-]?key|auth[_-]?key)\s*[:=]\s*(?!<secret>)[^\s,;}\]]+/i.test(nested) ||
         /\bBearer\s+[A-Za-z0-9._~+/=-]+/i.test(nested) ||
-        /(?:^|[\s"'])(?:[A-Za-z]:\\|\\\\[^\\]+\\|\/(?:home|users|var|opt|etc|tmp)\/)/i.test(nested) ||
+        /(?:[A-Za-z]:\\|\\\\[^\\]+\\|\/(?:home|users|var|opt|etc|tmp)\/)/i.test(nested) ||
         /\b[a-z0-9_.-]+\.(?:exe|cmd|bat|ps1|py)\s+(?:--|-|\/)/i.test(nested) ||
         /\b(?:python|node|pwsh|powershell)\s+[^\r\n]+/i.test(nested) ||
         /^\s*\[[^\]]+\]\s*[\r\n]+[a-z0-9_.-]+\s*=/i.test(nested) ||
@@ -136,12 +149,12 @@ function containsInferredAuthorityStatus(value: unknown): boolean {
   return Object.entries(value).some(([key, nested]) => {
     const normalized = normalizedKey(key);
     const status = typeof nested === "string" ? nested.toLowerCase().replace(/[\s-]+/g, "_") : nested;
-    const semantic = normalized
-      .replace(/^(?:current|reported|inferred|observed|message|transport)+/, "")
-      .replace(/(?:state|status|flag|result|authority)$/, "");
+    const semantic = authoritySemanticKey(key);
     if (
       normalized === "messagestatus" ||
-      ["delivery", "delivered", "read", "readreceipt", "acceptance", "accepted", "queued"].includes(semantic)
+      /^(?:delivery|delivered|read)(?:receipt|confirmation|acknowledgement|evidence|observation)?$/.test(semantic) ||
+      /^(?:receipt|confirmation|acknowledgement)(?:delivery|read)$/.test(semantic) ||
+      ["acceptance", "accepted", "queued"].includes(semantic)
     ) {
       return ![false, null, "none", "unknown", "unsupported", "unobserved", "not_observed"].includes(status as never);
     }
