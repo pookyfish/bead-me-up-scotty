@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "spike": "agentchattr-compatibility",
+  "stage": "1.5",
+  "executionState": "not_run",
+  "upstream": {
+    "repository": "https://github.com/bcurts/agentchattr.git",
+    "commit": "c24f605c9b24fb7a98003f7930e2d5e7a7f7d297",
+    "tag": "v0.5.0",
+    "version": "0.5.0",
+    "licenseSha256": "a1abc583f6725867ed3564f1bcd201d78603612330665433a733a640721f40f3"
+  },
+  "endpoint": {
+    "host": "127.0.0.1",
+    "port": 43123,
+    "state": "candidate_only_not_bound"
+  },
+  "resourceAdmission": {
+    "availablePhysicalMemoryGiB": null,
+    "aggregateWorkingSetPercent": null,
+    "otherResourceHeavyJobActive": null,
+    "runtimeManagerCorrelationToken": null,
+    "admitted": null
+  },
+  "safety": {
+    "lifecycleOwner": "runtime-manager",
+    "wrappersDisabled": null,
+    "triggerQueueConsumerDisabled": null,
+    "terminalInjectionDisabled": null,
+    "autoWakeDisabled": null,
+    "jobsIgnored": null,
+    "persistentRulesUnused": null
+  },
+  "desktopResults": {
+    "claudeCodeDesktop": {
+      "status": "unknown",
+      "observedBy": null
+    },
+    "codexDesktop": {
+      "status": "unknown",
+      "observedBy": null
+    }
+  },
+  "evidence": [],
+  "resultClassifications": [
+    "pass",
+    "fail",
+    "unsupported",
+    "unknown",
+    "promotion_pending",
+    "reconciliation_conflict"
+  ],
+  "provenance": "docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/provenance.md",
+  "notes": "This is a redacted contract template only. No service, runtime registration, Desktop client, or MCP client has been invoked."
+}

@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "bindings": [
+    {
+      "bindingId": "binding-actor-a-claude",
+      "actorId": "actor-synthetic-a",
+      "logicalSessionId": "session-coordination",
+      "providerModel": "claude-code",
+      "executionSurface": "claude-code-desktop",
+      "role": "participant",
+      "runtimeSessionRef": "runtime-session-synthetic-a",
+      "herdrPaneRef": "pane-synthetic-a",
+      "upstreamInstanceId": "spike-instance-synthetic",
+      "senderExternalId": "external-synthetic-a-claude",
+      "displayName": "Synthetic Operator",
+      "beadsActorId": "beads-actor-synthetic-a",
+      "boundAtUtc": "2026-08-10T08:00:00.000Z",
+      "boundBy": "synthetic-operator",
+      "validity": "verified"
+    },
+    {
+      "bindingId": "binding-actor-a-codex",
+      "actorId": "actor-synthetic-a",
+      "logicalSessionId": "session-coordination",
+      "providerModel": "codex",
+      "executionSurface": "codex-desktop",
+      "role": "reviewer",
+      "runtimeSessionRef": "runtime-session-synthetic-b",
+      "upstreamInstanceId": "spike-instance-synthetic",
+      "senderExternalId": "external-synthetic-a-codex",
+      "displayName": "Synthetic Operator",
+      "beadsActorId": "beads-actor-synthetic-a",
+      "boundAtUtc": "2026-08-10T08:00:01.000Z",
+      "boundBy": "synthetic-operator",
+      "validity": "verified"
+    },
+    {
+      "bindingId": "binding-actor-b-reviewer",
+      "actorId": "actor-synthetic-b",
+      "logicalSessionId": "session-coordination",
+      "providerModel": "codex",
+      "executionSurface": "codex-desktop",
+      "role": "reviewer",
+      "runtimeSessionRef": "runtime-session-synthetic-c",
+      "upstreamInstanceId": "spike-instance-synthetic",
+      "senderExternalId": "external-synthetic-b",
+      "displayName": "Synthetic Reviewer",
+      "beadsActorId": "beads-actor-synthetic-b",
+      "boundAtUtc": "2026-08-10T08:00:02.000Z",
+      "boundBy": "synthetic-operator",
+      "validity": "verified"
+    },
+    {
+      "bindingId": "binding-session-unassigned",
+      "actorId": "actor-synthetic-c",
+      "logicalSessionId": "session-unassigned",
+      "providerModel": "claude-code",
+      "executionSurface": "claude-code-desktop",
+      "role": "observer",
+      "runtimeSessionRef": "runtime-session-synthetic-d",
+      "upstreamInstanceId": "spike-instance-synthetic",
+      "senderExternalId": "external-synthetic-c",
+      "displayName": "Synthetic Observer",
+      "beadsActorId": "beads-actor-synthetic-c",
+      "boundAtUtc": "2026-08-10T08:00:03.000Z",
+      "boundBy": "synthetic-operator",
+      "validity": "verified"
+    },
+    {
+      "bindingId": "binding-stale",
+      "actorId": "actor-synthetic-stale",
+      "logicalSessionId": "session-reclaimed",
+      "providerModel": "codex",
+      "executionSurface": "codex-desktop",
+      "role": "participant",
+      "runtimeSessionRef": "runtime-session-stale",
+      "upstreamInstanceId": "spike-instance-prior",
+      "senderExternalId": "external-synthetic-stale",
+      "displayName": "Synthetic Reclaimed Name",
+      "beadsActorId": "beads-actor-synthetic-stale",
+      "boundAtUtc": "2026-08-09T08:00:00.000Z",
+      "boundBy": "synthetic-operator",
+      "validity": "revoked",
+      "revokedAtUtc": "2026-08-10T07:59:00.000Z"
+    },
+    {
+      "bindingId": "binding-unverified",
+      "actorId": "actor-synthetic-unverified",
+      "logicalSessionId": "session-unverified",
+      "providerModel": "claude-code",
+      "executionSurface": "claude-code-desktop",
+      "role": "participant",
+      "runtimeSessionRef": "runtime-session-unverified",
+      "upstreamInstanceId": "spike-instance-synthetic",
+      "senderExternalId": "external-synthetic-unverified",
+      "displayName": "Synthetic Unverified",
+      "beadsActorId": "beads-actor-synthetic-unverified",
+      "boundAtUtc": "2026-08-10T08:00:04.000Z",
+      "boundBy": "synthetic-operator",
+      "validity": "unverified"
+    }
+  ],
+  "sessionBeadLinks": [
+    {
+      "logicalSessionId": "session-coordination",
+      "beadId": "synthetic-spike-bead"
+    },
+    {
+      "logicalSessionId": "session-coordination",
+      "beadId": "synthetic-review-bead"
+    }
+  ]
+}

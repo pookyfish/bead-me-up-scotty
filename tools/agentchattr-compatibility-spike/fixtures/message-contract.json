@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "deliveryVocabulary": [
+    "accepted",
+    "queued",
+    "delivered",
+    "read",
+    "failed",
+    "unknown",
+    "unsupported"
+  ],
+  "cases": [
+    {
+      "caseId": "overlap-deduplication",
+      "providerInstanceId": "spike-instance-synthetic",
+      "channelId": "channel-synthetic",
+      "stableMessageUid": "message-synthetic-001",
+      "cursorId": 101,
+      "parentUid": null,
+      "threadId": null,
+      "senderExternalId": "external-synthetic-a-claude",
+      "delivery": "unknown",
+      "contentChecksum": "sha256:synthetic-content-001",
+      "workState": "not_started",
+      "leaseState": "none",
+      "expected": "Stable UID deduplicates an overlapping cursor page."
+    },
+    {
+      "caseId": "retry-replay",
+      "providerInstanceId": "spike-instance-synthetic",
+      "channelId": "channel-synthetic",
+      "stableMessageUid": "message-synthetic-002",
+      "cursorId": 102,
+      "parentUid": "message-synthetic-001",
+      "threadId": "thread-synthetic-1",
+      "senderExternalId": "external-synthetic-a-codex",
+      "delivery": "unknown",
+      "contentChecksum": "sha256:synthetic-content-002",
+      "workState": "not_started",
+      "leaseState": "none",
+      "expected": "Retry and replay retain the stable UID; cursor remains pagination-only."
+    },
+    {
+      "caseId": "restart-and-tombstone",
+      "providerInstanceId": "spike-instance-synthetic",
+      "channelId": "channel-synthetic",
+      "stableMessageUid": "message-synthetic-003",
+      "cursorId": 103,
+      "parentUid": null,
+      "threadId": null,
+      "senderExternalId": "external-synthetic-b",
+      "delivery": "unknown",
+      "contentChecksum": "sha256:synthetic-content-003",
+      "workState": "not_started",
+      "leaseState": "none",
+      "expected": "Restart and deletion/tombstone semantics are evidence questions, never inferred."
+    },
+    {
+      "caseId": "equal-timestamps-and-queue",
+      "providerInstanceId": "spike-instance-synthetic",
+      "channelId": "channel-synthetic",
+      "stableMessageUid": "message-synthetic-004",
+      "cursorId": 104,
+      "parentUid": null,
+      "threadId": null,
+      "senderExternalId": "external-synthetic-unverified",
+      "delivery": "queued",
+      "directUpstreamEvidence": "sha256:synthetic-queue-acknowledgement",
+      "contentChecksum": "sha256:synthetic-content-004",
+      "workState": "not_started",
+      "leaseState": "none",
+      "expected": "Queued is only a direct message-state observation and never work or a lease."
+    }
+  ]
+}
