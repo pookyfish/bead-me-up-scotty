@@ -69,10 +69,11 @@ No read-only source inspection in this artifact proves all of the following: an 
 
 | Item | Reviewer entry required before executable work |
 | --- | --- |
-| Reviewer identity |  |
-| Approval UTC |  |
-| Pin/current comparison conclusion | **Pending.** |
-| License/MIT obligations conclusion | **Pending.** |
-| Windows direct-server/no-wrapper conclusion | **Pending.** |
-| Approval decision (`approved` / `hold` / `rejected`) | **Pending.** |
-| Current status | **HOLD: provenance captured; independent approval has not occurred; no executable work authorized.** |
+| Reviewer identity | `Avicenna (/root/agentchattr_compat_plan_review)` |
+| Approval UTC | `2026-08-10T07:30:33Z` |
+| Pin/current comparison conclusion | **APPROVED — At review time, default branch `main`, latest tag `v0.5.0`, latest release `v0.5.0`, and the approved tested pin all resolve to `c24f605c9b24fb7a98003f7930e2d5e7a7f7d297`; pinned and current root `VERSION` are `0.5.0`; no revision drift was observed.** |
+| License/MIT obligations conclusion | **APPROVED — Pinned root `LICENSE` SHA-256 is `a1abc583f6725867ed3564f1bcd201d78603612330665433a733a640721f40f3` and contains the MIT License with Copyright (c) 2026 Ben Curtis. This spike authorizes no upstream code/asset copying; later reuse requires separate provenance review, attribution, and preservation of the copyright and permission notice.** |
+| Windows direct-server/no-wrapper conclusion | **APPROVED — The pinned material supports only a narrowed Windows direct-server, loopback-only compatibility trial. AgentChattr launchers, wrapper processes, trigger-queue consumers, terminal/console injection, auto-wake, pane control, and direct agent subprocess launch remain prohibited; any use or detection is a required failure/NO-GO.** |
+| Separate protocol version conclusion | **APPROVED — No separately versioned server/API/MCP protocol declaration was found in the inspected pinned materials. Independent protocol-version evidence is `absent` and must not be inferred from root `VERSION` `0.5.0`.** |
+| Approval decision (`approved` / `hold` / `rejected`) | **approved** |
+| Current status | **APPROVED: provenance independently verified. This authorizes only transition to the plan's remaining execution gates; it does not approve installation, service start, MCP calls, production integration, or authority expansion.** |
