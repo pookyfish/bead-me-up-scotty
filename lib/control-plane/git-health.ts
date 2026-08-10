@@ -66,8 +66,18 @@ export function runGitHealthCommand(
 }
 
 function failureCode(error: unknown, signal: AbortSignal): ObservationError["code"] {
+  const nodeTimedOut =
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    "killed" in error &&
+    "signal" in error &&
+    (error as { code?: unknown }).code === null &&
+    (error as { killed?: unknown }).killed === true &&
+    (error as { signal?: unknown }).signal === "SIGTERM";
   if (
     signal.aborted ||
+    nodeTimedOut ||
     (error instanceof Error && error.name === "AbortError") ||
     (typeof error === "object" && error !== null && "code" in error && (error as { code?: unknown }).code === "ABORT_ERR")
   ) return "timeout";

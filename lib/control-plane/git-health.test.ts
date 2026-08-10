@@ -98,4 +98,36 @@ describe("observeGitHealth", () => {
       },
     });
   });
+
+  it("reports Node's killed SIGTERM timeout as degraded while retaining identity", async () => {
+    const git = fakeGit({ branch: "topic", head: "0123456789ab", dirty: true });
+    const originalRunGit = git.runGit!;
+    git.runGit = async (repo, args, options) => {
+      if (args[0] === "rev-list") {
+        throw Object.assign(new Error("Command failed: git"), {
+          code: null,
+          killed: true,
+          signal: "SIGTERM",
+        });
+      }
+      return originalRunGit(repo, args, options);
+    };
+
+    const result = await observeGitHealth("C:/repo", { runGit: git.runGit });
+
+    expect(result).toMatchObject({
+      capability: "degraded",
+      error: { code: "timeout" },
+      data: {
+        repository: true,
+        branch: "topic",
+        head: "0123456789ab",
+        dirty: true,
+        baseRef: "origin/master",
+        ahead: null,
+        behind: null,
+        unmergedLocalBranchCount: null,
+      },
+    });
+  });
 });
