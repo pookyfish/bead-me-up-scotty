@@ -21,6 +21,8 @@ import {
   sha256Schema,
   teardownSchema,
   transportStateSchema,
+  runtimeActionSchema,
+  runtimeControlActionSchema,
   runtimeObservationSchema,
   withEvidenceBase,
 } from "./evidence-schema";
@@ -510,6 +512,252 @@ function validTraceSummary() {
     },
   };
 }
+
+const eventId = "11111111-1111-4111-8111-111111111111";
+const actionId = "22222222-2222-4222-8222-222222222222";
+const correlationId = "33333333-3333-4333-8333-333333333333";
+const authorizationId = "44444444-4444-4444-8444-444444444444";
+const attemptId = "55555555-5555-4555-8555-555555555555";
+
+function validRuntimeControlAction<T extends Record<string, unknown>>(event: T, sequence = 0) {
+  return {
+    ...validRecord("runtime_control_action"),
+    eventId,
+    actionId,
+    correlationId,
+    idempotencyKey: digest,
+    sequence,
+    runtimeProvider: "herdr",
+    event,
+  };
+}
+
+function validRuntimeControlRequest() {
+  return validRuntimeControlAction({
+    phase: "request",
+    action: "send_text",
+    target: { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" },
+    effectClass: "non_idempotent_mutation",
+    parameterHash: digest,
+    requestState: "recorded",
+    retryPolicy: { mode: "none" },
+    reviewedProviderIdempotencyArtifactHash: digest,
+    durablePromotion: "required",
+    humanIntent: {
+      state: "exact_assignment",
+      assignedActorId: "actor-1",
+      targetHash: digest,
+      evidenceHash: digest,
+    },
+  });
+}
+
+function validRuntimeControlAuthorization() {
+  return validRuntimeControlAction({
+    phase: "authorization",
+    authorizationId,
+    decision: "authorized",
+    authorizingActorId: "actor-1",
+    authorizingSource: "human",
+    scope: {
+      action: "send_text",
+      target: { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" },
+      parameterHash: digest,
+    },
+    validFrom: "2026-08-10T08:00:00.000Z",
+    validUntil: "2026-08-10T08:05:00.000Z",
+    evidenceHash: digest,
+  }, 1);
+}
+
+function validRuntimeControlExecution() {
+  return validRuntimeControlAction({
+    phase: "execution",
+    attemptId,
+    attemptNumber: 1,
+    adapter: "direct_herdr",
+    state: "succeeded",
+    providerOperationId: "operation-1",
+    providerIdempotencyState: "supported",
+    resultArtifactHash: digest,
+  }, 2);
+}
+
+function validRuntimeControlVerification() {
+  return validRuntimeControlAction({
+    phase: "verification",
+    attemptId,
+    state: "verified_applied",
+    evidenceReference: { kind: "runtime_observation", caseId: "runtime-observation-1" },
+  }, 3);
+}
+
+function validRuntimeControlAcknowledgement() {
+  return validRuntimeControlAction({
+    phase: "acknowledgement",
+    attemptId,
+    state: "acknowledged",
+    directAcknowledgementEvidenceHash: digest,
+  }, 4);
+}
+
+function validRuntimeControlReconciliation() {
+  return validRuntimeControlAction({
+    phase: "reconciliation",
+    attemptId,
+    observedDisposition: "not_applied",
+    retryDecision: "retry_authorized",
+    decidingActorId: "actor-1",
+    decidingSource: "human",
+    evidenceHash: digest,
+  }, 5);
+}
+
+describe("append-only Herdr runtime control evidence", () => {
+  it("parses one strict record for every independent lifecycle phase", () => {
+    const records = [
+      validRuntimeControlRequest(),
+      validRuntimeControlAuthorization(),
+      validRuntimeControlExecution(),
+      validRuntimeControlVerification(),
+      validRuntimeControlAcknowledgement(),
+      validRuntimeControlReconciliation(),
+    ];
+
+    for (const record of records) {
+      expect(runtimeControlActionSchema.safeParse(record).success).toBe(true);
+      expect(runtimeControlActionSchema.safeParse({ ...record, event: { ...record.event, unexpected: true } }).success).toBe(false);
+    }
+  });
+
+  it("requires stable UUID identities, lowercase SHA-256 idempotency, and nonnegative sequence", () => {
+    const valid = validRuntimeControlRequest();
+
+    for (const field of ["eventId", "actionId", "correlationId"] as const) {
+      expect(runtimeControlActionSchema.safeParse({ ...valid, [field]: "not-a-uuid" }).success).toBe(false);
+    }
+    expect(runtimeControlActionSchema.safeParse({ ...valid, idempotencyKey: `sha256:${"A".repeat(64)}` }).success).toBe(false);
+    expect(runtimeControlActionSchema.safeParse({ ...valid, sequence: -1 }).success).toBe(false);
+    expect(runtimeControlActionSchema.safeParse({ ...valid, sequence: 1.5 }).success).toBe(false);
+
+    for (const record of [
+      validRuntimeControlExecution(),
+      validRuntimeControlVerification(),
+      validRuntimeControlAcknowledgement(),
+      validRuntimeControlReconciliation(),
+    ]) {
+      expect(runtimeControlActionSchema.safeParse({ ...record, event: { ...record.event, attemptId: "not-a-uuid" } }).success).toBe(false);
+    }
+  });
+
+  it("admits only Herdr and the two approved execution adapters", () => {
+    const execution = validRuntimeControlExecution();
+
+    expect(runtimeControlActionSchema.safeParse({ ...execution, runtimeProvider: "runtime-manager" }).success).toBe(false);
+    expect(runtimeControlActionSchema.safeParse({ ...execution, event: { ...execution.event, adapter: "direct_herdr" } }).success).toBe(true);
+    expect(runtimeControlActionSchema.safeParse({ ...execution, event: { ...execution.event, adapter: "herdr_mesh" } }).success).toBe(true);
+    for (const adapter of ["herdr_telemetry_bridge", "desktop", "runtime_manager"]) {
+      expect(runtimeControlActionSchema.safeParse({ ...execution, event: { ...execution.event, adapter } }).success).toBe(false);
+    }
+  });
+
+  it("maps every primitive action to exactly its approved target class", () => {
+    const targets = {
+      workspace: { targetKind: "workspace", workspaceId: "workspace-1" },
+      agent_session: { targetKind: "agent_session", agentSessionId: "agent-session-1" },
+      pane: { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" },
+      tab: { targetKind: "tab", workspaceId: "workspace-1", tabId: "tab-1" },
+      runtime_manager_project: { targetKind: "runtime_manager_project", projectId: "project-1" },
+    } as const;
+    const mappings = [
+      [["list_agents", "create_tab", "close_workspace"], "workspace"],
+      [["get_agent", "wait_for_agent", "wait_for_output", "stop_session", "delete_session"], "agent_session"],
+      [["read_pane", "relay_message", "send_text", "submit_input", "focus_agent", "rename_agent", "run_command", "send_keys", "split_pane", "close_pane"], "pane"],
+      [["close_tab", "spawn_agent"], "tab"],
+      [["create_workspace"], "runtime_manager_project"],
+    ] as const;
+
+    for (const [actions, targetKind] of mappings) {
+      for (const action of actions) {
+        const record = validRuntimeControlRequest();
+        expect(runtimeControlActionSchema.safeParse({ ...record, event: { ...record.event, action, target: targets[targetKind] } }).success).toBe(true);
+        for (const [otherTargetKind, target] of Object.entries(targets)) {
+          if (otherTargetKind !== targetKind) {
+            expect(runtimeControlActionSchema.safeParse({ ...record, event: { ...record.event, action, target } }).success).toBe(false);
+          }
+        }
+      }
+    }
+
+    expect(runtimeActionSchema.safeParse("handoff").success).toBe(false);
+  });
+
+  it("rejects labels, focus, CWD, and pane numbers as control targets", () => {
+    const request = validRuntimeControlRequest();
+    const invalidTargets = [
+      { targetKind: "pane", displayName: "worker" },
+      { targetKind: "pane", focusedPane: true },
+      { targetKind: "pane", cwd: "project" },
+      { targetKind: "pane", paneNumber: 1 },
+    ];
+
+    for (const target of invalidTargets) {
+      expect(runtimeControlActionSchema.safeParse({ ...request, event: { ...request.event, target } }).success).toBe(false);
+    }
+  });
+
+  it("keeps request, authorization, execution, verification, acknowledgement, and reconciliation states independent", () => {
+    const mutations = [
+      [validRuntimeControlRequest(), { requestState: "authorized" }],
+      [validRuntimeControlAuthorization(), { decision: "started" }],
+      [validRuntimeControlExecution(), { state: "verified_applied" }],
+      [validRuntimeControlVerification(), { state: "acknowledged" }],
+      [validRuntimeControlAcknowledgement(), { state: "retry_authorized" }],
+      [validRuntimeControlReconciliation(), { observedDisposition: "succeeded" }],
+      [validRuntimeControlReconciliation(), { retryDecision: "acknowledged" }],
+    ] as const;
+
+    for (const [record, mutation] of mutations) {
+      expect(runtimeControlActionSchema.safeParse({ ...record, event: { ...record.event, ...mutation } }).success).toBe(false);
+    }
+  });
+
+  it("keeps human intent, authorization scope, verification evidence, and acknowledgement strict", () => {
+    const request = validRuntimeControlRequest();
+    const authorization = validRuntimeControlAuthorization();
+    const verification = validRuntimeControlVerification();
+    const acknowledgement = validRuntimeControlAcknowledgement();
+
+    expect(runtimeControlActionSchema.safeParse({ ...request, event: { ...request.event, humanIntent: { state: "none" } } }).success).toBe(true);
+    expect(runtimeControlActionSchema.safeParse({ ...request, event: { ...request.event, humanIntent: { state: "denied", evidenceHash: digest } } }).success).toBe(true);
+    expect(runtimeControlActionSchema.safeParse({ ...request, event: { ...request.event, humanIntent: { state: "exact_assignment", assignedActorId: "actor-1", targetHash: digest } } }).success).toBe(false);
+    expect(runtimeControlActionSchema.safeParse({ ...authorization, event: { ...authorization.event, scope: { ...authorization.event.scope, unexpected: true } } }).success).toBe(false);
+    expect(runtimeControlActionSchema.safeParse({ ...verification, event: { ...verification.event, evidenceReference: { kind: "artifact", artifactHash: digest } } }).success).toBe(true);
+    expect(runtimeControlActionSchema.safeParse({ ...verification, event: { ...verification.event, evidenceReference: { kind: "runtime_observation", artifactHash: digest } } }).success).toBe(false);
+    expect(runtimeControlActionSchema.safeParse({ ...acknowledgement, event: { ...acknowledgement.event, state: "pending", directAcknowledgementEvidenceHash: digest } }).success).toBe(false);
+    expect(runtimeControlActionSchema.safeParse({ ...acknowledgement, event: { phase: "acknowledgement", attemptId, state: "acknowledged" } }).success).toBe(false);
+  });
+
+  it("does not let runtime coordinates become orchestration or durable identity", () => {
+    const request = validRuntimeControlRequest();
+    const execution = validRuntimeControlExecution();
+    const forbiddenIdentityFields = [
+      "actorId", "modelProvider", "orchestrationRole", "supervisorId", "beadId",
+      "taskAssignmentId", "leaseId", "stableMessageUid",
+    ];
+
+    for (const field of forbiddenIdentityFields) {
+      expect(runtimeControlActionSchema.safeParse({ ...request, [field]: "conflated" }).success).toBe(false);
+      expect(runtimeControlActionSchema.safeParse({ ...request, event: { ...request.event, target: { ...request.event.target, [field]: "conflated" } } }).success).toBe(false);
+      expect(runtimeControlActionSchema.safeParse({ ...execution, event: { ...execution.event, [field]: "conflated" } }).success).toBe(false);
+    }
+
+    expect(runtimeControlActionSchema.safeParse({
+      ...request,
+      extensions: { "x-actor-id": "present", "x-supervisor": digest },
+    }).success).toBe(true);
+  });
+});
 
 function validTeardown() {
   return {

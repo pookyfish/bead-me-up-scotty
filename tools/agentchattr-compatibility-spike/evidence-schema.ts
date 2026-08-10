@@ -560,9 +560,227 @@ export const runtimeObservationSchema = withEvidenceBase("runtime_observation", 
   observation: runtimeObservationPayloadSchema,
 });
 
+export const runtimeActionSchema = z.enum([
+  "list_agents", "get_agent", "read_pane", "wait_for_agent", "wait_for_output",
+  "relay_message", "send_text", "submit_input", "spawn_agent", "focus_agent",
+  "rename_agent", "run_command", "send_keys", "split_pane", "close_pane",
+  "stop_session", "delete_session", "create_tab", "close_tab",
+  "create_workspace", "close_workspace",
+]);
+
+const runtimeWorkspaceTargetSchema = z.strictObject({
+  targetKind: z.literal("workspace"),
+  workspaceId: safeRefSchema,
+});
+const runtimeAgentSessionTargetSchema = z.strictObject({
+  targetKind: z.literal("agent_session"),
+  agentSessionId: safeRefSchema,
+});
+const runtimePaneTargetSchema = z.strictObject({
+  targetKind: z.literal("pane"),
+  workspaceId: safeRefSchema,
+  tabId: safeRefSchema,
+  paneId: safeRefSchema,
+});
+const runtimeTabTargetSchema = z.strictObject({
+  targetKind: z.literal("tab"),
+  workspaceId: safeRefSchema,
+  tabId: safeRefSchema,
+});
+const runtimeManagerProjectTargetSchema = z.strictObject({
+  targetKind: z.literal("runtime_manager_project"),
+  projectId: safeRefSchema,
+});
+
+export const runtimeControlTargetSchema = z.discriminatedUnion("targetKind", [
+  runtimeWorkspaceTargetSchema,
+  runtimeAgentSessionTargetSchema,
+  runtimePaneTargetSchema,
+  runtimeTabTargetSchema,
+  runtimeManagerProjectTargetSchema,
+]);
+
+export const runtimeRetryPolicySchema = z.discriminatedUnion("mode", [
+  z.strictObject({ mode: z.literal("none") }),
+  z.strictObject({ mode: z.literal("bounded"), maxAttempts: z.int().positive() }),
+]);
+
+export const humanIntentSchema = z.discriminatedUnion("state", [
+  z.strictObject({ state: z.literal("none") }),
+  z.strictObject({
+    state: z.literal("exact_assignment"),
+    assignedActorId: safeRefSchema,
+    targetHash: sha256Schema,
+    evidenceHash: sha256Schema,
+  }),
+  z.strictObject({ state: z.literal("denied"), evidenceHash: sha256Schema }),
+]);
+
+const requestEventFields = {
+  phase: z.literal("request"),
+  effectClass: z.enum(["read_only", "idempotent_mutation", "non_idempotent_mutation"]),
+  parameterHash: sha256Schema,
+  requestState: z.enum(["recorded", "rejected", "cancelled"]),
+  retryPolicy: runtimeRetryPolicySchema,
+  reviewedProviderIdempotencyArtifactHash: sha256Schema.optional(),
+  durablePromotion: z.enum(["required", "not_required"]),
+  humanIntent: humanIntentSchema,
+};
+
+export const runtimeControlRequestEventSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    ...requestEventFields,
+    action: z.enum(["list_agents", "create_tab", "close_workspace"]),
+    target: runtimeWorkspaceTargetSchema,
+  }),
+  z.strictObject({
+    ...requestEventFields,
+    action: z.enum(["get_agent", "wait_for_agent", "wait_for_output", "stop_session", "delete_session"]),
+    target: runtimeAgentSessionTargetSchema,
+  }),
+  z.strictObject({
+    ...requestEventFields,
+    action: z.enum([
+      "read_pane", "relay_message", "send_text", "submit_input", "focus_agent",
+      "rename_agent", "run_command", "send_keys", "split_pane", "close_pane",
+    ]),
+    target: runtimePaneTargetSchema,
+  }),
+  z.strictObject({
+    ...requestEventFields,
+    action: z.enum(["close_tab", "spawn_agent"]),
+    target: runtimeTabTargetSchema,
+  }),
+  z.strictObject({
+    ...requestEventFields,
+    action: z.literal("create_workspace"),
+    target: runtimeManagerProjectTargetSchema,
+  }),
+]);
+
+const authorizationScopeFields = { parameterHash: sha256Schema };
+export const runtimeAuthorizationScopeSchema = z.discriminatedUnion("action", [
+  z.strictObject({
+    ...authorizationScopeFields,
+    action: z.enum(["list_agents", "create_tab", "close_workspace"]),
+    target: runtimeWorkspaceTargetSchema,
+  }),
+  z.strictObject({
+    ...authorizationScopeFields,
+    action: z.enum(["get_agent", "wait_for_agent", "wait_for_output", "stop_session", "delete_session"]),
+    target: runtimeAgentSessionTargetSchema,
+  }),
+  z.strictObject({
+    ...authorizationScopeFields,
+    action: z.enum([
+      "read_pane", "relay_message", "send_text", "submit_input", "focus_agent",
+      "rename_agent", "run_command", "send_keys", "split_pane", "close_pane",
+    ]),
+    target: runtimePaneTargetSchema,
+  }),
+  z.strictObject({
+    ...authorizationScopeFields,
+    action: z.enum(["close_tab", "spawn_agent"]),
+    target: runtimeTabTargetSchema,
+  }),
+  z.strictObject({
+    ...authorizationScopeFields,
+    action: z.literal("create_workspace"),
+    target: runtimeManagerProjectTargetSchema,
+  }),
+]);
+
+export const runtimeAuthorizationEventSchema = z.strictObject({
+  phase: z.literal("authorization"),
+  authorizationId: uuidSchema,
+  decision: z.enum(["pending", "authorized", "denied", "expired", "cancelled", "unknown"]),
+  authorizingActorId: safeRefSchema,
+  authorizingSource: z.enum(["human", "scotty_policy", "beads"]),
+  scope: runtimeAuthorizationScopeSchema,
+  validFrom: utcTimestampSchema,
+  validUntil: utcTimestampSchema,
+  evidenceHash: sha256Schema,
+}).refine((event) => event.validFrom < event.validUntil, {
+  message: "Authorization validity interval must be increasing.",
+  path: ["validUntil"],
+});
+
+export const runtimeExecutionEventSchema = z.strictObject({
+  phase: z.literal("execution"),
+  attemptId: uuidSchema,
+  attemptNumber: z.int().positive(),
+  adapter: z.enum(["direct_herdr", "herdr_mesh"]),
+  state: z.enum(["started", "succeeded", "failed", "timed_out", "unknown"]),
+  providerOperationId: safeRefSchema.optional(),
+  providerIdempotencyState: z.enum(["supported", "unsupported", "unknown"]),
+  resultArtifactHash: sha256Schema,
+});
+
+export const runtimeVerificationEvidenceSchema = z.discriminatedUnion("kind", [
+  z.strictObject({ kind: z.literal("runtime_observation"), caseId: caseIdSchema }),
+  z.strictObject({ kind: z.literal("artifact"), artifactHash: sha256Schema }),
+]);
+
+export const runtimeVerificationEventSchema = z.strictObject({
+  phase: z.literal("verification"),
+  attemptId: uuidSchema,
+  state: z.enum(["verified_applied", "verified_not_applied", "mismatched", "timed_out", "unknown", "unsupported"]),
+  evidenceReference: runtimeVerificationEvidenceSchema,
+});
+
+export const runtimeAcknowledgementEventSchema = z.strictObject({
+  phase: z.literal("acknowledgement"),
+  attemptId: uuidSchema,
+  state: z.enum(["not_applicable", "pending", "acknowledged", "timed_out", "unknown", "unsupported"]),
+  directAcknowledgementEvidenceHash: sha256Schema.optional(),
+}).superRefine((event, context) => {
+  const hasDirectEvidence = event.directAcknowledgementEvidenceHash !== undefined;
+  if ((event.state === "acknowledged") !== hasDirectEvidence) {
+    context.addIssue({
+      code: "custom",
+      message: "Direct acknowledgement evidence is required only for acknowledged events.",
+      path: ["directAcknowledgementEvidenceHash"],
+    });
+  }
+});
+
+export const runtimeReconciliationEventSchema = z.strictObject({
+  phase: z.literal("reconciliation"),
+  attemptId: uuidSchema,
+  observedDisposition: z.enum(["applied", "not_applied", "unresolved"]),
+  retryDecision: z.enum(["do_not_retry", "retry_authorized", "unresolved"]),
+  decidingActorId: safeRefSchema,
+  decidingSource: z.enum(["human", "scotty_policy", "beads"]),
+  evidenceHash: sha256Schema,
+});
+
+export const runtimeControlPhaseEventSchema = z.discriminatedUnion("phase", [
+  runtimeControlRequestEventSchema,
+  runtimeAuthorizationEventSchema,
+  runtimeExecutionEventSchema,
+  runtimeVerificationEventSchema,
+  runtimeAcknowledgementEventSchema,
+  runtimeReconciliationEventSchema,
+]);
+
+export const runtimeControlActionSchema = withEvidenceBase("runtime_control_action", {
+  eventId: uuidSchema,
+  actionId: uuidSchema,
+  correlationId: uuidSchema,
+  idempotencyKey: sha256Schema,
+  sequence: z.int().nonnegative(),
+  runtimeProvider: z.literal("herdr"),
+  event: runtimeControlPhaseEventSchema,
+});
+
 export type ConfigurationBoundary = z.infer<typeof configurationBoundarySchema>;
 export type MonitorInterval = z.infer<typeof monitorIntervalSchema>;
 export type Teardown = z.infer<typeof teardownSchema>;
 export type NativeContract = z.infer<typeof nativeContractSchema>;
 export type HerdrTarget = z.infer<typeof herdrTargetSchema>;
 export type RuntimeObservation = z.infer<typeof runtimeObservationSchema>;
+export type RuntimeAction = z.infer<typeof runtimeActionSchema>;
+export type RuntimeControlTarget = z.infer<typeof runtimeControlTargetSchema>;
+export type HumanIntent = z.infer<typeof humanIntentSchema>;
+export type RuntimeControlPhaseEvent = z.infer<typeof runtimeControlPhaseEventSchema>;
+export type RuntimeControlAction = z.infer<typeof runtimeControlActionSchema>;
