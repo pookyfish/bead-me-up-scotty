@@ -150,9 +150,11 @@ function parseConfig(provider: HookProvider, text: string): ParsedConfig {
         continue;
       }
       for (const hook of group.hooks) {
-        if (isRecord(hook) && typeof hook.command === "string") {
-          references.push(parseCommand(provider, event, hook.command));
+        if (!isRecord(hook) || hook.type !== "command" || typeof hook.command !== "string") {
+          malformed = true;
+          continue;
         }
+        references.push(parseCommand(provider, event, hook.command));
       }
     }
   }

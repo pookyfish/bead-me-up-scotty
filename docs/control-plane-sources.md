@@ -63,7 +63,11 @@ The adapter can retain a successfully read health identity with a degraded, null
 Hook coverage reads only project-local `.claude/settings.json` and `.codex/hooks.json`, then reports redacted executable basenames and safe project-relative file references when applicable. It never exposes a raw command, secret, environment value, or absolute external path. Global Codex hook coverage remains explicitly `unknown`.
 
 - `not_configured`: neither project configuration file exists.
-- `parse_error`: a configuration file or hook structure is malformed.
+- `parse_error`: a configuration file contains invalid JSON; its root, hooks
+  container, event group, or group hook container is malformed; or an
+  individual provider hook entry is not a supported `{ type: "command",
+  command: <string> }` reference. Valid peer references are retained and
+  redacted in the degraded observation.
 - `unavailable`: configuration or a referenced file cannot be inspected.
 - `incomplete_observation`: a configured project-local file is missing.
 
@@ -85,11 +89,11 @@ Continuity is a derived diagnostic over current Orchestra `active_work`; it is n
 
 The evaluator produces only these diagnostic codes:
 
-- `supervisor_continuity_stalled` — an `approved_incomplete` checkpoint has passed its transition deadline and the exact required Herdr binding was conclusively observed as not working.
+- `supervisor_continuity_stalled` — an `approved_incomplete` checkpoint has passed its transition deadline and either its phase is `transition`, which declares no execution owner, or the exact Herdr binding required by its non-transition phase was conclusively observed as not working.
 - `supervisor_owner_update_overdue` — an `approved_incomplete` checkpoint has passed its owner-update deadline. This can coexist with live worker evidence.
-- `supervisor_continuity_unproven` — continuity cannot be established from available, exact evidence. This includes unavailable coordination data, invalid checkpoints, missing phase bindings, unavailable or degraded Herdr, an exact Herdr `unknown` status, and every declared non-Herdr surface (Codex collaboration, Desktop, external, or another undeclared source).
+- `supervisor_continuity_unproven` — continuity cannot be established from available, exact evidence. This includes unavailable coordination data and invalid checkpoints. For non-transition phases that require liveness, it also includes a missing binding, any declared non-Herdr surface (Codex collaboration, Desktop, or external), unavailable or degraded Herdr, and an exact Herdr `unknown` status. `transition` does not require liveness evidence and therefore does not become unproven for any of those liveness-only reasons.
 
-Stage 1 can conclusively resolve only an exact `{ source: "herdr", surface: "herdr", session_id }` binding against a complete available Herdr snapshot. Actor identity, provider, display name, pane title, role, or an old session are never substitutes for that exact binding. For `planning` and `handoff` the supervisor binding is required; for `implementation` and `correction` the worker binding is required; for `review` the reviewer binding is required; and `transition` declares no active execution owner. `working` is the sole live Herdr status; `idle`, `blocked`, `done`, and a missing exact session are not-working; `unknown` is unproven.
+Stage 1 can conclusively resolve only an exact `{ source: "herdr", surface: "herdr", session_id }` binding against a complete available Herdr snapshot. Actor identity, provider, display name, pane title, role, or an old session are never substitutes for that exact binding. For `planning` and `handoff` the supervisor binding is required; for `implementation` and `correction` the worker binding is required; for `review` the reviewer binding is required; and `transition` declares no active execution owner. In those binding-requiring phases, `working` is the sole live Herdr status; `idle`, `blocked`, `done`, and a missing exact session are not-working; `unknown` is unproven.
 
 Valid `paused`, `blocked`, and `complete` checkpoints suppress all three continuity codes, even if they retain old deadlines. A missing usable Orchestra projection emits one unproven coordination diagnostic instead of an empty passing result. The evaluator does not invent diagnostics for active work that has no checkpoint.
 
@@ -105,7 +109,7 @@ Coordination observation is unavailable, so supervisor continuity cannot be prov
 
 ## Checkpoint contract
 
-The on-disk checkpoint is the nested snake_case `active_work.<work-key>.supervision` object at `schema_version: 1`; client projection is camelCase. Flat experimental session keys (`supervisor_session_id`, `worker_session_id`, `reviewer_session_id` and their camelCase variants) make the checkpoint invalid rather than being migrated or inferred. Unknown non-legacy fields are ignored and invalid raw values are never serialized.
+The on-disk checkpoint is the nested snake_case `active_work.<work-key>.supervision` object at `schema_version: 1`; client projection is camelCase. Flat experimental session keys (`supervisor_session_id`, `worker_session_id`, `reviewer_session_id` and their camelCase variants) make the checkpoint invalid rather than being migrated or inferred. Binding sources and surfaces are limited to the declared exact pairs; an undeclared source or mismatched pair invalidates the checkpoint and produces the invalid-checkpoint `supervisor_continuity_unproven` diagnostic, rather than being accepted as generic non-Herdr evidence. Unknown non-legacy fields are ignored and invalid raw values are never serialized.
 
 Writers, not Scotty, own checkpoint creation and handoff. They must write only non-secret, control-character-free text; use a normalized project-relative `plan_path` (no drive/UNC/absolute path, backslash, empty/dot/parent segment); and retain the supervisor-declared `next_action` exactly. The action is coordination state, not a Scotty-created task and never automatic dispatch authorization.
 

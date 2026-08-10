@@ -50,22 +50,24 @@ const secretBearingExternalFixture = {
 };
 
 function fakeFiles(files: Record<string, string>): HookCoverageDependencies & {
-  executions(): number;
+  reads(): string[];
 } {
-  let executions = 0;
+  const reads: string[] = [];
   const normalize = (value: string) => value.replace(/\\/g, "/");
   const relative = (value: string) => normalize(value).replace(/^C:\/repo\/?/, "");
 
   return {
     readFile: async (file) => {
-      const content = files[relative(file)];
+      const relativeFile = relative(file);
+      reads.push(relativeFile);
+      const content = files[relativeFile];
       if (content === undefined) {
         throw Object.assign(new Error("Missing fixture file"), { code: "ENOENT" });
       }
       return content;
     },
     now: () => new Date("2026-08-10T01:00:00.000Z"),
-    executions: () => executions,
+    reads: () => [...reads],
   };
 }
 
@@ -84,10 +86,14 @@ describe("observeHookCoverage", () => {
     expect(result.data?.missingConfiguredFiles).toContain(".claude/hooks/actor-stamp.cjs");
   });
 
-  it("does not execute hook code", async () => {
+  it("only reads hook configuration and referenced files", async () => {
     const files = fakeFiles(completeClaudeFixture);
     await observeHookCoverage("C:/repo", files);
-    expect(files.executions()).toBe(0);
+    expect(files.reads()).toEqual([
+      ".claude/settings.json",
+      ".codex/hooks.json",
+      ".claude/hooks/actor-stamp.cjs",
+    ]);
   });
 
   it("inspects Claude and Codex independently", async () => {
@@ -170,6 +176,40 @@ describe("observeHookCoverage", () => {
     expect(result.data?.references).toEqual([expect.objectContaining({
       provider: "claude",
       fileRef: ".claude/hooks/actor-stamp.cjs",
+    })]);
+  });
+
+  it.each([
+    ["claude", ".claude/settings.json", ".claude/hooks/valid.cjs"],
+    ["codex", ".codex/hooks.json", ".codex/hooks/valid.cjs"],
+  ])("degrades malformed %s command entries while retaining valid peers", async (
+    provider,
+    configPath,
+    hookPath,
+  ) => {
+    const result = await observeHookCoverage("C:/repo", fakeFiles({
+      [configPath]: JSON.stringify({
+        hooks: {
+          SessionStart: [{
+            hooks: [
+              { type: "command", command: `node ${hookPath}` },
+              provider === "claude"
+                ? { type: "command" }
+                : { type: "command", command: ["node", hookPath] },
+            ],
+          }],
+        },
+      }),
+      [hookPath]: "process.exit(0)",
+    }));
+
+    expect(result.capability).toBe("degraded");
+    expect(result.error?.code).toBe("parse_error");
+    expect(result.data?.references).toEqual([expect.objectContaining({
+      provider,
+      fileRef: hookPath,
+      fileScope: "project",
+      exists: true,
     })]);
   });
 });
