@@ -979,6 +979,36 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
       classification: "unknown",
       path: "/evidence",
     });
+
+    const postTrialOnly = validManifestV2([
+      runtimeSnapshot("direct_herdr", "after-trial", {
+        startedAt: times.after,
+        observedAt: times.later,
+      }),
+    ], { includeDirectFoundation: false });
+    expect(validateEvidenceManifest(postTrialOnly).issues).toContainEqual({
+      code: "runtime_direct_foundation_missing",
+      classification: "unknown",
+      path: "/evidence",
+    });
+
+    const overlappingIntervals = [
+      { suffix: "strictly-in-trial", startedAt: times.one, observedAt: times.two },
+      { suffix: "configuration-boundary", startedAt: times.before, observedAt: times.start },
+      { suffix: "teardown-boundary", startedAt: times.eight, observedAt: times.after },
+      { suffix: "spanning-trial", startedAt: times.before, observedAt: times.after },
+    ];
+    for (const interval of overlappingIntervals) {
+      const manifest = validManifestV2([
+        runtimeSnapshot("direct_herdr", interval.suffix, {
+          startedAt: interval.startedAt,
+          observedAt: interval.observedAt,
+        }),
+      ], { includeDirectFoundation: false });
+      expect(validateEvidenceManifest(manifest).issues.filter(
+        (issue) => issue.code === "runtime_direct_foundation_missing",
+      )).toEqual([]);
+    }
   });
 
   it("enforces observation adapter, provenance source, and native contract compatibility", () => {
@@ -1310,19 +1340,57 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
         && Reflect.get(record, "origin") === "human");
       if (aliasedReset) aliasedReset.caseId = "loop-reset-aliased-evidence";
       const aliasedProof = deriveProof(aliasedEvidenceManifest, "channel-one");
+      const uidAliasedEvidenceManifest = structuredClone(proofManifest);
+      const uidAliasedMessage = uidAliasedEvidenceManifest.evidence.find((record) => record.kind === "message_observation"
+        && Reflect.get(record, "senderExternalId") === "external-human-one");
+      if (uidAliasedMessage) Reflect.set(uidAliasedMessage, "stableMessageUid", "human-reset-message-aliased");
+      const uidAliasedProof = deriveProof(uidAliasedEvidenceManifest, "channel-one");
       expect(proof).not.toBeNull();
       expect(duplicateProof).not.toBeNull();
       expect(aliasedProof).not.toBeNull();
+      expect(uidAliasedProof).not.toBeNull();
       expect(Reflect.ownKeys(proof as object)).toEqual([]);
       expect(recordAuthenticatedHumanOrigin(state, { ...(proof as object) } as never).reset).toBe(false);
       expect(recordAuthenticatedHumanOrigin(
         { ...state, channelId: "channel-other" },
         proof as never,
       ).reset).toBe(false);
-      expect(recordAuthenticatedHumanOrigin(state, proof as never).reset).toBe(true);
+      const firstReset = recordAuthenticatedHumanOrigin(state, proof as never);
+      expect(firstReset.reset).toBe(true);
       expect(recordAuthenticatedHumanOrigin(state, proof as never).reset).toBe(false);
       expect(recordAuthenticatedHumanOrigin(state, duplicateProof as never).reset).toBe(false);
       expect(recordAuthenticatedHumanOrigin(state, aliasedProof as never).reset).toBe(false);
+      expect(recordAuthenticatedHumanOrigin(state, uidAliasedProof as never).reset).toBe(false);
+
+      let nextEpochState = firstReset.state;
+      for (let index = 0; index < 6; index += 1) {
+        nextEpochState = requestAutonomousSend(nextEpochState).state;
+      }
+      const laterEvidenceManifest = structuredClone(proofManifest);
+      const laterReset = laterEvidenceManifest.evidence.find((record) => record.kind === "loop_guard_transition"
+        && Reflect.get(record, "origin") === "human");
+      if (laterReset) {
+        laterReset.caseId = "loop-reset-later-epoch";
+        laterReset.startedAt = times.five;
+        laterReset.observedAt = times.six;
+        Reflect.set(laterReset, "authenticatedHumanProofHash", hashes.c);
+      }
+      const laterMessage = laterEvidenceManifest.evidence.find((record) => record.kind === "message_observation"
+        && Reflect.get(record, "senderExternalId") === "external-human-one");
+      if (laterMessage) {
+        laterMessage.caseId = "message-human-reset-later-epoch";
+        Reflect.set(laterMessage, "stableMessageUid", "human-reset-message-later-epoch");
+        laterMessage.startedAt = times.five;
+        laterMessage.observedAt = times.six;
+        Reflect.set(laterMessage, "contentChecksum", hashes.d);
+        Reflect.set(laterMessage, "directEvidenceArtifactHash", hashes.c);
+      }
+      const laterProof = deriveProof(laterEvidenceManifest, "channel-one");
+      expect(laterProof).not.toBeNull();
+      expect(recordAuthenticatedHumanOrigin(state, laterProof as never).reset).toBe(false);
+      const laterResetResult = recordAuthenticatedHumanOrigin(nextEpochState, laterProof as never);
+      expect(laterResetResult.reset).toBe(true);
+      expect(recordAuthenticatedHumanOrigin(nextEpochState, laterProof as never).reset).toBe(false);
     }
   });
 

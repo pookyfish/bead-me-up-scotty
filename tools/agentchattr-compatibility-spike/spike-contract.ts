@@ -475,9 +475,8 @@ function validateRuntimeObservations(
     : undefined;
   const relevantEvidence = manifest.evidence.filter((record) => record.kind === "runtime_observation"
     || record.kind === "runtime_control_action");
-  const coverageEnd = [
+  const trialEnd = teardownRecord?.observedAt ?? [
     configuration?.startedAt,
-    teardownRecord?.observedAt,
     ...relevantEvidence.map((record) => record.observedAt),
   ].filter((timestamp): timestamp is string => timestamp !== undefined)
     .reduce<string | undefined>((latest, timestamp) => latest === undefined
@@ -489,9 +488,9 @@ function validateRuntimeObservations(
     && record.classification === "pass"
     && observationHasCompatibleProvenance(record)
     && configuration !== undefined
-    && compareTimestamps(record.startedAt, configuration.startedAt) <= 0
-    && coverageEnd !== undefined
-    && compareTimestamps(record.observedAt, coverageEnd) >= 0);
+    && trialEnd !== undefined
+    && compareTimestamps(record.startedAt, trialEnd) <= 0
+    && compareTimestamps(record.observedAt, configuration.startedAt) >= 0);
   if (manifest.executionState !== "not_run" && !hasExecutedDirectFoundation) {
     addIssue(issues, "runtime_direct_foundation_missing", "unknown", "/evidence");
   }
@@ -1412,6 +1411,7 @@ export type AutonomousSendDecision = {
 type LoopGuardEpochState = {
   epoch: object;
   openedAfter: string | null;
+  closed: boolean;
 };
 
 const loopGuardEpochs = new WeakMap<object, LoopGuardEpochState>();
@@ -1429,6 +1429,7 @@ export function createLoopGuardState(channelId: string): LoopGuardState {
     {
       epoch: Object.freeze({}),
       openedAfter: latestConsumedResetAtByChannel.get(channelId) ?? null,
+      closed: false,
     },
   );
 }
@@ -1437,6 +1438,7 @@ export function requestAutonomousSend(state: LoopGuardState): AutonomousSendDeci
   const epoch = loopGuardEpochs.get(state) ?? {
     epoch: Object.freeze({}),
     openedAfter: latestConsumedResetAtByChannel.get(state.channelId) ?? null,
+    closed: false,
   };
   if (state.phase === "paused" || state.autonomousCount >= 6) {
     return {
@@ -1501,7 +1503,14 @@ export function deriveAuthenticatedHumanOriginProof(
     reset.transition.startedAt,
     reset.transition.observedAt,
     reset.transition.authenticatedHumanProofHash,
-    messageIdentityKey(reset.proofMessage),
+    reset.proofMessage.startedAt,
+    reset.proofMessage.observedAt,
+    reset.proofMessage.providerInstanceId,
+    reset.proofMessage.senderExternalId,
+    reset.proofMessage.contentChecksum,
+    reset.proofMessage.parentUid,
+    reset.proofMessage.threadId,
+    reset.proofMessage.messageState,
     reset.proofMessage.directEvidenceArtifactHash,
   ]);
   let resetEvidence = authenticatedHumanResetEvidence.get(evidenceKey);
@@ -1531,6 +1540,7 @@ export function recordAuthenticatedHumanOrigin(
     || proofState === undefined
     || resetEvidence === undefined
     || loopEpoch === undefined
+    || loopEpoch.closed
     || resetEvidence.consumed
     || resetEvidence.channelId !== state.channelId
     || compareTimestamps(resetEvidence.validFrom, resetEvidence.validUntil) > 0
@@ -1539,6 +1549,7 @@ export function recordAuthenticatedHumanOrigin(
     || (resetEvidence.boundEpoch !== undefined && resetEvidence.boundEpoch !== loopEpoch.epoch)) {
     return { reset: false, state };
   }
+  loopEpoch.closed = true;
   resetEvidence.boundEpoch = loopEpoch.epoch;
   resetEvidence.consumed = true;
   latestConsumedResetAtByChannel.set(state.channelId, resetEvidence.validUntil);
