@@ -12,6 +12,22 @@
     "version": "0.5.0",
     "licenseSha256": "a1abc583f6725867ed3564f1bcd201d78603612330665433a733a640721f40f3"
   },
+  "implementationSource": {
+    "mode": "upstream",
+    "repository": "https://github.com/bcurts/agentchattr.git",
+    "upstreamBaseCommit": "c24f605c9b24fb7a98003f7930e2d5e7a7f7d297",
+    "runtimeCommit": "c24f605c9b24fb7a98003f7930e2d5e7a7f7d297",
+    "patchSha256": null,
+    "licenseSha256": "a1abc583f6725867ed3564f1bcd201d78603612330665433a733a640721f40f3"
+  },
+  "artifactBinding": {
+    "kind": "source_bundle_file_manifest",
+    "artifactSha256": null,
+    "entrypointSha256": null,
+    "interpreterSha256": null,
+    "fileManifestSha256": null,
+    "verificationState": "not_run"
+  },
   "endpoint": {
     "host": "127.0.0.1",
     "port": 43123,

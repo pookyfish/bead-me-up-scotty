@@ -49,6 +49,13 @@ export const safeExtensionsSchema = z
         params: structuralInvalidFieldParams,
       });
     }
+    if (Object.keys(extensions).some((key) => /^x-(?:implementation|artifact)(?:-|$)/.test(key))) {
+      context.addIssue({
+        code: "custom",
+        message: "Implementation provenance and artifact bindings must use their typed manifest fields.",
+        params: structuralInvalidFieldParams,
+      });
+    }
   });
 
 export const provenanceSourceKindSchema = z.enum([
@@ -877,6 +884,66 @@ export const approvedUpstreamPinSchema = z.strictObject({
   licenseSha256: z.literal(APPROVED_UPSTREAM_PIN.licenseSha256),
 });
 
+const gitCommitSchema = z.string().regex(/^[0-9a-f]{40}$/);
+const httpsGitHubRepositorySchema = z.string().url().regex(
+  /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/,
+);
+
+export const implementationSourceSchema = z.discriminatedUnion("mode", [
+  z.strictObject({
+    mode: z.literal("upstream"),
+    repository: z.literal(APPROVED_UPSTREAM_PIN.repository),
+    upstreamBaseCommit: z.literal(APPROVED_UPSTREAM_PIN.commit),
+    runtimeCommit: z.literal(APPROVED_UPSTREAM_PIN.commit),
+    patchSha256: z.null(),
+    licenseSha256: z.literal(APPROVED_UPSTREAM_PIN.licenseSha256),
+  }),
+  z.strictObject({
+    mode: z.literal("compatibility_shim"),
+    repository: httpsGitHubRepositorySchema,
+    upstreamBaseCommit: z.literal(APPROVED_UPSTREAM_PIN.commit),
+    runtimeCommit: gitCommitSchema,
+    patchSha256: sha256Schema,
+    licenseSha256: z.literal(APPROVED_UPSTREAM_PIN.licenseSha256),
+  }).refine((value) => value.repository !== APPROVED_UPSTREAM_PIN.repository, {
+    path: ["repository"],
+    message: "A compatibility shim must identify its fork repository.",
+  }).refine((value) => value.runtimeCommit !== value.upstreamBaseCommit, {
+    path: ["runtimeCommit"],
+    message: "A compatibility shim must identify its distinct runtime commit.",
+  }),
+]);
+
+export const artifactBindingSchema = z.strictObject({
+  kind: z.enum(["wheel", "zipapp", "source_bundle_file_manifest"]),
+  artifactSha256: sha256Schema.nullable(),
+  entrypointSha256: sha256Schema.nullable(),
+  interpreterSha256: sha256Schema.nullable(),
+  fileManifestSha256: sha256Schema.nullable(),
+  verificationState: z.enum(["not_run", "verified", "mismatch", "unknown"]),
+}).superRefine((binding, context) => {
+  if (binding.verificationState === "not_run" || binding.verificationState === "unknown") {
+    return;
+  }
+
+  for (const field of ["artifactSha256", "entrypointSha256", "interpreterSha256"] as const) {
+    if (binding[field] === null) {
+      context.addIssue({
+        code: "custom",
+        message: "Verified or mismatched artifacts require exact digest evidence.",
+        path: [field],
+      });
+    }
+  }
+  if (binding.kind === "source_bundle_file_manifest" && binding.fileManifestSha256 === null) {
+    context.addIssue({
+      code: "custom",
+      message: "Source bundle bindings require an exact file manifest digest.",
+      path: ["fileManifestSha256"],
+    });
+  }
+});
+
 export const endpointBoundarySchema = z.strictObject({
   host: z.literal("127.0.0.1"),
   port: z.int().min(1).max(65_535),
@@ -944,6 +1011,8 @@ export const evidenceManifestV2Schema = z.strictObject({
   runId: safeRefSchema,
   executionState: z.enum(["not_run", "running", "completed", "aborted"]),
   upstream: approvedUpstreamPinSchema,
+  implementationSource: implementationSourceSchema,
+  artifactBinding: artifactBindingSchema,
   endpoint: endpointBoundarySchema,
   resourceAdmission: resourceAdmissionSchema,
   safety: safetyBoundarySchema,
@@ -951,6 +1020,9 @@ export const evidenceManifestV2Schema = z.strictObject({
   extensions: safeExtensionsSchema.optional(),
 }).superRefine((manifest, context) => {
   if (manifest.executionState === "not_run") {
+    if (manifest.artifactBinding.verificationState !== "not_run") {
+      context.addIssue({ code: "custom", message: "A not-run manifest must have an unresolved artifact binding.", path: ["artifactBinding", "verificationState"] });
+    }
     if (manifest.endpoint.state !== "candidate_only_not_bound") {
       context.addIssue({ code: "custom", message: "A not-run endpoint must remain unbound.", path: ["endpoint", "state"] });
     }
@@ -966,6 +1038,11 @@ export const evidenceManifestV2Schema = z.strictObject({
       context.addIssue({ code: "custom", message: "A not-run manifest must have no evidence.", path: ["evidence"] });
     }
     return;
+  }
+
+  if ((manifest.executionState === "running" || manifest.executionState === "completed")
+    && manifest.artifactBinding.verificationState !== "verified") {
+    context.addIssue({ code: "custom", message: "Running or completed execution requires a verified artifact binding.", path: ["artifactBinding", "verificationState"] });
   }
 
   if (manifest.resourceAdmission.measurementState !== "measured") {

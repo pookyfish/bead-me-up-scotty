@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  APPROVED_UPSTREAM_PIN,
   acknowledgementStateSchema,
   beadsPromotionSchema,
   caseIdSchema,
@@ -38,6 +39,42 @@ import committedMessageFixture from "./fixtures/message-contract.json";
 
 const digest = `sha256:${"a".repeat(64)}`;
 
+const upstreamImplementation = {
+  mode: "upstream",
+  repository: "https://github.com/bcurts/agentchattr.git",
+  upstreamBaseCommit: APPROVED_UPSTREAM_PIN.commit,
+  runtimeCommit: APPROVED_UPSTREAM_PIN.commit,
+  patchSha256: null,
+  licenseSha256: APPROVED_UPSTREAM_PIN.licenseSha256,
+};
+
+const shimImplementation = {
+  mode: "compatibility_shim",
+  repository: "https://github.com/pookyfish/agentchattr.git",
+  upstreamBaseCommit: APPROVED_UPSTREAM_PIN.commit,
+  runtimeCommit: "1111111111111111111111111111111111111111",
+  patchSha256: digest,
+  licenseSha256: APPROVED_UPSTREAM_PIN.licenseSha256,
+};
+
+const artifactBinding = {
+  kind: "source_bundle_file_manifest",
+  artifactSha256: null,
+  entrypointSha256: null,
+  interpreterSha256: null,
+  fileManifestSha256: null,
+  verificationState: "not_run",
+};
+
+const verifiedSourceBundleBinding = {
+  kind: "source_bundle_file_manifest",
+  artifactSha256: digest,
+  entrypointSha256: digest,
+  interpreterSha256: digest,
+  fileManifestSha256: digest,
+  verificationState: "verified",
+};
+
 const invalidExtensions = [
   { "x-team-path": "C:/Users/example" },
   { "x-team-url": "https://example.invalid" },
@@ -62,6 +99,10 @@ describe("committed version-2 evidence artifacts", () => {
 
   it("parses the committed manifest without migration fallback", () => {
     expect(parseManifestV2(committedManifest).ok).toBe(true);
+  });
+
+  it("rejects a changed committed template that claims execution", () => {
+    expect(parseManifestV2({ ...committedManifest, executionState: "completed" }).ok).toBe(false);
   });
 
   it("covers independent identity dimensions and zero, one, and multiple Bead relations", () => {
@@ -195,6 +236,8 @@ describe("committed version-2 evidence artifacts", () => {
         version: "0.5.0",
         licenseSha256: "a1abc583f6725867ed3564f1bcd201d78603612330665433a733a640721f40f3",
       },
+      implementationSource: upstreamImplementation,
+      artifactBinding,
       endpoint: { host: "127.0.0.1", port: 43123, state: "candidate_only_not_bound" },
       resourceAdmission: {
         measurementState: "not_run",
@@ -1452,6 +1495,8 @@ function validCompletedManifest() {
     manifestId: "agentchattr-spike-manifest-1",
     runId: "run-1",
     executionState: "completed",
+    implementationSource: upstreamImplementation,
+    artifactBinding: verifiedSourceBundleBinding,
     upstream: {
       repository: "https://github.com/bcurts/agentchattr.git",
       commit: "c24f605c9b24fb7a98003f7930e2d5e7a7f7d297",
@@ -1485,6 +1530,7 @@ function validNotRunManifest() {
     manifestId: "agentchattr-spike-manifest-template",
     runId: "not-run",
     executionState: "not_run",
+    artifactBinding,
     endpoint: { host: "127.0.0.1", port: 43123, state: "candidate_only_not_bound" },
     resourceAdmission: {
       measurementState: "not_run",
@@ -1543,6 +1589,97 @@ function injectUnknownAtPath<T>(value: T, path: ObjectPath): T {
 }
 
 describe("strict version-2 evidence manifest", () => {
+  it("binds an upstream or reviewed compatibility implementation to explicit artifacts", () => {
+    expect(parseManifestV2(validNotRunManifest()).ok).toBe(true);
+    expect(parseManifestV2({
+      ...validCompletedManifest(),
+      implementationSource: shimImplementation,
+    }).ok).toBe(true);
+  });
+
+  it("rejects contradictory implementation provenance and incomplete artifact bindings", () => {
+    const upstreamWithPatch = {
+      ...validNotRunManifest(),
+      implementationSource: { ...upstreamImplementation, patchSha256: digest },
+    };
+    const upstreamWithDivergentCommit = {
+      ...validNotRunManifest(),
+      implementationSource: { ...upstreamImplementation, runtimeCommit: shimImplementation.runtimeCommit },
+    };
+    const invalidShimImplementations = [
+      { ...shimImplementation, repository: APPROVED_UPSTREAM_PIN.repository },
+      { ...shimImplementation, runtimeCommit: APPROVED_UPSTREAM_PIN.commit },
+      { ...shimImplementation, patchSha256: null },
+      { ...shimImplementation, repository: "git@github.com:pookyfish/agentchattr.git" },
+    ];
+    const incompleteBindings = [
+      { ...artifactBinding, artifactSha256: undefined },
+      { ...artifactBinding, entrypointSha256: undefined },
+      { ...artifactBinding, interpreterSha256: undefined },
+      { ...artifactBinding, kind: "opaque_bundle" },
+      { ...artifactBinding, verificationState: "pending" },
+    ];
+
+    for (const implementationSource of [upstreamWithPatch.implementationSource, upstreamWithDivergentCommit.implementationSource, ...invalidShimImplementations]) {
+      expect(parseManifestV2({ ...validNotRunManifest(), implementationSource }).ok).toBe(false);
+    }
+    for (const candidateBinding of incompleteBindings) {
+      expect(parseManifestV2({ ...validNotRunManifest(), artifactBinding: candidateBinding }).ok).toBe(false);
+    }
+    expect(parseManifestV2({
+      ...validNotRunManifest(),
+      extensions: { "x-implementation-source": digest },
+    }).ok).toBe(false);
+  });
+
+  it("requires artifact verification to match the execution lifecycle", () => {
+    expect(parseManifestV2({
+      ...validNotRunManifest(),
+      artifactBinding: verifiedSourceBundleBinding,
+    }).ok).toBe(false);
+    for (const executionState of ["running", "completed"] as const) {
+      const manifest = validCompletedManifest();
+      manifest.executionState = executionState;
+      manifest.endpoint.state = executionState === "running" ? "bound" : "stopped";
+      expect(parseManifestV2({ ...manifest, artifactBinding }).ok).toBe(false);
+    }
+  });
+
+  it("permits unresolved bindings without synthetic digest claims", () => {
+    expect(parseManifestV2(validNotRunManifest()).ok).toBe(true);
+    const completedManifest = validCompletedManifest();
+    const abortedWithUnknownBinding = {
+      ...completedManifest,
+      executionState: "aborted",
+      artifactBinding: { ...artifactBinding, verificationState: "unknown" },
+      evidence: completedManifest.evidence.map((record, index) => index === 0 ? { ...record, classification: "unknown" } : record),
+    };
+
+    expect(parseManifestV2(abortedWithUnknownBinding).ok).toBe(true);
+  });
+
+  it("requires concrete binding evidence before verified or mismatch states", () => {
+    const completedWithoutBindingEvidence = {
+      ...validCompletedManifest(),
+      artifactBinding: { ...artifactBinding, verificationState: "verified" },
+    };
+    const completedManifest = validCompletedManifest();
+    const abortedWithoutMismatchEvidence = {
+      ...completedManifest,
+      executionState: "aborted",
+      artifactBinding: { ...artifactBinding, verificationState: "mismatch" },
+      evidence: completedManifest.evidence.map((record, index) => index === 0 ? { ...record, classification: "unknown" } : record),
+    };
+    const completedWithoutSourceManifest = {
+      ...validCompletedManifest(),
+      artifactBinding: { ...verifiedSourceBundleBinding, fileManifestSha256: null },
+    };
+
+    expect(parseManifestV2(completedWithoutBindingEvidence).ok).toBe(false);
+    expect(parseManifestV2(abortedWithoutMismatchEvidence).ok).toBe(false);
+    expect(parseManifestV2(completedWithoutSourceManifest).ok).toBe(false);
+  });
+
   it("rejects recursive unknown-field mutations across every sampled strict object and union variant", () => {
     const requestTargets = [
       ["list_agents", { targetKind: "workspace", workspaceId: "workspace-1" }],

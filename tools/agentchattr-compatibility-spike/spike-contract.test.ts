@@ -20,6 +20,33 @@ const hashes = {
   f: `sha256:${"f".repeat(64)}`,
 };
 
+const upstreamImplementation = {
+  mode: "upstream",
+  repository: APPROVED_UPSTREAM_PIN.repository,
+  upstreamBaseCommit: APPROVED_UPSTREAM_PIN.commit,
+  runtimeCommit: APPROVED_UPSTREAM_PIN.commit,
+  patchSha256: null,
+  licenseSha256: APPROVED_UPSTREAM_PIN.licenseSha256,
+};
+
+const notRunArtifactBinding = {
+  kind: "source_bundle_file_manifest",
+  artifactSha256: null,
+  entrypointSha256: null,
+  interpreterSha256: null,
+  fileManifestSha256: null,
+  verificationState: "not_run",
+};
+
+const verifiedSourceBundleBinding = {
+  kind: "source_bundle_file_manifest",
+  artifactSha256: hashes.a,
+  entrypointSha256: hashes.b,
+  interpreterSha256: hashes.c,
+  fileManifestSha256: hashes.d,
+  verificationState: "verified",
+};
+
 const times = {
   before: "2026-08-10T07:59:59.000Z",
   start: "2026-08-10T08:00:00.000Z",
@@ -167,6 +194,8 @@ function validManifestV2(
     runId: "contract-run",
     executionState: "completed",
     upstream: { ...APPROVED_UPSTREAM_PIN },
+    implementationSource: { ...upstreamImplementation },
+    artifactBinding: { ...verifiedSourceBundleBinding },
     endpoint: { host: "127.0.0.1", port: 43123, state: "stopped" },
     resourceAdmission: {
       measurementState: "measured",
@@ -205,6 +234,8 @@ function validNotRunManifestV2() {
     runId: "not-run",
     executionState: "not_run",
     upstream: { ...APPROVED_UPSTREAM_PIN },
+    implementationSource: { ...upstreamImplementation },
+    artifactBinding: { ...notRunArtifactBinding },
     endpoint: { host: "127.0.0.1", port: 43123, state: "candidate_only_not_bound" },
     resourceAdmission: {
       measurementState: "not_run",
@@ -441,6 +472,18 @@ function runtimeControlResultObservation(
 describe("typed manifest aggregation and opaque extensions", () => {
   it("accepts the strict empty not-run envelope", () => {
     expect(validateEvidenceManifest(validNotRunManifestV2())).toEqual({ classification: "pass", issues: [] });
+  });
+
+  it("requires concrete source-bundle evidence before a binding becomes verified", () => {
+    const transitionedWithoutEvidence = validNotRunManifestV2();
+    transitionedWithoutEvidence.artifactBinding.verificationState = "verified";
+    expect(validateEvidenceManifest(transitionedWithoutEvidence).classification).toBe("fail");
+
+    const completedWithoutFileManifest = {
+      ...validManifestV2(),
+      artifactBinding: { ...verifiedSourceBundleBinding, fileManifestSha256: null },
+    };
+    expect(validateEvidenceManifest(completedWithoutFileManifest).classification).toBe("fail");
   });
 
   it("aggregates record classifications in fail, unsupported, unknown, pass order", () => {
