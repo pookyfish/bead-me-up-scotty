@@ -113,9 +113,59 @@ all prohibited paths explicitly, monitor the full interval, and complete exact
 teardown evidence. This repository template is deliberately `not_run` and
 executable-free.
 
-Old compatibility-spike Task 2 remains blocked. It may proceed only after a
-fresh independent adversarial review of schema version 2 passes and the
-existing provenance, resource-admission, monitoring, execution, and teardown
-gates are satisfied. Nothing in this migration authorizes AgentChattr, a
-provider, MCP, Desktop, Herdr Telemetry Bridge, Herdr Mesh, or Runtime Manager
-execution.
+## Task 2 configuration-boundary audit
+
+Task 2 began after the independent schema-version-2 review passed. The audit
+used a disposable source checkout of the approved pin only. It performed no
+dependency installation, server start, MCP request, Desktop configuration,
+Herdr control, or Runtime Manager mutation. The committed manifest therefore
+correctly remains the strict `not_run` envelope; measured admission or safety
+evidence would be false before an actual managed run.
+
+The pinned source exposes this sanitized direct-server argv shape:
+
+```yaml
+executable: python
+argv:
+  - run.py
+  - --data-dir
+  - <data-dir>
+  - --port
+  - <port>
+  - --mcp-http-port
+  - <port>
+  - --mcp-sse-port
+  - <port>
+  - --upload-dir
+  - <data-dir>
+```
+
+The token is generated in memory by `run.py`; it is not a command-line value
+and must never be copied into evidence. `--allow-network` is deliberately
+absent. Reproducible Windows pin verification must disable checkout line-ending
+conversion before materializing the pinned files so the working-tree license
+bytes retain the independently approved upstream hash.
+
+| Required boundary | Source/audit result | Task 2 decision |
+| --- | --- | --- |
+| Approved commit, tag, version, and MIT license hash | Exact match after line-ending-safe checkout | satisfied |
+| Quantitative resource and candidate-port preflight | Thresholds passed; candidate loopback port was free | satisfied for preparation only |
+| Named Runtime Manager lifecycle | The installed Runtime Manager uses a deliberately fixed service manifest and exposes no dynamic register/deregister API | unsupported; do not modify production Runtime Manager in this spike |
+| Runtime Manager admission correlation | Starts return a stable operation ID and run load admission, but only for fixed registered services | unavailable for a disposable AgentChattr service |
+| Direct server invocation | `run.py` accepts isolated data, web, MCP, and upload locations | source-supported, not executed |
+| Loopback-only bind | The pinned default is `127.0.0.1`; non-loopback requires the omitted network override and confirmation | source-supported, not executed |
+| Authentication | The pinned server generates an in-memory session token | source-supported, not executed |
+| Launcher and wrapper bypass | Direct `run.py` avoids launcher/wrapper entry points | source-supported, not executed |
+| Trigger consumer, terminal injection, and auto-wake disabled | `run.py` initializes configured agents/router behavior and announces automatic mention triggering; no direct-server disable flag was found | unsupported |
+| Jobs and persistent Rules disabled | `run.py` initializes both stores and exposes them to the app/MCP surface; no disable flag was found | unsupported |
+
+The result is **NO-GO before service execution** under the approved spike
+boundary. Starting the pinned server would require either pretending the fixed
+Runtime Manager owns an unregistered process or accepting auto-trigger and
+Jobs/Rules behavior that the design explicitly prohibits. Neither is allowed.
+The next action is a separately reviewed boundary decision—such as a disposable
+Runtime Manager recipe plus an upstream-supported safe-mode configuration—not
+an installation or launch hidden inside this spike.
+
+Nothing here authorizes AgentChattr, a production provider, MCP, Desktop,
+Herdr Telemetry Bridge, Herdr Mesh, or Runtime Manager execution.
