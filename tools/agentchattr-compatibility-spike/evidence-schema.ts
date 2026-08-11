@@ -39,6 +39,41 @@ export const extensionValueSchema = z.union([
   sha256Schema,
 ]);
 const structuralInvalidFieldParams = { contractStructuralCode: "invalid_field" } as const;
+const reservedTypedExtensionSemantics = new Set([
+  "implementationsource",
+  "implementationmode",
+  "sourcemode",
+  "sourcerepository",
+  "implementationrepository",
+  "upstreambasecommit",
+  "sourcebasecommit",
+  "upstreamcommit",
+  "sourcecommit",
+  "implementationcommit",
+  "runtimecommit",
+  "sourceruntimecommit",
+  "patchsha256",
+  "sourcepatchsha256",
+  "patchdigest",
+  "licensesha256",
+  "sourcelicensesha256",
+  "artifactbinding",
+  "artifactbindingkind",
+  "artifactkind",
+  "artifactsha256",
+  "artifactdigestsha256",
+  "artifactdigest",
+  "entrypointsha256",
+  "interpretersha256",
+  "filemanifestsha256",
+  "verificationstate",
+  "artifactverificationstate",
+]);
+
+function isReservedTypedExtensionSemantic(key: string) {
+  return reservedTypedExtensionSemantics.has(key.slice(2).replaceAll("-", "").toLowerCase());
+}
+
 export const safeExtensionsSchema = z
   .record(extensionKeySchema, extensionValueSchema)
   .superRefine((extensions, context) => {
@@ -49,7 +84,7 @@ export const safeExtensionsSchema = z
         params: structuralInvalidFieldParams,
       });
     }
-    if (Object.keys(extensions).some((key) => /^x-(?:implementation|artifact)(?:-|$)/.test(key))) {
+    if (Object.keys(extensions).some(isReservedTypedExtensionSemantic)) {
       context.addIssue({
         code: "custom",
         message: "Implementation provenance and artifact bindings must use their typed manifest fields.",
@@ -905,7 +940,7 @@ export const implementationSourceSchema = z.discriminatedUnion("mode", [
     runtimeCommit: gitCommitSchema,
     patchSha256: sha256Schema,
     licenseSha256: z.literal(APPROVED_UPSTREAM_PIN.licenseSha256),
-  }).refine((value) => value.repository !== APPROVED_UPSTREAM_PIN.repository, {
+  }).refine((value) => value.repository.toLowerCase() !== APPROVED_UPSTREAM_PIN.repository.toLowerCase(), {
     path: ["repository"],
     message: "A compatibility shim must identify its fork repository.",
   }).refine((value) => value.runtimeCommit !== value.upstreamBaseCommit, {

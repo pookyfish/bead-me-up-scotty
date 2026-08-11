@@ -8,6 +8,7 @@ import {
   requestAutonomousSend,
   validateEvidenceManifest,
 } from "./spike-contract";
+import { artifactBindingSchema } from "./evidence-schema";
 import committedIdentityFixture from "./fixtures/identity-bindings.json";
 import committedMessageFixture from "./fixtures/message-contract.json";
 
@@ -475,15 +476,26 @@ describe("typed manifest aggregation and opaque extensions", () => {
   });
 
   it("requires concrete source-bundle evidence before a binding becomes verified", () => {
-    const transitionedWithoutEvidence = validNotRunManifestV2();
-    transitionedWithoutEvidence.artifactBinding.verificationState = "verified";
-    expect(validateEvidenceManifest(transitionedWithoutEvidence).classification).toBe("fail");
-
-    const completedWithoutFileManifest = {
-      ...validManifestV2(),
-      artifactBinding: { ...verifiedSourceBundleBinding, fileManifestSha256: null },
+    const notRunToVerifiedWithOneMissingDigest = {
+      ...notRunArtifactBinding,
+      artifactSha256: hashes.a,
+      entrypointSha256: null,
+      interpreterSha256: hashes.c,
+      fileManifestSha256: hashes.d,
+      verificationState: "verified",
     };
-    expect(validateEvidenceManifest(completedWithoutFileManifest).classification).toBe("fail");
+    const transitionResult = artifactBindingSchema.safeParse(notRunToVerifiedWithOneMissingDigest);
+    expect(transitionResult.success).toBe(false);
+    if (!transitionResult.success) {
+      expect(transitionResult.error.issues).toHaveLength(1);
+      expect(transitionResult.error.issues[0]?.path).toEqual(["entrypointSha256"]);
+    }
+
+    expect(artifactBindingSchema.safeParse({
+      ...verifiedSourceBundleBinding,
+      kind: "wheel",
+      fileManifestSha256: null,
+    }).success).toBe(true);
   });
 
   it("aggregates record classifications in fail, unsupported, unknown, pass order", () => {

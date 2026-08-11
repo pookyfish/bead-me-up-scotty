@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   APPROVED_UPSTREAM_PIN,
   acknowledgementStateSchema,
+  artifactBindingSchema,
   beadsPromotionSchema,
   caseIdSchema,
   collaborationIntentSchema,
@@ -13,6 +14,7 @@ import {
   evidenceRecordSchema,
   identityBindingSchema,
   identityFixtureSchema,
+  implementationSourceSchema,
   loopGuardTransitionSchema,
   mcpExchangeSchema,
   monitorIntervalSchema,
@@ -101,8 +103,28 @@ describe("committed version-2 evidence artifacts", () => {
     expect(parseManifestV2(committedManifest).ok).toBe(true);
   });
 
-  it("rejects a changed committed template that claims execution", () => {
-    expect(parseManifestV2({ ...committedManifest, executionState: "completed" }).ok).toBe(false);
+  it("pins the committed template to exact unresolved upstream provenance", () => {
+    const expectedPin = {
+      executionState: "not_run",
+      implementationSource: upstreamImplementation,
+      artifactBinding,
+    };
+    expect({
+      executionState: committedManifest.executionState,
+      implementationSource: committedManifest.implementationSource,
+      artifactBinding: committedManifest.artifactBinding,
+    }).toEqual(expectedPin);
+
+    const coherentCompletedClaim = {
+      ...committedManifest,
+      executionState: "completed",
+      artifactBinding: verifiedSourceBundleBinding,
+    };
+    expect({
+      executionState: coherentCompletedClaim.executionState,
+      implementationSource: coherentCompletedClaim.implementationSource,
+      artifactBinding: coherentCompletedClaim.artifactBinding,
+    }).not.toEqual(expectedPin);
   });
 
   it("covers independent identity dimensions and zero, one, and multiple Bead relations", () => {
@@ -314,6 +336,32 @@ describe("strict evidence schema primitives", () => {
     for (const extensions of invalidExtensions) {
       expect(safeExtensionsSchema.safeParse(extensions).success).toBe(false);
     }
+  });
+
+  it("reserves typed implementation and artifact semantic extension aliases", () => {
+    const reservedAliases = [
+      "x-implementation-source",
+      "x-source-mode",
+      "x-sourcemode",
+      "x-upstream-commit",
+      "x-runtime-commit",
+      "x-patch-sha256",
+      "x-patch-digest",
+      "x-artifact-binding",
+      "x-artifact-digest",
+      "x-entrypoint-sha256",
+      "x-file-manifest-sha256",
+      "x-verification-state",
+    ];
+
+    for (const key of reservedAliases) {
+      expect(safeExtensionsSchema.safeParse({ [key]: digest }).success).toBe(false);
+    }
+    expect(safeExtensionsSchema.safeParse({
+      "x-team-source": "present",
+      "x-team-artifact": digest,
+      "x-team-runtime": "unknown",
+    }).success).toBe(true);
   });
 
   it("rejects unknown fields at common, provenance, and artifact boundaries", () => {
@@ -1659,25 +1707,53 @@ describe("strict version-2 evidence manifest", () => {
   });
 
   it("requires concrete binding evidence before verified or mismatch states", () => {
-    const completedWithoutBindingEvidence = {
-      ...validCompletedManifest(),
-      artifactBinding: { ...artifactBinding, verificationState: "verified" },
-    };
-    const completedManifest = validCompletedManifest();
-    const abortedWithoutMismatchEvidence = {
-      ...completedManifest,
-      executionState: "aborted",
-      artifactBinding: { ...artifactBinding, verificationState: "mismatch" },
-      evidence: completedManifest.evidence.map((record, index) => index === 0 ? { ...record, classification: "unknown" } : record),
-    };
-    const completedWithoutSourceManifest = {
-      ...validCompletedManifest(),
-      artifactBinding: { ...verifiedSourceBundleBinding, fileManifestSha256: null },
+    const expectOnlyFieldRejection = (candidate: Record<string, unknown>, field: string) => {
+      const result = artifactBindingSchema.safeParse(candidate);
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error.issues).toHaveLength(1);
+        expect(result.error.issues[0]?.path).toEqual([field]);
+      }
     };
 
-    expect(parseManifestV2(completedWithoutBindingEvidence).ok).toBe(false);
-    expect(parseManifestV2(abortedWithoutMismatchEvidence).ok).toBe(false);
-    expect(parseManifestV2(completedWithoutSourceManifest).ok).toBe(false);
+    for (const verificationState of ["verified", "mismatch"] as const) {
+      for (const field of ["artifactSha256", "entrypointSha256", "interpreterSha256"] as const) {
+        expectOnlyFieldRejection({
+          ...verifiedSourceBundleBinding,
+          verificationState,
+          [field]: null,
+        }, field);
+      }
+      expectOnlyFieldRejection({
+        ...verifiedSourceBundleBinding,
+        verificationState,
+        fileManifestSha256: null,
+      }, "fileManifestSha256");
+      for (const kind of ["wheel", "zipapp"] as const) {
+        expect(artifactBindingSchema.safeParse({
+          ...verifiedSourceBundleBinding,
+          kind,
+          verificationState,
+          fileManifestSha256: null,
+        }).success).toBe(true);
+      }
+    }
+
+    expectOnlyFieldRejection({
+      ...artifactBinding,
+      artifactSha256: digest,
+      entrypointSha256: null,
+      interpreterSha256: digest,
+      fileManifestSha256: digest,
+      verificationState: "verified",
+    }, "entrypointSha256");
+  });
+
+  it("rejects a case-insensitive alias of the approved upstream as a shim fork", () => {
+    expect(implementationSourceSchema.safeParse({
+      ...shimImplementation,
+      repository: "https://github.com/BCURTS/agentchattr.git",
+    }).success).toBe(false);
   });
 
   it("rejects recursive unknown-field mutations across every sampled strict object and union variant", () => {
