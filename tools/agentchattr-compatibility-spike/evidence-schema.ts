@@ -64,7 +64,7 @@ export const provenanceSourceKindSchema = z.enum([
   "operator_observation",
 ]);
 
-export const artifactKindSchema = z.enum([
+const standardArtifactKindSchema = z.enum([
   "source_snapshot",
   "request",
   "response",
@@ -81,6 +81,10 @@ export const artifactKindSchema = z.enum([
   "teardown",
   "synthetic_fixture",
 ]);
+export const artifactKindSchema = z.enum([
+  ...standardArtifactKindSchema.options,
+  "provider_idempotency_review",
+]);
 
 export const evidenceProvenanceSchema = z.strictObject({
   sourceKind: provenanceSourceKindSchema,
@@ -88,10 +92,18 @@ export const evidenceProvenanceSchema = z.strictObject({
   digest: sha256Schema,
 });
 
-export const evidenceArtifactSchema = z.strictObject({
-  kind: artifactKindSchema,
-  digest: sha256Schema,
-});
+export const evidenceArtifactSchema = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: standardArtifactKindSchema,
+    digest: sha256Schema,
+  }),
+  z.strictObject({
+    kind: z.literal("provider_idempotency_review"),
+    digest: sha256Schema,
+    reviewedRequestArtifactHash: sha256Schema,
+    reviewedIdempotencyKey: sha256Schema,
+  }),
+]);
 
 const evidenceBaseFields = {
   caseId: caseIdSchema,
@@ -335,6 +347,8 @@ export const mcpAuthenticationStateSchema = z.enum(["authenticated", "unauthenti
 export const mcpExchangeSchema = withEvidenceBase("mcp_exchange", {
   clientKind: z.enum(["operator_mcp_client", "claude_code_desktop", "codex_desktop"]),
   clientVersion: safeRefSchema,
+  providerInstanceId: safeRefSchema,
+  channelId: safeRefSchema,
   operation: mcpOperationSchema,
   authenticationState: mcpAuthenticationStateSchema,
   requestArtifactHash: sha256Schema,
@@ -586,16 +600,6 @@ export const runtimeObservationPayloadSchema = z.discriminatedUnion("observation
   }),
 ]);
 
-export const runtimeObservationSchema = withEvidenceBase("runtime_observation", {
-  runtimeProvider: z.literal("herdr"),
-  adapter: z.enum(["direct_herdr", "herdr_telemetry_bridge"]),
-  measurementQuality: z.enum(["direct", "derived", "estimated", "unknown"]),
-  freshness: z.enum(["live", "cached", "stale", "unknown"]),
-  nativeContract: nativeContractSchema,
-  nativeEventId: safeRefSchema.nullable(),
-  observation: runtimeObservationPayloadSchema,
-});
-
 export const runtimeActionSchema = z.enum([
   "list_agents", "get_agent", "read_pane", "wait_for_agent", "wait_for_output",
   "relay_message", "send_text", "submit_input", "spawn_agent", "focus_agent",
@@ -635,6 +639,26 @@ export const runtimeControlTargetSchema = z.discriminatedUnion("targetKind", [
   runtimeTabTargetSchema,
   runtimeManagerProjectTargetSchema,
 ]);
+
+export const runtimeControlProofSchema = z.strictObject({
+  actionId: uuidSchema,
+  attemptId: uuidSchema,
+  action: runtimeActionSchema,
+  target: runtimeControlTargetSchema,
+  disposition: z.enum(["applied", "not_applied"]),
+  resultArtifactHash: sha256Schema,
+});
+
+export const runtimeObservationSchema = withEvidenceBase("runtime_observation", {
+  runtimeProvider: z.literal("herdr"),
+  adapter: z.enum(["direct_herdr", "herdr_telemetry_bridge"]),
+  measurementQuality: z.enum(["direct", "derived", "estimated", "unknown"]),
+  freshness: z.enum(["live", "cached", "stale", "unknown"]),
+  nativeContract: nativeContractSchema,
+  nativeEventId: safeRefSchema.nullable(),
+  observation: runtimeObservationPayloadSchema,
+  controlProof: runtimeControlProofSchema.optional(),
+});
 
 export const runtimeRetryPolicySchema = z.discriminatedUnion("mode", [
   z.strictObject({ mode: z.literal("none") }),
@@ -752,15 +776,27 @@ export const runtimeExecutionEventSchema = z.strictObject({
   resultArtifactHash: sha256Schema,
 });
 
+export const runtimeVerificationStateSchema = z.enum([
+  "verified_applied", "verified_not_applied", "mismatched", "timed_out", "unknown", "unsupported",
+]);
+
 export const runtimeVerificationEvidenceSchema = z.discriminatedUnion("kind", [
-  z.strictObject({ kind: z.literal("runtime_observation"), caseId: caseIdSchema }),
+  z.strictObject({
+    kind: z.literal("runtime_observation"),
+    caseId: caseIdSchema,
+    actionId: uuidSchema,
+    attemptId: uuidSchema,
+    action: runtimeActionSchema,
+    target: runtimeControlTargetSchema,
+    claimedState: runtimeVerificationStateSchema,
+  }),
   z.strictObject({ kind: z.literal("artifact"), artifactHash: sha256Schema }),
 ]);
 
 export const runtimeVerificationEventSchema = z.strictObject({
   phase: z.literal("verification"),
   attemptId: uuidSchema,
-  state: z.enum(["verified_applied", "verified_not_applied", "mismatched", "timed_out", "unknown", "unsupported"]),
+  state: runtimeVerificationStateSchema,
   evidenceReference: runtimeVerificationEvidenceSchema,
 });
 

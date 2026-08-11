@@ -149,6 +149,9 @@ function messageReplaySignature(message: MessageObservation) {
   return JSON.stringify([
     messageDurableSignature(message),
     message.messageState,
+    message.collaborationIntent ?? null,
+    message.collaborationSessionId ?? null,
+    message.collaborationSequence ?? null,
   ]);
 }
 
@@ -164,12 +167,19 @@ function validateMessages(
   const seenByUid = new Map<string, MessageObservation[]>();
   const lastCursorByChannel = new Map<string, number>();
   const knownUids = new Set<string>();
+  const restartEpochOpened = new Set<string>();
 
   messages.forEach((message) => {
     const path = evidencePath(manifest, message);
     const channelKey = `${message.providerInstanceId}|${message.channelId}`;
     const uidKey = messageIdentityKey(message);
-    const beginsRestartEpoch = message.observationContext === "post_restart";
+    const previous = seenByUid.get(uidKey) ?? [];
+    const validRestartObservation = previous.length === 0
+      || previous.every((candidate) => messageReplaySignature(candidate) === messageReplaySignature(message));
+    const beginsRestartEpoch = message.observationContext === "post_restart"
+      && !restartEpochOpened.has(channelKey)
+      && validRestartObservation;
+    if (beginsRestartEpoch) restartEpochOpened.add(channelKey);
     const previousCursor = beginsRestartEpoch ? undefined : lastCursorByChannel.get(channelKey);
     if (String(message.cursorId) === message.stableMessageUid) {
       addIssue(issues, "message_cursor_used_as_uid", "fail", `${path}/stableMessageUid`);
@@ -179,7 +189,6 @@ function validateMessages(
     }
     lastCursorByChannel.set(channelKey, Math.max(previousCursor ?? message.cursorId, message.cursorId));
 
-    const previous = seenByUid.get(uidKey) ?? [];
     if (message.observationContext === "tombstone") {
       if (message.messageState !== "deleted") {
         addIssue(issues, "message_tombstone_state_invalid", "fail", `${path}/messageState`);
@@ -439,6 +448,16 @@ function validateRuntimeObservations(
   observations: RuntimeObservation[],
   issues: ContractIssue[],
 ) {
+  const hasExecutedDirectFoundation = observations.some((record) => record.adapter === "direct_herdr"
+    && record.freshness === "live"
+    && record.measurementQuality === "direct"
+    && record.observedResult === "pass"
+    && record.classification === "pass"
+    && observationHasCompatibleProvenance(record));
+  if (manifest.executionState !== "not_run" && !hasExecutedDirectFoundation) {
+    addIssue(issues, "runtime_direct_foundation_missing", "unknown", "/evidence");
+  }
+
   const groups = new Map<string, RuntimeObservation[]>();
   for (const observation of observations) {
     if (!observationHasCompatibleProvenance(observation)) {
@@ -529,18 +548,12 @@ function validateLoopTransitions(
     channelTransitions.push(transition);
     byChannel.set(transition.channelId, channelTransitions);
   }
-  const allAllowedUids = new Set(transitions.flatMap((transition) => transition.origin === "agent"
-    && transition.mcpInvoked
-    && transition.stableMessageUid !== null
-    ? [transition.stableMessageUid]
-    : []));
-  const allHumanResetUids = new Set(transitions.flatMap((transition) => {
-    const proofMessage = humanResetMessage(transition, messages, bindings);
-    return proofMessage === undefined ? [] : [proofMessage.stableMessageUid];
-  }));
   for (const channelTransitions of byChannel.values()) {
     const allowedUids = new Set<string>();
-    const humanResetUids = new Set<string>();
+    const allowedMessages = new Set<MessageObservation>();
+    const allowedExchanges = new Set<McpExchange>();
+    const humanResetMessages = new Set<MessageObservation>();
+    const channelProviderIds = new Set<string>();
     for (const transition of channelTransitions) {
       const transitionPath = evidencePath(manifest, transition);
       if (transition.origin === "agent" && transition.mcpInvoked && transition.stableMessageUid !== null) {
@@ -548,21 +561,30 @@ function validateLoopTransitions(
           addIssue(issues, "loop_message_uid_reused", "fail", `${transitionPath}/stableMessageUid`);
         }
         allowedUids.add(transition.stableMessageUid);
-        const matchingMessage = messages.some((message) => message.channelId === transition.channelId
+        const matchingMessages = messages.filter((message) => message.channelId === transition.channelId
           && message.stableMessageUid === transition.stableMessageUid
           && message.messageState === "present"
           && message.observedResult === "pass"
           && message.classification === "pass");
-        if (!matchingMessage) {
+        const matchingProviderIds = new Set(matchingMessages.map((message) => message.providerInstanceId));
+        const matchingMessage = matchingProviderIds.size === 1 ? matchingMessages[0] : undefined;
+        if (matchingMessage === undefined) {
           addIssue(issues, "loop_message_evidence_missing", "fail", `${transitionPath}/stableMessageUid`);
+        } else {
+          matchingMessages.forEach((message) => allowedMessages.add(message));
+          channelProviderIds.add(matchingMessage.providerInstanceId);
         }
-        const matchingMcp = exchanges.some((exchange) => exchange.operation === "chat_send"
+        const matchingMcp = matchingMessage === undefined ? [] : exchanges.filter((exchange) => exchange.operation === "chat_send"
           && exchange.authenticationState === "authenticated"
           && exchange.observedResult === "pass"
           && exchange.classification === "pass"
+          && exchange.providerInstanceId === matchingMessage.providerInstanceId
+          && exchange.channelId === matchingMessage.channelId
           && exchange.resultingStableMessageUid === transition.stableMessageUid);
-        if (!matchingMcp) {
+        if (matchingMcp.length === 0) {
           addIssue(issues, "loop_mcp_evidence_missing", "fail", `${transitionPath}/stableMessageUid`);
+        } else {
+          matchingMcp.forEach((exchange) => allowedExchanges.add(exchange));
         }
       }
       if (transition.origin === "human") {
@@ -570,7 +592,8 @@ function validateLoopTransitions(
         if (proofMessage === undefined) {
           addIssue(issues, "loop_human_reset_unproven", "fail", `${transitionPath}/authenticatedHumanProofHash`);
         } else {
-          humanResetUids.add(proofMessage.stableMessageUid);
+          humanResetMessages.add(proofMessage);
+          channelProviderIds.add(proofMessage.providerInstanceId);
         }
       }
     }
@@ -598,16 +621,16 @@ function validateLoopTransitions(
       && transition.toState === "paused(6)"
       && !transition.mcpInvoked)) {
       const hasUpstreamMessage = messages.some((message) => message.channelId === rejection.channelId
-        && compareTimestamps(message.observedAt, rejection.observedAt) >= 0
-        && !allowedUids.has(message.stableMessageUid)
-        && !humanResetUids.has(message.stableMessageUid));
-      const hasUpstreamMcp = exchanges.some((exchange) => exchange.operation === "chat_send"
-        && exchange.authenticationState === "authenticated"
-        && exchange.observedResult === "pass"
-        && compareTimestamps(exchange.observedAt, rejection.observedAt) >= 0
-        && exchange.resultingStableMessageUid !== null
-        && !allAllowedUids.has(exchange.resultingStableMessageUid)
-        && !allHumanResetUids.has(exchange.resultingStableMessageUid));
+        && (channelProviderIds.size === 0 || channelProviderIds.has(message.providerInstanceId))
+        && compareTimestamps(message.startedAt, rejection.observedAt) <= 0
+        && compareTimestamps(rejection.startedAt, message.observedAt) <= 0
+        && !allowedMessages.has(message)
+        && !humanResetMessages.has(message));
+      const hasUpstreamMcp = exchanges.some((exchange) => exchange.channelId === rejection.channelId
+        && (channelProviderIds.size === 0 || channelProviderIds.has(exchange.providerInstanceId))
+        && compareTimestamps(exchange.startedAt, rejection.observedAt) <= 0
+        && compareTimestamps(rejection.startedAt, exchange.observedAt) <= 0
+        && !allowedExchanges.has(exchange));
       if (hasUpstreamMessage || hasUpstreamMcp) {
         addIssue(
           issues,
@@ -740,7 +763,7 @@ function validateMonitorAndTeardown(manifest: EvidenceManifestV2, issues: Contra
       const hasStartCoverage = candidates.some((monitor) => compareTimestamps(
         monitor.startedAt,
         configuration.startedAt,
-      ) <= 0);
+      ) <= 0 && compareTimestamps(monitor.observedAt, configuration.startedAt) >= 0);
       const hasCompletedCoverage = teardownRecord === undefined || candidates.some((monitor) => compareTimestamps(
         monitor.startedAt,
         configuration.startedAt,
@@ -825,13 +848,36 @@ function runtimeRequestSignature(record: RuntimeControlAction) {
   ]);
 }
 
-const READ_ONLY_RUNTIME_ACTIONS = new Set([
-  "list_agents",
-  "get_agent",
-  "read_pane",
-  "wait_for_agent",
-  "wait_for_output",
-]);
+type RuntimeRequest = Extract<RuntimeControlAction["event"], { phase: "request" }>;
+type RuntimeEffectClass = RuntimeRequest["effectClass"];
+
+const RUNTIME_ACTION_EFFECT_CLASS = {
+  list_agents: "read_only",
+  get_agent: "read_only",
+  read_pane: "read_only",
+  wait_for_agent: "read_only",
+  wait_for_output: "read_only",
+  relay_message: "non_idempotent_mutation",
+  send_text: "non_idempotent_mutation",
+  submit_input: "non_idempotent_mutation",
+  spawn_agent: "non_idempotent_mutation",
+  focus_agent: "idempotent_mutation",
+  rename_agent: "idempotent_mutation",
+  run_command: "non_idempotent_mutation",
+  send_keys: "non_idempotent_mutation",
+  split_pane: "non_idempotent_mutation",
+  close_pane: "idempotent_mutation",
+  stop_session: "idempotent_mutation",
+  delete_session: "idempotent_mutation",
+  create_tab: "non_idempotent_mutation",
+  close_tab: "idempotent_mutation",
+  create_workspace: "non_idempotent_mutation",
+  close_workspace: "idempotent_mutation",
+} as const satisfies Record<RuntimeRequest["action"], RuntimeEffectClass>;
+
+function runtimeActionIsReadOnly(action: RuntimeRequest["action"]) {
+  return RUNTIME_ACTION_EFFECT_CLASS[action] === "read_only";
+}
 
 function observationMatchesControlTarget(observation: RuntimeObservation, target: RuntimeControlTarget) {
   const payload = observation.observation;
@@ -857,15 +903,63 @@ function observationMatchesControlTarget(observation: RuntimeObservation, target
   return target.targetKind === "agent_session" && payload.agentSessionId === target.agentSessionId;
 }
 
+function observationSemanticallySupportsControlProof(
+  observation: RuntimeObservation,
+  action: RuntimeRequest["action"],
+  disposition: "applied" | "not_applied",
+) {
+  const payload = observation.observation;
+  if (payload.observationKind === "agent_snapshot") {
+    if (disposition === "not_applied") return payload.runtimeState !== "unknown";
+    if (["send_text", "submit_input", "relay_message", "send_keys", "run_command"].includes(action)) {
+      return payload.runtimeState === "working"
+        || payload.runtimeState === "waiting"
+        || payload.runtimeState === "idle";
+    }
+    return payload.runtimeState !== "blocked"
+      && payload.runtimeState !== "disconnected"
+      && payload.runtimeState !== "unknown";
+  }
+  if (payload.observationKind === "trace_summary") return false;
+  if (disposition === "not_applied") return false;
+  const expectedLifecycleEvent: Partial<Record<RuntimeRequest["action"], typeof payload.event>> = {
+    spawn_agent: "session_started",
+    stop_session: "session_stopped",
+    delete_session: "session_stopped",
+    split_pane: "pane_created",
+    close_pane: "pane_closed",
+    create_tab: "tab_created",
+    close_tab: "tab_closed",
+    create_workspace: "workspace_created",
+    close_workspace: "workspace_closed",
+    focus_agent: "session_updated",
+    rename_agent: "session_updated",
+  };
+  return expectedLifecycleEvent[action] === payload.event;
+}
+
 function validRuntimeVerificationObservation(
   manifest: EvidenceManifestV2,
   verification: RuntimeControlAction,
   observation: EvidenceRecord | undefined,
-  target: RuntimeControlTarget,
+  request: RuntimeRequest,
+  execution: (RuntimeControlAction & {
+    event: Extract<RuntimeControlAction["event"], { phase: "execution" }>;
+  }) | undefined,
 ) {
+  if (verification.event.phase !== "verification"
+    || verification.event.evidenceReference.kind !== "runtime_observation") return false;
+  const reference = verification.event.evidenceReference;
+  const expectedDisposition = verification.event.state === "verified_applied"
+    ? "applied"
+    : verification.event.state === "verified_not_applied"
+      ? "not_applied"
+      : undefined;
+  if (expectedDisposition === undefined) return false;
+  const controlProof = observation?.kind === "runtime_observation" ? observation.controlProof : undefined;
   return observation?.kind === "runtime_observation"
     && manifest.evidence.indexOf(observation) > manifest.evidence.indexOf(verification)
-    && compareTimestamps(verification.observedAt, observation.observedAt) <= 0
+    && compareTimestamps(verification.observedAt, observation.observedAt) < 0
     && observation.adapter === "direct_herdr"
     && observation.provenance.sourceKind === "herdr_direct"
     && observation.nativeContract.versionKind === "herdr_protocol"
@@ -873,7 +967,21 @@ function validRuntimeVerificationObservation(
     && observation.freshness === "live"
     && observation.observedResult === "pass"
     && observation.classification === "pass"
-    && observationMatchesControlTarget(observation, target);
+    && reference.actionId === verification.actionId
+    && reference.attemptId === verification.event.attemptId
+    && reference.action === request.action
+    && runtimeTargetSignature(reference.target) === runtimeTargetSignature(request.target)
+    && reference.claimedState === verification.event.state
+    && controlProof !== undefined
+    && controlProof.actionId === verification.actionId
+    && controlProof.attemptId === verification.event.attemptId
+    && controlProof.action === request.action
+    && runtimeTargetSignature(controlProof.target) === runtimeTargetSignature(request.target)
+    && controlProof.disposition === expectedDisposition
+    && execution !== undefined
+    && controlProof.resultArtifactHash === execution.event.resultArtifactHash
+    && observationMatchesControlTarget(observation, request.target)
+    && observationSemanticallySupportsControlProof(observation, request.action, expectedDisposition);
 }
 
 function validateRuntimeActionGroup(
@@ -916,12 +1024,17 @@ function validateRuntimeActionGroup(
   if (requestRecord.event.phase !== "request") return;
   const request = requestRecord.event;
   const requestPath = evidencePath(manifest, requestRecord);
-  const actionIsReadOnly = READ_ONLY_RUNTIME_ACTIONS.has(request.action);
-  if (actionIsReadOnly !== (request.effectClass === "read_only")) {
+  if (request.effectClass !== RUNTIME_ACTION_EFFECT_CLASS[request.action]) {
     addIssue(issues, "runtime_effect_class_mismatch", "fail", `${requestPath}/event/effectClass`);
   }
-  const declaredProviderIdempotencyArtifact = request.reviewedProviderIdempotencyArtifactHash !== undefined
-    && requestRecord.artifacts.some((artifact) => artifact.digest === request.reviewedProviderIdempotencyArtifactHash);
+  const providerIdempotencyReview = request.reviewedProviderIdempotencyArtifactHash === undefined
+    ? undefined
+    : requestRecord.artifacts.find((artifact) => artifact.kind === "provider_idempotency_review"
+      && artifact.digest === request.reviewedProviderIdempotencyArtifactHash
+      && artifact.reviewedIdempotencyKey === requestRecord.idempotencyKey
+      && requestRecord.artifacts.some((requestArtifact) => requestArtifact.kind === "request"
+        && requestArtifact.digest === artifact.reviewedRequestArtifactHash));
+  const declaredProviderIdempotencyArtifact = providerIdempotencyReview !== undefined;
   if (request.reviewedProviderIdempotencyArtifactHash !== undefined && !declaredProviderIdempotencyArtifact) {
     addIssue(
       issues,
@@ -971,7 +1084,8 @@ function validateRuntimeActionGroup(
       manifest,
       record,
       caseIndex.get(evidenceReference.caseId),
-      request.target,
+      request,
+      executionByAttempt.get(record.event.attemptId),
     )) {
       addIssue(issues, "runtime_verification_evidence_invalid", "fail", verificationPath);
     }
@@ -1047,7 +1161,7 @@ function validateRuntimeRetries(
   for (let index = 1; index < executions.length; index += 1) {
     const previous = executions[index - 1];
     const current = executions[index];
-    if (READ_ONLY_RUNTIME_ACTIONS.has(request.action)) continue;
+    if (runtimeActionIsReadOnly(request.action)) continue;
 
     const between = records.filter((record) => record.sequence > previous.sequence
       && record.sequence < current.sequence);
@@ -1271,12 +1385,16 @@ export function requestAutonomousSend(state: LoopGuardState): AutonomousSendDeci
   };
 }
 
-const authenticatedHumanOriginProofBrand: unique symbol = Symbol("authenticated-human-origin-proof");
+export type AuthenticatedHumanOriginProof = Readonly<Record<string, never>>;
 
-export type AuthenticatedHumanOriginProof = {
-  readonly channelId: string;
-  readonly [authenticatedHumanOriginProofBrand]: true;
+type AuthenticatedHumanOriginProofState = {
+  channelId: string;
+  validFrom: string;
+  validUntil: string;
+  consumed: boolean;
 };
+
+const authenticatedHumanOriginProofs = new WeakMap<object, AuthenticatedHumanOriginProofState>();
 
 export function deriveAuthenticatedHumanOriginProof(
   value: unknown,
@@ -1292,18 +1410,29 @@ export function deriveAuthenticatedHumanOriginProof(
     && transition.toState === "active(0)"
     && humanResetMessage(transition, messages, bindings) !== undefined);
   if (reset === undefined) return null;
-  return Object.freeze({ channelId, [authenticatedHumanOriginProofBrand]: true as const });
+  const proof = Object.freeze({}) as AuthenticatedHumanOriginProof;
+  authenticatedHumanOriginProofs.set(proof, {
+    channelId,
+    validFrom: reset.startedAt,
+    validUntil: reset.observedAt,
+    consumed: false,
+  });
+  return proof;
 }
 
 export function recordAuthenticatedHumanOrigin(
   state: LoopGuardState,
   proof: AuthenticatedHumanOriginProof | null,
 ): { reset: boolean; state: LoopGuardState } {
+  const proofState = proof === null ? undefined : authenticatedHumanOriginProofs.get(proof);
   if (state.phase !== "paused"
     || proof === null
-    || proof[authenticatedHumanOriginProofBrand] !== true
-    || proof.channelId !== state.channelId) {
+    || proofState === undefined
+    || proofState.consumed
+    || proofState.channelId !== state.channelId
+    || compareTimestamps(proofState.validFrom, proofState.validUntil) > 0) {
     return { reset: false, state };
   }
+  proofState.consumed = true;
   return { reset: true, state: createLoopGuardState(state.channelId) };
 }

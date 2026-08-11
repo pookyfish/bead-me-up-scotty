@@ -279,6 +279,23 @@ describe("strict evidence schema primitives", () => {
     expect(evidenceArtifactSchema.safeParse({ ...validEvidence().artifacts[0], unexpected: true }).success).toBe(false);
   });
 
+  it("models provider idempotency review as a separately typed, request-bound artifact", () => {
+    const review = {
+      kind: "provider_idempotency_review",
+      digest,
+      reviewedRequestArtifactHash: `sha256:${"b".repeat(64)}`,
+      reviewedIdempotencyKey: `sha256:${"c".repeat(64)}`,
+    };
+    expect(evidenceArtifactSchema.safeParse(review).success).toBe(true);
+    expect(evidenceArtifactSchema.safeParse({
+      kind: "verification",
+      digest,
+      reviewedRequestArtifactHash: review.reviewedRequestArtifactHash,
+      reviewedIdempotencyKey: review.reviewedIdempotencyKey,
+    }).success).toBe(false);
+    expect(evidenceArtifactSchema.safeParse({ ...review, reviewedIdempotencyKey: undefined }).success).toBe(false);
+  });
+
   it("accepts the complete approved UTC timestamp precision grammar", () => {
     for (const timestamp of [
       "2026-08-10T08:00Z",
@@ -403,6 +420,8 @@ function validMcpExchange() {
     ...validRecord("mcp_exchange"),
     clientKind: "operator_mcp_client",
     clientVersion: "v1",
+    providerInstanceId: "agentchattr-instance",
+    channelId: "channel-1",
     operation: "chat_send",
     authenticationState: "authenticated",
     requestArtifactHash: digest,
@@ -600,6 +619,8 @@ describe("typed conversation evidence records", () => {
     const sessionB = { ...validMessageObservation(), stableMessageUid: "message-2", collaborationSessionId: "collaboration-b", collaborationSequence: 0 };
 
     expect(mcpExchangeSchema.safeParse(valid).success).toBe(true);
+    expect(mcpExchangeSchema.safeParse({ ...valid, providerInstanceId: undefined }).success).toBe(false);
+    expect(mcpExchangeSchema.safeParse({ ...valid, channelId: undefined }).success).toBe(false);
     expect(mcpExchangeSchema.safeParse({ ...valid, operation: "tools/list", resultingStableMessageUid: "message-1" }).success).toBe(false);
     expect(mcpExchangeSchema.safeParse({ ...valid, authenticationState: "unknown" }).success).toBe(false);
     expect(messageFixtureSchema.safeParse({ schemaVersion: 2, fixture: "message_contract", records: [sessionA, sessionB] }).success).toBe(true);
@@ -813,7 +834,15 @@ function validRuntimeControlVerification() {
     phase: "verification",
     attemptId,
     state: "verified_applied",
-    evidenceReference: { kind: "runtime_observation", caseId: "runtime-observation-1" },
+    evidenceReference: {
+      kind: "runtime_observation",
+      caseId: "runtime-observation-1",
+      actionId,
+      attemptId,
+      action: "send_text",
+      target: { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" },
+      claimedState: "verified_applied",
+    },
   }, 3);
 }
 
@@ -1091,6 +1120,20 @@ describe("append-only Herdr runtime control evidence", () => {
     expect(runtimeControlActionSchema.safeParse({ ...authorization, event: { ...authorization.event, scope: { ...authorization.event.scope, unexpected: true } } }).success).toBe(false);
     expect(runtimeControlActionSchema.safeParse({ ...verification, event: { ...verification.event, evidenceReference: { kind: "artifact", artifactHash: digest } } }).success).toBe(true);
     expect(runtimeControlActionSchema.safeParse({ ...verification, event: { ...verification.event, evidenceReference: { kind: "runtime_observation", artifactHash: digest } } }).success).toBe(false);
+    expect(runtimeControlActionSchema.safeParse({
+      ...verification,
+      event: {
+        ...verification.event,
+        evidenceReference: { ...verification.event.evidenceReference, attemptId: undefined },
+      },
+    }).success).toBe(false);
+    expect(runtimeControlActionSchema.safeParse({
+      ...verification,
+      event: {
+        ...verification.event,
+        evidenceReference: { ...verification.event.evidenceReference, claimedState: "applied" },
+      },
+    }).success).toBe(false);
     expect(runtimeControlActionSchema.safeParse({ ...acknowledgement, event: { ...acknowledgement.event, state: "pending", directAcknowledgementEvidenceHash: digest } }).success).toBe(false);
     expect(runtimeControlActionSchema.safeParse({ ...acknowledgement, event: { phase: "acknowledgement", attemptId, state: "acknowledged" } }).success).toBe(false);
   });
@@ -1186,6 +1229,31 @@ describe("operational boundaries and Herdr observations", () => {
     for (const field of ["modelProvider", "actorId", "taskId", "leaseState", "authority"]) {
       expect(runtimeObservationSchema.safeParse({ ...validAgentSnapshot(), [field]: "conflated" }).success).toBe(false);
     }
+  });
+
+  it("admits only a closed typed runtime-control proof on direct observations", () => {
+    const controlProof = {
+      actionId,
+      attemptId,
+      action: "send_text",
+      target: { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" },
+      disposition: "applied",
+      resultArtifactHash: digest,
+    };
+    const snapshot = { ...validAgentSnapshot(), controlProof };
+    expect(runtimeObservationSchema.safeParse(snapshot).success).toBe(true);
+    expect(runtimeObservationSchema.safeParse({
+      ...snapshot,
+      controlProof: { ...controlProof, attemptId: "not-a-uuid" },
+    }).success).toBe(false);
+    expect(runtimeObservationSchema.safeParse({
+      ...snapshot,
+      controlProof: { ...controlProof, disposition: "succeeded" },
+    }).success).toBe(false);
+    expect(runtimeObservationSchema.safeParse({
+      ...snapshot,
+      controlProof: { ...controlProof, unexpected: true },
+    }).success).toBe(false);
   });
 
   it("keeps every Herdr target shape, native contract, and token quality closed", () => {
@@ -1528,17 +1596,44 @@ describe("strict version-2 evidence manifest", () => {
         humanIntent: { state: "denied", evidenceHash: digest },
       },
     };
+    const reviewedProviderRequest = {
+      ...validRuntimeControlRequest(),
+      caseId: "recursive-provider-review",
+      artifacts: [
+        { kind: "request", digest: `sha256:${"b".repeat(64)}` },
+        {
+          kind: "provider_idempotency_review",
+          digest,
+          reviewedRequestArtifactHash: `sha256:${"b".repeat(64)}`,
+          reviewedIdempotencyKey: digest,
+        },
+      ],
+    };
+    const controlProofSnapshot = {
+      ...validAgentSnapshot(),
+      caseId: "recursive-control-proof",
+      controlProof: {
+        actionId,
+        attemptId,
+        action: "send_text",
+        target: { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" },
+        disposition: "applied",
+        resultArtifactHash: digest,
+      },
+    };
     const records = [
       validConfigurationBoundary(),
       ...["process", "child_process", "trigger_queue", "herdr_pane", "input_control", "runtime_manager_inventory"]
         .map((kind) => validMonitorInterval(kind)),
       validAgentSnapshot(),
+      controlProofSnapshot,
       snapshotUnknownMetadata,
       ...lifecycleVariants,
       validTraceSummary(),
       ...requestVariants,
       boundedNoneIntent,
       deniedIntent,
+      reviewedProviderRequest,
       ...authorizationVariants,
       validRuntimeControlExecution(),
       validRuntimeControlVerification(),

@@ -134,7 +134,29 @@ function teardown() {
   };
 }
 
-function validManifestV2(records: JsonRecord[] = []) {
+function validManifestV2(
+  records: JsonRecord[] = [],
+  options: { includeDirectFoundation?: boolean } = {},
+) {
+  const foundation = options.includeDirectFoundation === false
+    ? []
+    : [runtimeSnapshot("direct_herdr", "manifest-foundation", {
+      observation: {
+        observationKind: "agent_snapshot",
+        workspaceId: "foundation-workspace",
+        tabId: "foundation-tab",
+        paneId: "foundation-pane",
+        terminalId: "foundation-terminal",
+        agentSessionId: "foundation-agent-session",
+        runtimeState: "working",
+        modelMetadata: {
+          reportingState: "reported",
+          provider: "anthropic",
+          model: "claude-sonnet",
+        },
+        project: { projectKind: "configured_id", projectId: "scotty", relation: "root" },
+      },
+    })];
   return {
     schemaVersion: 2,
     spike: "agentchattr-compatibility",
@@ -166,6 +188,7 @@ function validManifestV2(records: JsonRecord[] = []) {
       configurationBoundary(),
       ...monitorKinds.map(monitorInterval),
       ...records,
+      ...foundation,
       teardown(),
     ],
   };
@@ -274,16 +297,19 @@ function loopTransition(
   };
 }
 
-function mcpChatSend(suffix: string, stableMessageUid: string) {
+function mcpChatSend(suffix: string, stableMessageUid: string, overrides: JsonRecord = {}) {
   return {
     ...evidenceBase("mcp_exchange", `mcp-send-${suffix}`, times.four),
     clientKind: "operator_mcp_client",
     clientVersion: "v1",
+    providerInstanceId: "agentchattr-instance",
+    channelId: "channel-one",
     operation: "chat_send",
     authenticationState: "authenticated",
     requestArtifactHash: hashes.a,
     responseArtifactHash: hashes.b,
     resultingStableMessageUid: stableMessageUid,
+    ...overrides,
   };
 }
 
@@ -477,7 +503,7 @@ describe("typed message, identity, collaboration, and promotion invariants", () 
     });
   });
 
-  it("allows mutable message observations to progress without changing the approved durable replay tuple", () => {
+  it("allows transport, acknowledgement, read, and evidence to progress without changing the approved replay tuple", () => {
     const initial = messageObservation("progressive", {
       transportState: "queued",
       receiverAcknowledgementState: "pending",
@@ -490,9 +516,6 @@ describe("typed message, identity, collaboration, and promotion invariants", () 
       transportState: "server_accepted",
       receiverAcknowledgementState: "acknowledged",
       readState: "read",
-      collaborationIntent: "peer_acceptance",
-      collaborationSessionId: "progressive-session",
-      collaborationSequence: 0,
       directEvidenceArtifactHash: hashes.c,
     };
 
@@ -507,6 +530,20 @@ describe("typed message, identity, collaboration, and promotion invariants", () 
       classification: "fail",
       path: "/evidence/9/stableMessageUid",
     });
+
+    const collaborationDivergence = {
+      ...progressed,
+      caseId: "message-progressive-collaboration-divergent",
+      collaborationIntent: "peer_acceptance",
+      collaborationSessionId: "progressive-session",
+      collaborationSequence: 99,
+    };
+    expect(validateEvidenceManifest(validManifestV2([identityBinding(), initial, collaborationDivergence])).issues)
+      .toContainEqual({
+        code: "message_uid_divergence",
+        classification: "fail",
+        path: "/evidence/9/stableMessageUid",
+      });
   });
 
   it("scopes durable message identity by provider instance, channel, and UID", () => {
@@ -538,6 +575,31 @@ describe("typed message, identity, collaboration, and promotion invariants", () 
     expect(validateEvidenceManifest(validManifestV2([
       identityBinding(), beforeRestart, restart, afterRestart,
     ]))).toEqual({ classification: "pass", issues: [] });
+  });
+
+  it("opens only one cursor epoch for repeated post-restart observations", () => {
+    const beforeRestart = messageObservation("epoch-original", {
+      stableMessageUid: "epoch-original-uid",
+      cursorId: 100,
+    });
+    const firstRestart = messageObservation("epoch-first-restart", {
+      stableMessageUid: "epoch-first-restart-uid",
+      cursorId: 5,
+      observationContext: "post_restart",
+    });
+    const repeatedRestart = messageObservation("epoch-repeated-restart", {
+      stableMessageUid: "epoch-repeated-restart-uid",
+      cursorId: 4,
+      observationContext: "post_restart",
+    });
+
+    expect(validateEvidenceManifest(validManifestV2([
+      identityBinding(), beforeRestart, firstRestart, repeatedRestart,
+    ])).issues).toContainEqual({
+      code: "message_cursor_order",
+      classification: "fail",
+      path: "/evidence/10/cursorId",
+    });
   });
 
   it("requires tombstone state deleted in addition to prior-present durable linkage", () => {
@@ -796,6 +858,26 @@ describe("typed message, identity, collaboration, and promotion invariants", () 
 });
 
 describe("runtime observation, loop, Desktop, monitor, and teardown invariants", () => {
+  it("requires a passing direct Herdr foundation for every executed trial", () => {
+    const noObservation = validManifestV2([], { includeDirectFoundation: false });
+    expect(validateEvidenceManifest(noObservation).issues).toContainEqual({
+      code: "runtime_direct_foundation_missing",
+      classification: "unknown",
+      path: "/evidence",
+    });
+
+    const meshOnly = validManifestV2(timeline([
+      requestEvent(),
+      authorizationEvent(1),
+      executionEvent(1, "succeeded", { adapter: "herdr_mesh" }),
+    ]), { includeDirectFoundation: false });
+    expect(validateEvidenceManifest(meshOnly).issues).toContainEqual({
+      code: "runtime_direct_foundation_missing",
+      classification: "unknown",
+      path: "/evidence",
+    });
+  });
+
   it("enforces observation adapter, provenance source, and native contract compatibility", () => {
     const invalid = [
       runtimeSnapshot("direct_herdr", "direct-source", {
@@ -956,9 +1038,19 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
       "loop_message_uid_reused",
       "fail",
     );
+
+    const wrongProviderAndChannel = proof.map((record) => record.kind === "mcp_exchange"
+      && record.resultingStableMessageUid === "loop-message-six"
+      ? { ...record, providerInstanceId: "agentchattr-other", channelId: "channel-other" }
+      : record);
+    expectIssue(
+      validManifestV2([identityBinding(), ...transitions, ...wrongProviderAndChannel]),
+      "loop_mcp_evidence_missing",
+      "fail",
+    );
   });
 
-  it("proves the seventh rejection by absence of any seventh upstream message or MCP send", () => {
+  it("proves the seventh rejection across its actual interval with no message or MCP invocation", () => {
     const transitions = [
       loopTransition("one", "active(0)", "active(1)"),
       loopTransition("two", "active(1)", "active(2)"),
@@ -966,7 +1058,10 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
       loopTransition("four", "active(3)", "active(4)"),
       loopTransition("five", "active(4)", "active(5)"),
       loopTransition("six", "active(5)", "paused(6)"),
-      loopTransition("seven", "paused(6)", "paused(6)"),
+      loopTransition("seven", "paused(6)", "paused(6)", {
+        startedAt: times.four,
+        observedAt: times.six,
+      }),
       loopTransition("reset", "paused(6)", "active(0)", { origin: "human" }),
     ];
     const upstreamSeventh = messageObservation("loop-seven-upstream", {
@@ -974,11 +1069,23 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
       cursorId: 7,
       observedAt: times.five,
     });
+    const failedNonChatInvocation = mcpChatSend("loop-seven-failed-tools", "loop-message-seven-upstream", {
+      caseId: "mcp-loop-seven-failed-tools",
+      startedAt: times.five,
+      observedAt: times.five,
+      operation: "tools/list",
+      expectedResult: "fail",
+      observedResult: "fail",
+      classification: "fail",
+      authenticationState: "failed",
+      resultingStableMessageUid: null,
+    });
     const base = [identityBinding(), ...transitions, ...loopProofRecords(transitions)];
     for (const upstreamEvidence of [
       [upstreamSeventh],
       [mcpChatSend("loop-seven-upstream", "loop-message-seven-upstream")],
       [upstreamSeventh, mcpChatSend("loop-seven-upstream", "loop-message-seven-upstream")],
+      [failedNonChatInvocation],
     ]) {
       expectIssue(
         validManifestV2([...base, ...upstreamEvidence]),
@@ -1075,7 +1182,14 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
     if (deriveProof) {
       const proof = deriveProof(proofManifest, "channel-one");
       expect(proof).not.toBeNull();
+      expect(Reflect.ownKeys(proof as object)).toEqual([]);
+      expect(recordAuthenticatedHumanOrigin(state, { ...(proof as object) } as never).reset).toBe(false);
+      expect(recordAuthenticatedHumanOrigin(
+        { ...state, channelId: "channel-other" },
+        proof as never,
+      ).reset).toBe(false);
       expect(recordAuthenticatedHumanOrigin(state, proof as never).reset).toBe(true);
+      expect(recordAuthenticatedHumanOrigin(state, proof as never).reset).toBe(false);
     }
   });
 
@@ -1171,6 +1285,27 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
         classification: "fail",
         path: "/evidence",
       });
+
+      const endedBeforeStart = validManifestV2();
+      endedBeforeStart.executionState = executionState;
+      endedBeforeStart.endpoint.state = executionState === "running" ? "bound" : "stopped";
+      endedBeforeStart.evidence = endedBeforeStart.evidence.filter((record) => record.kind !== "teardown");
+      if (executionState === "aborted") {
+        endedBeforeStart.evidence[0].observedResult = "unknown";
+        endedBeforeStart.evidence[0].classification = "unknown";
+      }
+      const endedProcessMonitor = endedBeforeStart.evidence.find(
+        (record) => record.kind === "monitor_interval" && Reflect.get(record, "monitorKind") === "process",
+      );
+      if (endedProcessMonitor) {
+        endedProcessMonitor.startedAt = times.before;
+        endedProcessMonitor.observedAt = times.before;
+      }
+      expect(validateEvidenceManifest(endedBeforeStart).issues).toContainEqual({
+        code: "monitor_coverage_gap",
+        classification: "fail",
+        path: "/evidence",
+      });
     }
   });
 
@@ -1239,7 +1374,7 @@ function runtimeControlRecord(
   sequence: number,
   event: JsonRecord,
   overrides: JsonRecord = {},
-) {
+): JsonRecord {
   const observedAt = [times.start, times.one, times.two, times.three, times.four, times.five, times.six, times.seven][sequence] ?? times.eight;
   const verificationArtifactHash = event.phase === "verification"
     && (event.evidenceReference as JsonRecord | undefined)?.kind === "artifact"
@@ -1326,6 +1461,37 @@ function verificationEvent(
   };
 }
 
+function runtimeObservationEvidenceReference(
+  state: "verified_applied" | "verified_not_applied" | "mismatched" | "timed_out" | "unknown" | "unsupported",
+  overrides: JsonRecord = {},
+) {
+  return {
+    kind: "runtime_observation",
+    caseId: "runtime-verification-observation",
+    actionId: actionIds.action,
+    attemptId: actionIds.attemptOne,
+    action: "send_text",
+    target: paneTarget,
+    claimedState: state,
+    ...overrides,
+  };
+}
+
+function runtimeControlProof(
+  disposition: "applied" | "not_applied",
+  overrides: JsonRecord = {},
+) {
+  return {
+    actionId: actionIds.action,
+    attemptId: actionIds.attemptOne,
+    action: "send_text",
+    target: paneTarget,
+    disposition,
+    resultArtifactHash: hashes.d,
+    ...overrides,
+  };
+}
+
 function acknowledgementEvent(
   attemptId: string,
   state: "not_applicable" | "pending" | "acknowledged" | "timed_out" | "unknown" | "unsupported",
@@ -1393,6 +1559,23 @@ describe("typed runtime-control state machine", () => {
         classification: "fail",
         path: "/evidence/7/event/effectClass",
       });
+
+      if (effectClass !== "read_only") {
+        const swappedMutationClass = effectClass === "idempotent_mutation"
+          ? "non_idempotent_mutation"
+          : "idempotent_mutation";
+        const swappedRequest = runtimeControlRecord(0, requestEvent({
+          action,
+          target,
+          effectClass: swappedMutationClass,
+          retryPolicy: { mode: "none" },
+        }));
+        expect(validateEvidenceManifest(validManifestV2([swappedRequest])).issues).toContainEqual({
+          code: "runtime_effect_class_mismatch",
+          classification: "fail",
+          path: "/evidence/7/event/effectClass",
+        });
+      }
     }
   });
 
@@ -1557,6 +1740,7 @@ describe("typed runtime-control state machine", () => {
       caseId: "runtime-verification-observation",
       startedAt: times.four,
       observedAt: times.four,
+      controlProof: runtimeControlProof("applied"),
     });
     const records = timeline([
       requestEvent(),
@@ -1564,7 +1748,7 @@ describe("typed runtime-control state machine", () => {
       executionEvent(1, "succeeded"),
       {
         ...verificationEvent(actionIds.attemptOne, "verified_applied"),
-        evidenceReference: { kind: "runtime_observation", caseId: "runtime-verification-observation" },
+        evidenceReference: runtimeObservationEvidenceReference("verified_applied"),
       },
     ]);
     expect(validateEvidenceManifest(validManifestV2([...records, verified])).issues).toEqual([]);
@@ -1574,16 +1758,21 @@ describe("typed runtime-control state machine", () => {
         caseId: "runtime-verification-observation",
         startedAt: times.four,
         observedAt: times.four,
+        controlProof: runtimeControlProof("applied"),
       }),
       runtimeSnapshot("direct_herdr", "verification-earlier", {
         caseId: "runtime-verification-observation",
         startedAt: times.start,
         observedAt: times.two,
+        controlProof: runtimeControlProof("applied"),
       }),
       runtimeSnapshot("direct_herdr", "verification-target", {
         caseId: "runtime-verification-observation",
         startedAt: times.four,
         observedAt: times.four,
+        controlProof: runtimeControlProof("applied", {
+          target: { ...paneTarget, paneId: "pane-other" },
+        }),
         observation: {
           ...runtimeSnapshot("direct_herdr", "verification-target").observation,
           paneId: "pane-other",
@@ -1594,6 +1783,7 @@ describe("typed runtime-control state machine", () => {
         startedAt: times.four,
         observedAt: times.four,
         provenance: { sourceKind: "operator_observation", sourceRef: "wrong-source", digest: hashes.a },
+        controlProof: runtimeControlProof("applied"),
       }),
       runtimeSnapshot("direct_herdr", "verification-unknown", {
         caseId: "runtime-verification-observation",
@@ -1601,6 +1791,7 @@ describe("typed runtime-control state machine", () => {
         observedAt: times.four,
         observedResult: "unknown",
         classification: "unknown",
+        controlProof: runtimeControlProof("applied"),
       }),
     ];
     for (const proof of invalidProofs) {
@@ -1610,6 +1801,90 @@ describe("typed runtime-control state machine", () => {
         path: "/evidence/10/event/evidenceReference",
       });
     }
+  });
+
+  it("binds runtime observation proof to action, attempt, target, claimed result, and observation semantics", () => {
+    const verifiedApplied = {
+      ...verificationEvent(actionIds.attemptOne, "verified_applied"),
+      evidenceReference: runtimeObservationEvidenceReference("verified_applied"),
+    };
+    const base = timeline([
+      requestEvent(),
+      authorizationEvent(1),
+      executionEvent(1, "succeeded"),
+      verifiedApplied,
+    ]);
+    const passing = runtimeSnapshot("direct_herdr", "verification-binding", {
+      caseId: "runtime-verification-observation",
+      startedAt: times.four,
+      observedAt: times.four,
+      controlProof: runtimeControlProof("applied"),
+    });
+    expect(validateEvidenceManifest(validManifestV2([...base, passing])).issues).toEqual([]);
+
+    const referenceMismatches = [
+      runtimeObservationEvidenceReference("verified_applied", { action: "read_pane" }),
+      runtimeObservationEvidenceReference("verified_applied", { attemptId: actionIds.attemptTwo }),
+      runtimeObservationEvidenceReference("verified_applied", {
+        target: { ...paneTarget, paneId: "pane-other" },
+      }),
+      runtimeObservationEvidenceReference("verified_not_applied"),
+    ];
+    for (const evidenceReference of referenceMismatches) {
+      const records = timeline([
+        requestEvent(), authorizationEvent(1), executionEvent(1, "succeeded"),
+        { ...verifiedApplied, evidenceReference },
+      ]);
+      expectIssue(
+        validManifestV2([...records, passing]),
+        "runtime_verification_evidence_invalid",
+        "fail",
+      );
+    }
+
+    const blockedSnapshot = runtimeSnapshot("direct_herdr", "verification-blocked", {
+      caseId: "runtime-verification-observation",
+      startedAt: times.four,
+      observedAt: times.four,
+      observation: {
+        ...runtimeSnapshot("direct_herdr", "verification-blocked").observation,
+        runtimeState: "blocked",
+      },
+      controlProof: runtimeControlProof("applied"),
+    });
+    expectIssue(
+      validManifestV2([...base, blockedSnapshot]),
+      "runtime_verification_evidence_invalid",
+      "fail",
+    );
+
+    const verifiedNotApplied = timeline([
+      requestEvent(),
+      authorizationEvent(1),
+      executionEvent(1, "failed"),
+      {
+        ...verificationEvent(actionIds.attemptOne, "verified_not_applied"),
+        evidenceReference: runtimeObservationEvidenceReference("verified_not_applied"),
+      },
+    ]);
+    const paneCreated = runtimeSnapshot("direct_herdr", "verification-pane-created", {
+      caseId: "runtime-verification-observation",
+      startedAt: times.four,
+      observedAt: times.four,
+      observation: {
+        observationKind: "lifecycle_event",
+        event: "pane_created",
+        target: paneTarget,
+        nativeSequence: 1,
+        eventAt: times.four,
+      },
+      controlProof: runtimeControlProof("not_applied"),
+    });
+    expectIssue(
+      validManifestV2([...verifiedNotApplied, paneCreated]),
+      "runtime_verification_evidence_invalid",
+      "fail",
+    );
   });
 
   it("rejects request, authorized, succeeded, retry as a duplicate", () => {
@@ -1701,14 +1976,38 @@ describe("typed runtime-control state machine", () => {
       authorizationEvent(2),
       executionEvent(2, "succeeded", { providerIdempotencyState: "supported" }),
     ]);
-    records[0].artifacts = [{ kind: "verification", digest: hashes.f }];
+    records[0].artifacts = [
+      { kind: "request", digest: hashes.e },
+      {
+        kind: "provider_idempotency_review",
+        digest: hashes.f,
+        reviewedRequestArtifactHash: hashes.e,
+        reviewedIdempotencyKey: hashes.a,
+      },
+    ];
     expect(validateEvidenceManifest(validManifestV2(records))).toEqual({ classification: "pass", issues: [] });
   });
 
-  it("does not unlock provider-idempotent retry with an absent or unrelated review artifact", () => {
+  it("does not unlock provider-idempotent retry with generic, absent, or incorrectly bound review evidence", () => {
     for (const artifacts of [
+      [{ kind: "verification", digest: hashes.f }],
       [{ kind: "verification", digest: hashes.a }],
       [],
+      [{
+        kind: "provider_idempotency_review",
+        digest: hashes.f,
+        reviewedRequestArtifactHash: hashes.e,
+        reviewedIdempotencyKey: hashes.a,
+      }],
+      [
+        { kind: "request", digest: hashes.e },
+        {
+          kind: "provider_idempotency_review",
+          digest: hashes.f,
+          reviewedRequestArtifactHash: hashes.e,
+          reviewedIdempotencyKey: hashes.b,
+        },
+      ],
     ]) {
       const records = timeline([
         requestEvent({ reviewedProviderIdempotencyArtifactHash: hashes.f }),
