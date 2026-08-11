@@ -342,25 +342,35 @@ describe("strict evidence schema primitives", () => {
     const reservedAliases = [
       "x-implementation-source",
       "x-source-mode",
-      "x-sourcemode",
       "x-upstream-commit",
+      "x-fork-repository",
       "x-runtime-commit",
+      "x-runtime-revision",
       "x-patch-sha256",
       "x-patch-digest",
+      "x-patch-hash",
       "x-artifact-binding",
       "x-artifact-digest",
+      "x-build-digest",
+      "x-build-hash",
       "x-entrypoint-sha256",
+      "x-interpreter-hash",
+      "x-license-digest",
       "x-file-manifest-sha256",
+      "x-file-manifest-hash",
       "x-verification-state",
+      "x-verification-binding",
     ];
 
     for (const key of reservedAliases) {
       expect(safeExtensionsSchema.safeParse({ [key]: digest }).success).toBe(false);
     }
     expect(safeExtensionsSchema.safeParse({
-      "x-team-source": "present",
-      "x-team-artifact": digest,
-      "x-team-runtime": "unknown",
+      "x-runtime-control": "enabled",
+      "x-actor-authority": "present",
+      "x-task-state": "unknown",
+      "x-neutral-proof": digest,
+      "x-neutral-digest": digest,
     }).success).toBe(true);
   });
 

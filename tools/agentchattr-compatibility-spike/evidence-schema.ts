@@ -39,39 +39,27 @@ export const extensionValueSchema = z.union([
   sha256Schema,
 ]);
 const structuralInvalidFieldParams = { contractStructuralCode: "invalid_field" } as const;
-const reservedTypedExtensionSemantics = new Set([
-  "implementationsource",
-  "implementationmode",
-  "sourcemode",
-  "sourcerepository",
-  "implementationrepository",
-  "upstreambasecommit",
-  "sourcebasecommit",
-  "upstreamcommit",
-  "sourcecommit",
-  "implementationcommit",
-  "runtimecommit",
-  "sourceruntimecommit",
-  "patchsha256",
-  "sourcepatchsha256",
-  "patchdigest",
-  "licensesha256",
-  "sourcelicensesha256",
-  "artifactbinding",
-  "artifactbindingkind",
-  "artifactkind",
-  "artifactsha256",
-  "artifactdigestsha256",
-  "artifactdigest",
-  "entrypointsha256",
-  "interpretersha256",
-  "filemanifestsha256",
-  "verificationstate",
-  "artifactverificationstate",
+const reservedTypedExtensionTokens = new Set([
+  "implementation",
+  "source",
+  "upstream",
+  "fork",
+  "repository",
+  "patch",
+  "artifact",
+  "build",
+  "entrypoint",
+  "interpreter",
+  "license",
+  "verification",
 ]);
+const runtimeIdentityTokens = new Set(["commit", "revision"]);
 
 function isReservedTypedExtensionSemantic(key: string) {
-  return reservedTypedExtensionSemantics.has(key.slice(2).replaceAll("-", "").toLowerCase());
+  const tokens = key.slice(2).split("-");
+  return tokens.some((token) => reservedTypedExtensionTokens.has(token))
+    || (tokens.includes("runtime") && tokens.some((token) => runtimeIdentityTokens.has(token)))
+    || (tokens.includes("file") && tokens.includes("manifest"));
 }
 
 export const safeExtensionsSchema = z
