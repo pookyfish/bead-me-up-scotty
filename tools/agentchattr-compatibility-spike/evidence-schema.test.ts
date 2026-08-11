@@ -7,7 +7,9 @@ import {
   configurationBoundarySchema,
   desktopCapabilitySchema,
   evidenceArtifactSchema,
+  evidenceManifestV2Schema,
   evidenceProvenanceSchema,
+  evidenceRecordSchema,
   identityBindingSchema,
   identityFixtureSchema,
   loopGuardTransitionSchema,
@@ -1414,7 +1416,183 @@ function expectStructuralFailure(value: unknown, code: string, path?: string) {
   }
 }
 
+type ObjectPath = Array<string | number>;
+
+function strictObjectPaths(value: unknown, path: ObjectPath = []): ObjectPath[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry, index) => strictObjectPaths(entry, [...path, index]));
+  }
+  if (typeof value !== "object" || value === null) return [];
+  const object = value as Record<string, unknown>;
+  const ownPath = path.at(-1) === "extensions" ? [] : [path];
+  return [
+    ...ownPath,
+    ...Object.entries(object).flatMap(([key, entry]) => strictObjectPaths(entry, [...path, key])),
+  ];
+}
+
+function injectUnknownAtPath<T>(value: T, path: ObjectPath): T {
+  const clone = structuredClone(value);
+  let target: unknown = clone;
+  for (const segment of path) {
+    target = (target as Record<string | number, unknown>)[segment];
+  }
+  (target as Record<string, unknown>).attackerControlledUnknownKey = "attacker-controlled-value";
+  return clone;
+}
+
 describe("strict version-2 evidence manifest", () => {
+  it("rejects recursive unknown-field mutations across every sampled strict object and union variant", () => {
+    const requestTargets = [
+      ["list_agents", { targetKind: "workspace", workspaceId: "workspace-1" }],
+      ["get_agent", { targetKind: "agent_session", agentSessionId: "agent-session-1" }],
+      ["read_pane", { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" }],
+      ["close_tab", { targetKind: "tab", workspaceId: "workspace-1", tabId: "tab-1" }],
+      ["create_workspace", { targetKind: "runtime_manager_project", projectId: "project-1" }],
+    ] as const;
+    const lifecycleTargets = [
+      { targetKind: "workspace", workspaceId: "workspace-1" },
+      { targetKind: "tab", workspaceId: "workspace-1", tabId: "tab-1" },
+      { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" },
+      { targetKind: "terminal", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1", terminalId: "terminal-1" },
+      { targetKind: "agent_session", agentSessionId: "agent-session-1" },
+    ] as const;
+    const requestVariants = requestTargets.flatMap(([action, target], index) => {
+      const request = validRuntimeControlRequest();
+      return [{
+        ...request,
+        caseId: `recursive-request-${index}`,
+        event: { ...request.event, action, target },
+      }];
+    });
+    const authorizationVariants = requestTargets.map(([action, target], index) => {
+      const authorization = validRuntimeControlAuthorization();
+      return {
+        ...authorization,
+        caseId: `recursive-authorization-${index}`,
+        event: {
+          ...authorization.event,
+          scope: { ...authorization.event.scope, action, target },
+        },
+      };
+    });
+    const lifecycleVariants = lifecycleTargets.map((target, index) => {
+      const lifecycle = validLifecycleEvent();
+      return {
+        ...lifecycle,
+        caseId: `recursive-lifecycle-${index}`,
+        observation: { ...lifecycle.observation, target },
+      };
+    });
+    const snapshotUnknownMetadata = {
+      ...validAgentSnapshot(),
+      caseId: "recursive-snapshot-unknown",
+      nativeContract: { versionKind: "named", name: "herdr-direct", version: "v1" },
+      observation: {
+        ...validAgentSnapshot().observation,
+        modelMetadata: { reportingState: "unknown" },
+        project: { projectKind: "salted_sha256", projectHash: digest, relation: "root" },
+      },
+    };
+    const runtimePromotion = {
+      ...validBeadsPromotion(),
+      caseId: "recursive-runtime-promotion",
+      promotionSource: {
+        kind: "runtime_control",
+        correlationId,
+        actionIds: [actionId],
+      },
+    };
+    const artifactVerification = {
+      ...validRuntimeControlVerification(),
+      caseId: "recursive-artifact-verification",
+      event: {
+        ...validRuntimeControlVerification().event,
+        evidenceReference: { kind: "artifact", artifactHash: digest },
+      },
+    };
+    const boundedNoneIntent = {
+      ...validRuntimeControlRequest(),
+      caseId: "recursive-bounded-none",
+      event: {
+        ...validRuntimeControlRequest().event,
+        retryPolicy: { mode: "bounded", maxAttempts: 2 },
+        humanIntent: { state: "none" },
+      },
+    };
+    const deniedIntent = {
+      ...validRuntimeControlRequest(),
+      caseId: "recursive-denied-intent",
+      event: {
+        ...validRuntimeControlRequest().event,
+        humanIntent: { state: "denied", evidenceHash: digest },
+      },
+    };
+    const records = [
+      validConfigurationBoundary(),
+      ...["process", "child_process", "trigger_queue", "herdr_pane", "input_control", "runtime_manager_inventory"]
+        .map((kind) => validMonitorInterval(kind)),
+      validAgentSnapshot(),
+      snapshotUnknownMetadata,
+      ...lifecycleVariants,
+      validTraceSummary(),
+      ...requestVariants,
+      boundedNoneIntent,
+      deniedIntent,
+      ...authorizationVariants,
+      validRuntimeControlExecution(),
+      validRuntimeControlVerification(),
+      artifactVerification,
+      validRuntimeControlAcknowledgement(),
+      validRuntimeControlReconciliation(),
+      validMcpExchange(),
+      validMessageObservation(),
+      validIdentityBinding(),
+      validLoopGuardTransition(),
+      validBeadsPromotion(),
+      runtimePromotion,
+      validDesktopCapability(),
+      validTeardown(),
+    ];
+
+    for (const record of records) {
+      expect(evidenceRecordSchema.safeParse(record).success).toBe(true);
+      expect(evidenceRecordSchema.safeParse({
+        ...record,
+        extensions: { "x-neutral-proof": "present" },
+      }).success).toBe(true);
+      for (const path of strictObjectPaths(record)) {
+        expect(
+          evidenceRecordSchema.safeParse(injectUnknownAtPath(record, path)).success,
+          `${record.kind} should reject unknown field at ${JSON.stringify(path)}`,
+        ).toBe(false);
+      }
+    }
+
+    for (const manifest of [validCompletedManifest(), validNotRunManifest()]) {
+      expect(evidenceManifestV2Schema.safeParse(manifest).success).toBe(true);
+      for (const path of strictObjectPaths(manifest)) {
+        expect(
+          evidenceManifestV2Schema.safeParse(injectUnknownAtPath(manifest, path)).success,
+          `manifest should reject unknown field at ${JSON.stringify(path)}`,
+        ).toBe(false);
+      }
+    }
+
+    for (const [schema, fixture] of [
+      [identityFixtureSchema, committedIdentityFixture],
+      [messageFixtureSchema, committedMessageFixture],
+    ] as const) {
+      expect(schema.safeParse(fixture).success).toBe(true);
+      for (const path of strictObjectPaths(fixture)) {
+        expect(
+          schema.safeParse(injectUnknownAtPath(fixture, path)).success,
+          `fixture should reject unknown field at ${JSON.stringify(path)}`,
+        ).toBe(false);
+      }
+    }
+  });
+
   it("accepts the closed set of all eleven evidence record kinds", () => {
     const result = parseManifestV2(validCompletedManifest());
 
@@ -1522,22 +1700,36 @@ describe("strict version-2 evidence manifest", () => {
       "x-task-state": "unknown",
     } };
     const malformedExtensions = [
-      { key: "unexpectedCamelCase", value: "present", path: "/extensions/unexpectedCamelCase" },
-      { key: "compactalias", value: "present", path: "/extensions/compactalias" },
-      { key: "prefixed-unknown", value: "present", path: "/extensions/prefixed-unknown" },
-      { key: "x-nested", value: { rejectedValue: "secret" }, path: "/extensions/x-nested" },
-      { key: "x-array", value: ["secret"], path: "/extensions/x-array" },
-      { key: "bad~/key", value: "present", path: "/extensions/bad~0~1key" },
+      { key: "unexpectedCamelCase", value: "attacker-value-one" },
+      { key: "compactalias", value: "attacker-value-two" },
+      { key: "prefixed-unknown", value: "attacker-value-three" },
+      { key: "x-nested", value: { rejectedValue: "attacker-value-four" } },
+      { key: "x-array", value: ["attacker-value-five"] },
+      { key: "bad~/key", value: "attacker-value-six" },
     ] as const;
 
     expect(parseManifestV2(accepted).ok).toBe(true);
     for (const mutation of malformedExtensions) {
-      expectStructuralFailure(
-        { ...accepted, extensions: { [mutation.key]: mutation.value } },
-        "invalid_field",
-        mutation.path,
-      );
+      const result = parseManifestV2({ ...accepted, extensions: { [mutation.key]: mutation.value } });
+      expect(result).toEqual({
+        ok: false,
+        issues: [{ code: "invalid_field", classification: "fail", path: "/extensions" }],
+      });
+      const serialized = JSON.stringify(result);
+      expect(serialized).not.toContain(mutation.key);
+      expect(serialized).not.toContain("attacker-value");
     }
+
+    const nestedRecord = structuredClone(validCompletedManifest());
+    (nestedRecord.evidence[0] as Record<string, unknown>).extensions = {
+      "attacker/controlled~key": "attacker-nested-value",
+    };
+    const nestedResult = parseManifestV2(nestedRecord);
+    expect(nestedResult).toEqual({
+      ok: false,
+      issues: [{ code: "invalid_field", classification: "fail", path: "/evidence/0/extensions" }],
+    });
+    expect(JSON.stringify(nestedResult)).not.toContain("attacker");
   });
 
   it("classifies safe-extension cardinality limits as structural invalid fields", () => {

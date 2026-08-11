@@ -963,6 +963,11 @@ function jsonPointer(path: readonly PropertyKey[]) {
   return `/${path.map((segment) => String(segment).replaceAll("~", "~0").replaceAll("/", "~1")).join("/")}`;
 }
 
+function sanitizedIssuePath(path: readonly PropertyKey[]) {
+  const extensionsIndex = path.lastIndexOf("extensions");
+  return jsonPointer(extensionsIndex === -1 ? path : path.slice(0, extensionsIndex + 1));
+}
+
 export function parseEvidenceManifestV2(value: unknown): ManifestParseResult {
   if (typeof value !== "object" || value === null || Array.isArray(value)
     || (value as Record<string, unknown>).schemaVersion !== 2) {
@@ -977,9 +982,7 @@ export function parseEvidenceManifestV2(value: unknown): ManifestParseResult {
     return { ok: true, manifest: result.data };
   }
 
-  return {
-    ok: false,
-    issues: result.error.issues.map((issue) => ({
+  const issues = result.error.issues.map((issue) => ({
       code: issue.code === "unrecognized_keys"
         ? "unknown_field"
         : issue.code === "custom" && issue.params?.contractStructuralCode === "invalid_field"
@@ -988,8 +991,13 @@ export function parseEvidenceManifestV2(value: unknown): ManifestParseResult {
             ? "invalid_invariant"
             : "invalid_field",
       classification: "fail",
-      path: jsonPointer(issue.path),
-    })),
+      path: sanitizedIssuePath(issue.path),
+    } satisfies StructuralIssue));
+  return {
+    ok: false,
+    issues: issues.filter((issue, index) => issues.findIndex((candidate) => candidate.code === issue.code
+      && candidate.classification === issue.classification
+      && candidate.path === issue.path) === index),
   };
 }
 

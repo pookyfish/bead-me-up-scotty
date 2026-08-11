@@ -9,6 +9,7 @@ import {
   type HerdrTarget,
   type IdentityBinding,
   type LoopGuardTransition,
+  type McpExchange,
   type MessageObservation,
   type RuntimeControlAction,
   type RuntimeControlTarget,
@@ -114,16 +115,8 @@ function sameStringSet(left: readonly string[], right: readonly string[]) {
     && leftSorted.every((entry, index) => entry === rightSorted[index]);
 }
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function isNonemptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
-}
-
-function hasUtcTimestamp(value: unknown): value is string {
-  return isNonemptyString(value) && !Number.isNaN(Date.parse(value));
 }
 
 function validateCaseIds(manifest: EvidenceManifestV2, issues: ContractIssue[]) {
@@ -137,7 +130,7 @@ function validateCaseIds(manifest: EvidenceManifestV2, issues: ContractIssue[]) 
 }
 
 function messageIdentityKey(message: MessageObservation) {
-  return `${message.providerInstanceId}|${message.stableMessageUid}`;
+  return `${message.providerInstanceId}|${message.channelId}|${message.stableMessageUid}`;
 }
 
 function messageDurableSignature(message: MessageObservation) {
@@ -175,8 +168,9 @@ function validateMessages(
   messages.forEach((message) => {
     const path = evidencePath(manifest, message);
     const channelKey = `${message.providerInstanceId}|${message.channelId}`;
-    const previousCursor = lastCursorByChannel.get(channelKey);
     const uidKey = messageIdentityKey(message);
+    const beginsRestartEpoch = message.observationContext === "post_restart";
+    const previousCursor = beginsRestartEpoch ? undefined : lastCursorByChannel.get(channelKey);
     if (String(message.cursorId) === message.stableMessageUid) {
       addIssue(issues, "message_cursor_used_as_uid", "fail", `${path}/stableMessageUid`);
     }
@@ -187,6 +181,9 @@ function validateMessages(
 
     const previous = seenByUid.get(uidKey) ?? [];
     if (message.observationContext === "tombstone") {
+      if (message.messageState !== "deleted") {
+        addIssue(issues, "message_tombstone_state_invalid", "fail", `${path}/messageState`);
+      }
       const linked = previous.find((candidate) => candidate.messageState === "present");
       if (!linked) {
         addIssue(issues, "message_tombstone_unlinked", "fail", `${path}/stableMessageUid`);
@@ -209,6 +206,21 @@ function validateMessages(
     seenByUid.set(uidKey, previous);
     knownUids.add(uidKey);
   });
+}
+
+function deduplicateMessageReobservations(messages: MessageObservation[]) {
+  const seenReplaySignatures = new Set<string>();
+  const deduplicated: MessageObservation[] = [];
+  for (const message of messages) {
+    const signature = messageReplaySignature(message);
+    const isReplay = message.observationContext === "overlap_page"
+      || message.observationContext === "retry_replay"
+      || message.observationContext === "post_restart";
+    if (isReplay && seenReplaySignatures.has(signature)) continue;
+    seenReplaySignatures.add(signature);
+    deduplicated.push(message);
+  }
+  return deduplicated;
 }
 
 function bindingSignature(binding: IdentityBinding) {
@@ -371,7 +383,14 @@ function observationTargetKey(observation: RuntimeObservation) {
   const payload = observation.observation;
   switch (payload.observationKind) {
     case "agent_snapshot":
-      return JSON.stringify([payload.observationKind, payload.workspaceId, payload.tabId, payload.paneId, payload.terminalId]);
+      return JSON.stringify([
+        payload.observationKind,
+        payload.workspaceId,
+        payload.tabId,
+        payload.paneId,
+        payload.terminalId,
+        payload.agentSessionId,
+      ]);
     case "lifecycle_event":
       return JSON.stringify([payload.observationKind, runtimeTargetSignature(payload.target)]);
     case "trace_summary":
@@ -407,9 +426,29 @@ function intervalsOverlap(left: RuntimeObservation, right: RuntimeObservation) {
     && compareTimestamps(right.startedAt, left.observedAt) <= 0;
 }
 
-function validateRuntimeObservations(observations: RuntimeObservation[], issues: ContractIssue[]) {
+function observationHasCompatibleProvenance(observation: RuntimeObservation) {
+  return observation.adapter === "direct_herdr"
+    ? observation.provenance.sourceKind === "herdr_direct"
+      && observation.nativeContract.versionKind === "herdr_protocol"
+    : observation.provenance.sourceKind === "herdr_telemetry_bridge"
+      && observation.nativeContract.versionKind === "named";
+}
+
+function validateRuntimeObservations(
+  manifest: EvidenceManifestV2,
+  observations: RuntimeObservation[],
+  issues: ContractIssue[],
+) {
   const groups = new Map<string, RuntimeObservation[]>();
   for (const observation of observations) {
+    if (!observationHasCompatibleProvenance(observation)) {
+      addIssue(
+        issues,
+        "runtime_observation_provenance_mismatch",
+        "fail",
+        evidencePath(manifest, observation),
+      );
+    }
     const records = groups.get(observationTargetKey(observation)) ?? [];
     records.push(observation);
     groups.set(observationTargetKey(observation), records);
@@ -428,9 +467,56 @@ function validateRuntimeObservations(observations: RuntimeObservation[], issues:
       addIssue(issues, "runtime_observation_disagreement", "unknown", "/evidence");
     }
   }
+
+  const direct = observations.filter((record) => record.adapter === "direct_herdr");
+  for (const telemetry of observations.filter((record) => record.adapter === "herdr_telemetry_bridge")) {
+    const hasFoundation = direct.some((record) => observationTargetKey(record) === observationTargetKey(telemetry)
+      && record.startedAt === telemetry.startedAt
+      && record.observedAt === telemetry.observedAt
+      && record.freshness === "live"
+      && record.measurementQuality === "direct"
+      && record.observedResult === "pass"
+      && record.classification === "pass"
+      && observationHasCompatibleProvenance(record));
+    if (!hasFoundation) {
+      addIssue(
+        issues,
+        "runtime_direct_foundation_missing",
+        "unknown",
+        evidencePath(manifest, telemetry),
+      );
+    }
+  }
 }
 
-function validateLoopTransitions(transitions: LoopGuardTransition[], issues: ContractIssue[]) {
+function humanResetMessage(
+  transition: LoopGuardTransition,
+  messages: MessageObservation[],
+  bindings: IdentityBinding[],
+) {
+  if (transition.origin !== "human" || transition.authenticatedHumanProofHash === null) return undefined;
+  const candidates = messages.filter((message) => message.channelId === transition.channelId
+    && message.directEvidenceArtifactHash === transition.authenticatedHumanProofHash
+    && message.messageState === "present"
+    && message.observedResult === "pass"
+    && message.classification === "pass"
+    && compareTimestamps(transition.startedAt, message.observedAt) <= 0
+    && compareTimestamps(message.observedAt, transition.observedAt) <= 0
+    && bindings.filter((binding) => binding.agentChattrInstanceId === message.providerInstanceId
+      && binding.agentChattrExternalId === message.senderExternalId
+      && binding.orchestrationRole === "human"
+      && bindingCovers(binding, message.observedAt)).length === 1);
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
+function validateLoopTransitions(
+  manifest: EvidenceManifestV2,
+  transitions: LoopGuardTransition[],
+  messages: MessageObservation[],
+  bindings: IdentityBinding[],
+  exchanges: McpExchange[],
+  issues: ContractIssue[],
+) {
   const stateByChannel = new Map<string, LoopGuardTransition["fromState"]>();
   const byChannel = new Map<string, LoopGuardTransition[]>();
   for (const transition of transitions) {
@@ -443,7 +529,52 @@ function validateLoopTransitions(transitions: LoopGuardTransition[], issues: Con
     channelTransitions.push(transition);
     byChannel.set(transition.channelId, channelTransitions);
   }
+  const allAllowedUids = new Set(transitions.flatMap((transition) => transition.origin === "agent"
+    && transition.mcpInvoked
+    && transition.stableMessageUid !== null
+    ? [transition.stableMessageUid]
+    : []));
+  const allHumanResetUids = new Set(transitions.flatMap((transition) => {
+    const proofMessage = humanResetMessage(transition, messages, bindings);
+    return proofMessage === undefined ? [] : [proofMessage.stableMessageUid];
+  }));
   for (const channelTransitions of byChannel.values()) {
+    const allowedUids = new Set<string>();
+    const humanResetUids = new Set<string>();
+    for (const transition of channelTransitions) {
+      const transitionPath = evidencePath(manifest, transition);
+      if (transition.origin === "agent" && transition.mcpInvoked && transition.stableMessageUid !== null) {
+        if (allowedUids.has(transition.stableMessageUid)) {
+          addIssue(issues, "loop_message_uid_reused", "fail", `${transitionPath}/stableMessageUid`);
+        }
+        allowedUids.add(transition.stableMessageUid);
+        const matchingMessage = messages.some((message) => message.channelId === transition.channelId
+          && message.stableMessageUid === transition.stableMessageUid
+          && message.messageState === "present"
+          && message.observedResult === "pass"
+          && message.classification === "pass");
+        if (!matchingMessage) {
+          addIssue(issues, "loop_message_evidence_missing", "fail", `${transitionPath}/stableMessageUid`);
+        }
+        const matchingMcp = exchanges.some((exchange) => exchange.operation === "chat_send"
+          && exchange.authenticationState === "authenticated"
+          && exchange.observedResult === "pass"
+          && exchange.classification === "pass"
+          && exchange.resultingStableMessageUid === transition.stableMessageUid);
+        if (!matchingMcp) {
+          addIssue(issues, "loop_mcp_evidence_missing", "fail", `${transitionPath}/stableMessageUid`);
+        }
+      }
+      if (transition.origin === "human") {
+        const proofMessage = humanResetMessage(transition, messages, bindings);
+        if (proofMessage === undefined) {
+          addIssue(issues, "loop_human_reset_unproven", "fail", `${transitionPath}/authenticatedHumanProofHash`);
+        } else {
+          humanResetUids.add(proofMessage.stableMessageUid);
+        }
+      }
+    }
+
     const hasSixth = channelTransitions.some((transition) => transition.origin === "agent"
       && transition.fromState === "active(5)"
       && transition.toState === "paused(6)"
@@ -461,6 +592,31 @@ function validateLoopTransitions(transitions: LoopGuardTransition[], issues: Con
     if (!hasSixth || !hasSeventhRejection || !hasHumanReset) {
       addIssue(issues, "loop_evidence_incomplete", "unknown", "/evidence");
     }
+
+    for (const rejection of channelTransitions.filter((transition) => transition.origin === "agent"
+      && transition.fromState === "paused(6)"
+      && transition.toState === "paused(6)"
+      && !transition.mcpInvoked)) {
+      const hasUpstreamMessage = messages.some((message) => message.channelId === rejection.channelId
+        && compareTimestamps(message.observedAt, rejection.observedAt) >= 0
+        && !allowedUids.has(message.stableMessageUid)
+        && !humanResetUids.has(message.stableMessageUid));
+      const hasUpstreamMcp = exchanges.some((exchange) => exchange.operation === "chat_send"
+        && exchange.authenticationState === "authenticated"
+        && exchange.observedResult === "pass"
+        && compareTimestamps(exchange.observedAt, rejection.observedAt) >= 0
+        && exchange.resultingStableMessageUid !== null
+        && !allAllowedUids.has(exchange.resultingStableMessageUid)
+        && !allHumanResetUids.has(exchange.resultingStableMessageUid));
+      if (hasUpstreamMessage || hasUpstreamMcp) {
+        addIssue(
+          issues,
+          "loop_seventh_upstream_present",
+          "fail",
+          evidencePath(manifest, rejection),
+        );
+      }
+    }
   }
 }
 
@@ -475,7 +631,22 @@ function desktopSignature(record: DesktopCapability) {
   ]);
 }
 
-function validateDesktop(records: DesktopCapability[], issues: ContractIssue[]) {
+function validateDesktop(
+  manifest: EvidenceManifestV2,
+  records: DesktopCapability[],
+  issues: ContractIssue[],
+) {
+  for (const record of records) {
+    const derived = aggregateClassification([record.readClassification, record.sendClassification]);
+    if (record.classification !== derived) {
+      addIssue(
+        issues,
+        "desktop_classification_mismatch",
+        "fail",
+        `${evidencePath(manifest, record)}/classification`,
+      );
+    }
+  }
   for (const client of ["claude_code_desktop", "codex_desktop"] as const) {
     const clientRecords = records.filter((record) => record.client === client);
     if (new Set(clientRecords.map(desktopSignature)).size > 1) {
@@ -565,9 +736,18 @@ function validateMonitorAndTeardown(manifest: EvidenceManifestV2, issues: Contra
       addIssue(issues, "monitor_coverage_missing", "unknown", "/evidence");
       continue;
     }
-    if (configuration && teardownRecord && !candidates.some((monitor) => compareTimestamps(monitor.startedAt, configuration.startedAt) <= 0
-      && compareTimestamps(monitor.observedAt, teardownRecord.observedAt) >= 0)) {
-      addIssue(issues, "monitor_coverage_gap", "fail", "/evidence");
+    if (configuration) {
+      const hasStartCoverage = candidates.some((monitor) => compareTimestamps(
+        monitor.startedAt,
+        configuration.startedAt,
+      ) <= 0);
+      const hasCompletedCoverage = teardownRecord === undefined || candidates.some((monitor) => compareTimestamps(
+        monitor.startedAt,
+        configuration.startedAt,
+      ) <= 0 && compareTimestamps(monitor.observedAt, teardownRecord.observedAt) >= 0);
+      if (!hasStartCoverage || !hasCompletedCoverage) {
+        addIssue(issues, "monitor_coverage_gap", "fail", "/evidence");
+      }
     }
   }
 
@@ -645,7 +825,59 @@ function runtimeRequestSignature(record: RuntimeControlAction) {
   ]);
 }
 
+const READ_ONLY_RUNTIME_ACTIONS = new Set([
+  "list_agents",
+  "get_agent",
+  "read_pane",
+  "wait_for_agent",
+  "wait_for_output",
+]);
+
+function observationMatchesControlTarget(observation: RuntimeObservation, target: RuntimeControlTarget) {
+  const payload = observation.observation;
+  if (payload.observationKind === "agent_snapshot") {
+    switch (target.targetKind) {
+      case "workspace":
+        return payload.workspaceId === target.workspaceId;
+      case "tab":
+        return payload.workspaceId === target.workspaceId && payload.tabId === target.tabId;
+      case "pane":
+        return payload.workspaceId === target.workspaceId
+          && payload.tabId === target.tabId
+          && payload.paneId === target.paneId;
+      case "agent_session":
+        return payload.agentSessionId === target.agentSessionId;
+      case "runtime_manager_project":
+        return false;
+    }
+  }
+  if (payload.observationKind === "lifecycle_event") {
+    return runtimeTargetSignature(payload.target) === runtimeTargetSignature(target);
+  }
+  return target.targetKind === "agent_session" && payload.agentSessionId === target.agentSessionId;
+}
+
+function validRuntimeVerificationObservation(
+  manifest: EvidenceManifestV2,
+  verification: RuntimeControlAction,
+  observation: EvidenceRecord | undefined,
+  target: RuntimeControlTarget,
+) {
+  return observation?.kind === "runtime_observation"
+    && manifest.evidence.indexOf(observation) > manifest.evidence.indexOf(verification)
+    && compareTimestamps(verification.observedAt, observation.observedAt) <= 0
+    && observation.adapter === "direct_herdr"
+    && observation.provenance.sourceKind === "herdr_direct"
+    && observation.nativeContract.versionKind === "herdr_protocol"
+    && observation.measurementQuality === "direct"
+    && observation.freshness === "live"
+    && observation.observedResult === "pass"
+    && observation.classification === "pass"
+    && observationMatchesControlTarget(observation, target);
+}
+
 function validateRuntimeActionGroup(
+  manifest: EvidenceManifestV2,
   records: RuntimeControlAction[],
   caseIndex: ReadonlyMap<string, EvidenceRecord>,
   issues: ContractIssue[],
@@ -683,6 +915,21 @@ function validateRuntimeActionGroup(
 
   if (requestRecord.event.phase !== "request") return;
   const request = requestRecord.event;
+  const requestPath = evidencePath(manifest, requestRecord);
+  const actionIsReadOnly = READ_ONLY_RUNTIME_ACTIONS.has(request.action);
+  if (actionIsReadOnly !== (request.effectClass === "read_only")) {
+    addIssue(issues, "runtime_effect_class_mismatch", "fail", `${requestPath}/event/effectClass`);
+  }
+  const declaredProviderIdempotencyArtifact = request.reviewedProviderIdempotencyArtifactHash !== undefined
+    && requestRecord.artifacts.some((artifact) => artifact.digest === request.reviewedProviderIdempotencyArtifactHash);
+  if (request.reviewedProviderIdempotencyArtifactHash !== undefined && !declaredProviderIdempotencyArtifact) {
+    addIssue(
+      issues,
+      "runtime_provider_idempotency_evidence_missing",
+      "fail",
+      `${requestPath}/event/reviewedProviderIdempotencyArtifactHash`,
+    );
+  }
   const laterAuthorityOrExecution = records.some((record) => record.sequence > requestRecord.sequence
     && (record.event.phase === "authorization" || record.event.phase === "execution"));
   if (request.requestState !== "recorded" && laterAuthorityOrExecution) {
@@ -706,6 +953,27 @@ function validateRuntimeActionGroup(
       && record.event.evidenceReference.kind === "runtime_observation"
       && caseIndex.get(record.event.evidenceReference.caseId)?.kind !== "runtime_observation") {
       addIssue(issues, "runtime_verification_evidence_missing", "unknown", "/evidence");
+    }
+  }
+
+  for (const record of records) {
+    if (record.event.phase !== "verification") continue;
+    const verificationPath = `${evidencePath(manifest, record)}/event/evidenceReference`;
+    const evidenceReference = record.event.evidenceReference;
+    if (evidenceReference.kind === "artifact") {
+      if (!record.artifacts.some((artifact) => artifact.kind === "verification"
+        && artifact.digest === evidenceReference.artifactHash)) {
+        addIssue(issues, "runtime_verification_artifact_missing", "fail", verificationPath);
+      }
+      continue;
+    }
+    if (!validRuntimeVerificationObservation(
+      manifest,
+      record,
+      caseIndex.get(evidenceReference.caseId),
+      request.target,
+    )) {
+      addIssue(issues, "runtime_verification_evidence_invalid", "fail", verificationPath);
     }
   }
 
@@ -764,7 +1032,7 @@ function validateRuntimeActionGroup(
     }
   }
 
-  validateRuntimeRetries(records, request, executions, issues);
+  validateRuntimeRetries(records, request, executions, declaredProviderIdempotencyArtifact, issues);
 }
 
 function validateRuntimeRetries(
@@ -773,18 +1041,20 @@ function validateRuntimeRetries(
   executions: Array<RuntimeControlAction & {
     event: Extract<RuntimeControlAction["event"], { phase: "execution" }>;
   }>,
+  declaredProviderIdempotencyArtifact: boolean,
   issues: ContractIssue[],
 ) {
   for (let index = 1; index < executions.length; index += 1) {
     const previous = executions[index - 1];
     const current = executions[index];
-    if (request.effectClass === "read_only") continue;
+    if (READ_ONLY_RUNTIME_ACTIONS.has(request.action)) continue;
 
     const between = records.filter((record) => record.sequence > previous.sequence
       && record.sequence < current.sequence);
-    const verifications = between.filter((record) => record.event.phase === "verification"
+    const finalEvidence = records.filter((record) => record.sequence > previous.sequence);
+    const verifications = finalEvidence.filter((record) => record.event.phase === "verification"
       && record.event.attemptId === previous.event.attemptId);
-    const acknowledgements = between.filter((record) => record.event.phase === "acknowledgement"
+    const acknowledgements = finalEvidence.filter((record) => record.event.phase === "acknowledgement"
       && record.event.attemptId === previous.event.attemptId);
     const reconciliations = between.filter((record) => record.event.phase === "reconciliation"
       && record.event.attemptId === previous.event.attemptId);
@@ -820,6 +1090,7 @@ function validateRuntimeRetries(
     if (reconciliation) continue;
 
     const reviewedProviderIdempotency = request.reviewedProviderIdempotencyArtifactHash !== undefined
+      && declaredProviderIdempotencyArtifact
       && previous.event.providerIdempotencyState === "supported";
     if (reviewedProviderIdempotency) continue;
 
@@ -862,7 +1133,7 @@ function validateRuntimeControl(
   }
 
   for (const records of byAction.values()) {
-    validateRuntimeActionGroup(records, caseIndex, issues);
+    validateRuntimeActionGroup(manifest, records, caseIndex, issues);
   }
   validateRuntimePromotions(actions, promotions, issues);
 }
@@ -907,19 +1178,42 @@ function validateRuntimePromotions(
   }
 }
 
+function validateOperationalProvenance(manifest: EvidenceManifestV2, issues: ContractIssue[]) {
+  if (manifest.executionState === "not_run") return;
+  for (const record of manifest.evidence) {
+    if (record.provenance.sourceKind === "synthetic_fixture") {
+      addIssue(
+        issues,
+        "operational_provenance_invalid",
+        "fail",
+        `${evidencePath(manifest, record)}/provenance/sourceKind`,
+      );
+    }
+  }
+}
+
 function validateCrossRecordInvariants(manifest: EvidenceManifestV2): ContractIssue[] {
   const issues: ContractIssue[] = [];
+  validateOperationalProvenance(manifest, issues);
   validateCaseIds(manifest, issues);
   const messages = recordsOf(manifest, "message_observation");
   const bindings = recordsOf(manifest, "identity_binding");
   const promotions = recordsOf(manifest, "beads_promotion");
+  const deduplicatedMessages = deduplicateMessageReobservations(messages);
   validateMessages(manifest, messages, issues);
   validateIdentityAttribution(manifest, messages, bindings, issues);
-  validateCollaborationSequences(manifest, messages, issues);
+  validateCollaborationSequences(manifest, deduplicatedMessages, issues);
   validatePromotions(manifest, promotions, issues);
-  validateRuntimeObservations(recordsOf(manifest, "runtime_observation"), issues);
-  validateLoopTransitions(recordsOf(manifest, "loop_guard_transition"), issues);
-  validateDesktop(recordsOf(manifest, "desktop_capability"), issues);
+  validateRuntimeObservations(manifest, recordsOf(manifest, "runtime_observation"), issues);
+  validateLoopTransitions(
+    manifest,
+    recordsOf(manifest, "loop_guard_transition"),
+    messages,
+    bindings,
+    recordsOf(manifest, "mcp_exchange"),
+    issues,
+  );
+  validateDesktop(manifest, recordsOf(manifest, "desktop_capability"), issues);
   validateMonitorAndTeardown(manifest, issues);
   validateRuntimeControl(manifest, recordsOf(manifest, "runtime_control_action"), promotions, issues);
   return issues;
@@ -977,20 +1271,38 @@ export function requestAutonomousSend(state: LoopGuardState): AutonomousSendDeci
   };
 }
 
+const authenticatedHumanOriginProofBrand: unique symbol = Symbol("authenticated-human-origin-proof");
+
+export type AuthenticatedHumanOriginProof = {
+  readonly channelId: string;
+  readonly [authenticatedHumanOriginProofBrand]: true;
+};
+
+export function deriveAuthenticatedHumanOriginProof(
+  value: unknown,
+  channelId: string,
+): AuthenticatedHumanOriginProof | null {
+  const parsed = parseEvidenceManifestV2(value);
+  if (!parsed.ok || validateEvidenceManifest(value).issues.length > 0) return null;
+  const messages = recordsOf(parsed.manifest, "message_observation");
+  const bindings = recordsOf(parsed.manifest, "identity_binding");
+  const reset = recordsOf(parsed.manifest, "loop_guard_transition").find((transition) => transition.channelId === channelId
+    && transition.origin === "human"
+    && transition.fromState === "paused(6)"
+    && transition.toState === "active(0)"
+    && humanResetMessage(transition, messages, bindings) !== undefined);
+  if (reset === undefined) return null;
+  return Object.freeze({ channelId, [authenticatedHumanOriginProofBrand]: true as const });
+}
+
 export function recordAuthenticatedHumanOrigin(
   state: LoopGuardState,
-  evidence: unknown,
+  proof: AuthenticatedHumanOriginProof | null,
 ): { reset: boolean; state: LoopGuardState } {
   if (state.phase !== "paused"
-    || !isObject(evidence)
-    || evidence.origin !== "human"
-    || evidence.authenticated !== true
-    || evidence.identityVerified !== true
-    || evidence.channelId !== state.channelId
-    || !isNonemptyString(evidence.providerInstanceId)
-    || !isNonemptyString(evidence.stableMessageUid)
-    || !hasUtcTimestamp(evidence.observedAtUtc)
-    || !isNonemptyString(evidence.directUpstreamEvidence)) {
+    || proof === null
+    || proof[authenticatedHumanOriginProofBrand] !== true
+    || proof.channelId !== state.channelId) {
     return { reset: false, state };
   }
   return { reset: true, state: createLoopGuardState(state.channelId) };
