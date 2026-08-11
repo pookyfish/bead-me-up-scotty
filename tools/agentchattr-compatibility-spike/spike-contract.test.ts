@@ -1366,13 +1366,115 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
       for (let index = 0; index < 6; index += 1) {
         nextEpochState = requestAutonomousSend(nextEpochState).state;
       }
+
+      const mutableAliasCases = [
+        {
+          name: "timestamps only",
+          startedAt: "2026-08-10T08:00:04.100Z",
+          observedAt: "2026-08-10T08:00:04.200Z",
+          mutate: () => undefined,
+        },
+        {
+          name: "case and stable UID",
+          startedAt: "2026-08-10T08:00:04.300Z",
+          observedAt: "2026-08-10T08:00:04.400Z",
+          mutate: (reset: JsonRecord, message: JsonRecord) => {
+            Reflect.set(reset, "caseId", "loop-reset-case-alias");
+            Reflect.set(message, "caseId", "message-human-case-alias");
+            Reflect.set(message, "stableMessageUid", "human-reset-uid-alias");
+          },
+        },
+        {
+          name: "cursor",
+          startedAt: "2026-08-10T08:00:04.500Z",
+          observedAt: "2026-08-10T08:00:04.600Z",
+          mutate: (_reset: JsonRecord, message: JsonRecord) => {
+            Reflect.set(message, "cursorId", 70);
+          },
+        },
+        {
+          name: "sender label",
+          startedAt: "2026-08-10T08:00:04.700Z",
+          observedAt: "2026-08-10T08:00:04.800Z",
+          mutate: (_reset: JsonRecord, message: JsonRecord, humanBinding: JsonRecord) => {
+            Reflect.set(message, "senderExternalId", "external-human-alias");
+            Reflect.set(humanBinding, "agentChattrExternalId", "external-human-alias");
+          },
+        },
+        {
+          name: "provider label",
+          startedAt: "2026-08-10T08:00:04.900Z",
+          observedAt: "2026-08-10T08:00:05.000Z",
+          mutate: (_reset: JsonRecord, message: JsonRecord, humanBinding: JsonRecord) => {
+            Reflect.set(message, "providerInstanceId", "agentchattr-instance-alias");
+            Reflect.set(humanBinding, "agentChattrInstanceId", "agentchattr-instance-alias");
+          },
+        },
+        {
+          name: "content checksum",
+          startedAt: "2026-08-10T08:00:05.100Z",
+          observedAt: "2026-08-10T08:00:05.200Z",
+          mutate: (_reset: JsonRecord, message: JsonRecord) => {
+            Reflect.set(message, "contentChecksum", hashes.e);
+          },
+        },
+        {
+          name: "parent and thread labels",
+          startedAt: "2026-08-10T08:00:05.300Z",
+          observedAt: "2026-08-10T08:00:05.400Z",
+          mutate: (_reset: JsonRecord, message: JsonRecord) => {
+            Reflect.set(message, "parentUid", "parent-message-alias");
+            Reflect.set(message, "threadId", "thread-alias");
+          },
+        },
+        {
+          name: "transport acknowledgement read and observation states",
+          startedAt: "2026-08-10T08:00:05.500Z",
+          observedAt: "2026-08-10T08:00:05.600Z",
+          mutate: (_reset: JsonRecord, message: JsonRecord) => {
+            Reflect.set(message, "transportState", "queued");
+            Reflect.set(message, "receiverAcknowledgementState", "acknowledged");
+            Reflect.set(message, "readState", "read");
+            Reflect.set(message, "observationContext", "retry_replay");
+          },
+        },
+      ];
+      for (const [index, aliasCase] of mutableAliasCases.entries()) {
+        const aliasManifest = structuredClone(proofManifest);
+        const aliasReset = aliasManifest.evidence.find((record) => record.kind === "loop_guard_transition"
+          && Reflect.get(record, "origin") === "human") as JsonRecord | undefined;
+        const aliasMessage = aliasManifest.evidence.find((record) => record.kind === "message_observation"
+          && Reflect.get(record, "senderExternalId") === "external-human-one") as JsonRecord | undefined;
+        const aliasHumanBinding = aliasManifest.evidence.find((record) => record.kind === "identity_binding"
+          && Reflect.get(record, "orchestrationRole") === "human") as JsonRecord | undefined;
+        expect(aliasReset, aliasCase.name).toBeDefined();
+        expect(aliasMessage, aliasCase.name).toBeDefined();
+        expect(aliasHumanBinding, aliasCase.name).toBeDefined();
+        if (aliasReset && aliasMessage && aliasHumanBinding) {
+          Reflect.set(aliasReset, "startedAt", aliasCase.startedAt);
+          Reflect.set(aliasReset, "observedAt", aliasCase.observedAt);
+          Reflect.set(aliasMessage, "startedAt", aliasCase.startedAt);
+          Reflect.set(aliasMessage, "observedAt", aliasCase.observedAt);
+          aliasCase.mutate(aliasReset, aliasMessage, aliasHumanBinding);
+        }
+        const aliasProof = deriveProof(aliasManifest, "channel-one");
+        expect(aliasProof, aliasCase.name).not.toBeNull();
+        let aliasState = index === 0 ? nextEpochState : createLoopGuardState("channel-one");
+        if (index !== 0) {
+          for (let sendIndex = 0; sendIndex < 6; sendIndex += 1) {
+            aliasState = requestAutonomousSend(aliasState).state;
+          }
+        }
+        expect(recordAuthenticatedHumanOrigin(aliasState, aliasProof as never).reset, aliasCase.name).toBe(false);
+      }
+
       const laterEvidenceManifest = structuredClone(proofManifest);
       const laterReset = laterEvidenceManifest.evidence.find((record) => record.kind === "loop_guard_transition"
         && Reflect.get(record, "origin") === "human");
       if (laterReset) {
         laterReset.caseId = "loop-reset-later-epoch";
-        laterReset.startedAt = times.five;
-        laterReset.observedAt = times.six;
+        laterReset.startedAt = "2026-08-10T08:00:05.700Z";
+        laterReset.observedAt = "2026-08-10T08:00:05.800Z";
         Reflect.set(laterReset, "authenticatedHumanProofHash", hashes.c);
       }
       const laterMessage = laterEvidenceManifest.evidence.find((record) => record.kind === "message_observation"
@@ -1380,8 +1482,8 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
       if (laterMessage) {
         laterMessage.caseId = "message-human-reset-later-epoch";
         Reflect.set(laterMessage, "stableMessageUid", "human-reset-message-later-epoch");
-        laterMessage.startedAt = times.five;
-        laterMessage.observedAt = times.six;
+        laterMessage.startedAt = "2026-08-10T08:00:05.700Z";
+        laterMessage.observedAt = "2026-08-10T08:00:05.800Z";
         Reflect.set(laterMessage, "contentChecksum", hashes.d);
         Reflect.set(laterMessage, "directEvidenceArtifactHash", hashes.c);
       }
@@ -1391,6 +1493,22 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
       const laterResetResult = recordAuthenticatedHumanOrigin(nextEpochState, laterProof as never);
       expect(laterResetResult.reset).toBe(true);
       expect(recordAuthenticatedHumanOrigin(nextEpochState, laterProof as never).reset).toBe(false);
+
+      const otherChannelManifest = structuredClone(proofManifest);
+      for (const record of otherChannelManifest.evidence) {
+        if (record.kind === "loop_guard_transition"
+          || record.kind === "message_observation"
+          || record.kind === "mcp_exchange") {
+          Reflect.set(record, "channelId", "channel-two");
+        }
+      }
+      const otherChannelProof = deriveProof(otherChannelManifest, "channel-two");
+      let otherChannelState = createLoopGuardState("channel-two");
+      for (let index = 0; index < 6; index += 1) {
+        otherChannelState = requestAutonomousSend(otherChannelState).state;
+      }
+      expect(otherChannelProof).not.toBeNull();
+      expect(recordAuthenticatedHumanOrigin(otherChannelState, otherChannelProof as never).reset).toBe(true);
     }
   });
 

@@ -1498,20 +1498,11 @@ export function deriveAuthenticatedHumanOriginProof(
   }).sort((left, right) => compareTimestamps(left.transition.observedAt, right.transition.observedAt));
   const reset = resets.at(-1);
   if (reset === undefined) return null;
+  const proofDigest = reset.transition.authenticatedHumanProofHash;
+  if (proofDigest === null || proofDigest !== reset.proofMessage.directEvidenceArtifactHash) return null;
   const evidenceKey = JSON.stringify([
     channelId,
-    reset.transition.startedAt,
-    reset.transition.observedAt,
-    reset.transition.authenticatedHumanProofHash,
-    reset.proofMessage.startedAt,
-    reset.proofMessage.observedAt,
-    reset.proofMessage.providerInstanceId,
-    reset.proofMessage.senderExternalId,
-    reset.proofMessage.contentChecksum,
-    reset.proofMessage.parentUid,
-    reset.proofMessage.threadId,
-    reset.proofMessage.messageState,
-    reset.proofMessage.directEvidenceArtifactHash,
+    proofDigest,
   ]);
   let resetEvidence = authenticatedHumanResetEvidence.get(evidenceKey);
   if (resetEvidence === undefined) {
