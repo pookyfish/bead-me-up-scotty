@@ -8,11 +8,64 @@ import {
   type AuthorityFirewallInput,
 } from "./authority-firewall";
 
+const approvedTestSurfaces = [
+  "beads",
+  "supervisor_appointments",
+  "dispatch_configuration",
+  "execution_leases",
+  "runtime_manager_definitions",
+  "git_state",
+] as const;
+
+const approvedTestMechanisms = [
+  "callback",
+  "plugin",
+  "extension",
+  "configuration",
+  "http",
+  "mcp",
+  "message",
+  "mention",
+] as const;
+
+function hasApprovedCartesianDomain(
+  surfaces: readonly string[],
+  mechanisms: readonly string[],
+  invocations: ReadonlyArray<{ surface: string; mechanism: string }>,
+) {
+  if (surfaces.length !== approvedTestSurfaces.length
+    || !surfaces.every((surface, index) => surface === approvedTestSurfaces[index])
+    || mechanisms.length !== approvedTestMechanisms.length
+    || !mechanisms.every((mechanism, index) => mechanism === approvedTestMechanisms[index])) {
+    return false;
+  }
+  const expectedPairs = approvedTestSurfaces.flatMap((surface) => approvedTestMechanisms.map(
+    (mechanism) => `${surface}:${mechanism}`,
+  ));
+  const actualPairs = invocations.map((invocation) => `${invocation.surface}:${invocation.mechanism}`);
+  return actualPairs.length === expectedPairs.length
+    && new Set(actualPairs).size === expectedPairs.length
+    && actualPairs.every((pair) => expectedPairs.includes(pair));
+}
+
 function fixture(): AuthorityFirewallInput {
   return structuredClone(committedFixture) as AuthorityFirewallInput;
 }
 
 describe("typed authority-mutation firewall", () => {
+  it("rejects a coordinated domain replacement even when the candidate fixture drifts with it", () => {
+    const driftedMechanisms = ["import", ...approvedTestMechanisms.slice(1)];
+    const driftedInvocations = committedFixture.invocations.map((invocation) => invocation.mechanism === "callback"
+      ? { ...invocation, mechanism: "import" }
+      : invocation);
+
+    expect(hasApprovedCartesianDomain(
+      approvedTestSurfaces,
+      driftedMechanisms,
+      driftedInvocations,
+    )).toBe(false);
+  });
+
   it("passes identical snapshots and one rejected or inert attempt for every closed pair", () => {
     const result = evaluateAuthorityFirewall(fixture());
 
@@ -84,32 +137,43 @@ describe("typed authority-mutation firewall", () => {
   });
 
   it("requires each of the six surfaces by eight mechanisms exactly once", () => {
-    const expectedPairs = authoritySurfaces.flatMap((surface) => authorityMechanisms.map(
+    const expectedPairs = approvedTestSurfaces.flatMap((surface) => approvedTestMechanisms.map(
       (mechanism) => `${surface}:${mechanism}`,
     ));
     const actualPairs = committedFixture.invocations.map(
       (invocation) => `${invocation.surface}:${invocation.mechanism}`,
     );
 
+    expect(authoritySurfaces).toEqual(approvedTestSurfaces);
+    expect(authorityMechanisms).toEqual(approvedTestMechanisms);
     expect(actualPairs).toEqual(expectedPairs);
+    expect(actualPairs).toHaveLength(48);
     expect(new Set(actualPairs).size).toBe(48);
+    expect(hasApprovedCartesianDomain(authoritySurfaces, authorityMechanisms, committedFixture.invocations))
+      .toBe(true);
   });
 
-  it("fails duplicate and missing invocation pairs", () => {
+  it.each(approvedTestMechanisms)("fails a missing %s pair without consulting the production domain", (mechanism) => {
     const missing = fixture();
-    missing.invocations = missing.invocations.slice(1);
+    missing.invocations = missing.invocations.filter((invocation) => invocation.surface !== "beads"
+      || invocation.mechanism !== mechanism);
     expect(evaluateAuthorityFirewall(missing).issues).toContainEqual({
       surface: "beads",
-      mechanism: "callback",
+      mechanism,
       code: "invocation_missing",
     });
     expect(evaluateAuthorityFirewall(missing).classification).toBe("fail");
+  });
 
+  it.each(approvedTestMechanisms)("fails a duplicate %s pair without consulting the production domain", (mechanism) => {
     const duplicate = fixture();
-    duplicate.invocations = [...duplicate.invocations, duplicate.invocations[0]];
+    const duplicatedInvocation = duplicate.invocations.find((invocation) => invocation.surface === "beads"
+      && invocation.mechanism === mechanism);
+    if (!duplicatedInvocation) throw new Error(`Fixture is missing beads:${mechanism}.`);
+    duplicate.invocations = [...duplicate.invocations, duplicatedInvocation];
     expect(evaluateAuthorityFirewall(duplicate).issues).toContainEqual({
       surface: "beads",
-      mechanism: "callback",
+      mechanism,
       code: "invocation_duplicate",
     });
     expect(evaluateAuthorityFirewall(duplicate).classification).toBe("fail");

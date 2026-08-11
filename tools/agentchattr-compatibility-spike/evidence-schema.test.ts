@@ -3,6 +3,7 @@ import {
   APPROVED_UPSTREAM_PIN,
   acknowledgementStateSchema,
   artifactBindingSchema,
+  authorityInvocationSchema,
   beadsPromotionSchema,
   caseIdSchema,
   collaborationIntentSchema,
@@ -1337,6 +1338,36 @@ describe("operational boundaries and Herdr observations", () => {
           ],
         },
       }).success).toBe(false);
+    }
+  });
+
+  it("rejects near-neighbor mechanism aliases before they can substitute for an approved pair", () => {
+    const approvedInvocation = committedAuthorityFirewallFixture.invocations[0];
+    const rejectedMechanisms = [
+      "import",
+      "webhook",
+      "background_job",
+      "startup_hook",
+      "shutdown_hook",
+      "startup",
+      "startup-hook",
+      "configuration_hook",
+      "http_hook",
+      "message_hook",
+      "mention_hook",
+      "Import",
+      "WEBHOOK",
+      "background-job",
+      "startupHook",
+      "shutdownHook",
+      "configuration-hook",
+      "http-hook",
+      "message-hook",
+      "mention-hook",
+    ];
+
+    for (const mechanism of rejectedMechanisms) {
+      expect(authorityInvocationSchema.safeParse({ ...approvedInvocation, mechanism }).success).toBe(false);
     }
   });
 
