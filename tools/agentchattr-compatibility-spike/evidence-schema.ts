@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { authorityMechanisms, authoritySurfaces } from "./authority-firewall";
+
 export const APPROVED_UPSTREAM_PIN = {
   repository: "https://github.com/bcurts/agentchattr.git",
   commit: "c24f605c9b24fb7a98003f7930e2d5e7a7f7d297",
@@ -445,6 +447,55 @@ const reviewedArgvTemplateSchema = z.tuple([
   z.literal("<secret>"),
 ]);
 
+export const authoritySnapshotSchema = z.strictObject({
+  surface: z.enum(authoritySurfaces),
+  digest: sha256Schema,
+  inventoryCount: z.int().nonnegative(),
+});
+
+export const authorityInvocationSchema = z.strictObject({
+  mechanism: z.enum(authorityMechanisms),
+  surface: z.enum(authoritySurfaces),
+  result: z.enum(["rejected", "inert", "invoked", "unknown"]),
+  externalProcessCount: z.int().nonnegative(),
+});
+
+function exactAuthoritySnapshotsSchema() {
+  return z.array(authoritySnapshotSchema).length(authoritySurfaces.length).superRefine((snapshots, context) => {
+    for (const surface of authoritySurfaces) {
+      if (snapshots.filter((snapshot) => snapshot.surface === surface).length !== 1) {
+        context.addIssue({
+          code: "custom",
+          message: "Every authority surface requires exactly one snapshot.",
+          params: structuralInvalidFieldParams,
+        });
+      }
+    }
+  });
+}
+
+export const authorityMutationFirewallSchema = z.strictObject({
+  before: exactAuthoritySnapshotsSchema(),
+  after: exactAuthoritySnapshotsSchema(),
+  invocations: z.array(authorityInvocationSchema)
+    .length(authoritySurfaces.length * authorityMechanisms.length)
+    .superRefine((invocations, context) => {
+      for (const surface of authoritySurfaces) {
+        for (const mechanism of authorityMechanisms) {
+          if (invocations.filter((invocation) => invocation.surface === surface
+            && invocation.mechanism === mechanism).length !== 1) {
+            context.addIssue({
+              code: "custom",
+              message: "Every authority surface and mechanism pair requires exactly one invocation.",
+              params: structuralInvalidFieldParams,
+            });
+          }
+        }
+      }
+    }),
+  classification: z.enum(["pass", "fail", "unknown"]),
+});
+
 export const configurationBoundarySchema = withEvidenceBase("configuration_boundary", {
   lifecycleOwner: z.literal("runtime-manager"),
   invocation: z.literal("direct_server"),
@@ -460,6 +511,7 @@ export const configurationBoundarySchema = withEvidenceBase("configuration_bound
   autoWakeState: operationalStateSchema,
   jobsState: operationalStateSchema,
   persistentRulesState: operationalStateSchema,
+  authorityMutationFirewall: authorityMutationFirewallSchema.optional(),
 });
 
 export const monitorIntervalSchema = withEvidenceBase("monitor_interval", {

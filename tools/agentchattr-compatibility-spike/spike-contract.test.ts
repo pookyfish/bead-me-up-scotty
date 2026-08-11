@@ -11,6 +11,7 @@ import {
 import { artifactBindingSchema } from "./evidence-schema";
 import committedIdentityFixture from "./fixtures/identity-bindings.json";
 import committedMessageFixture from "./fixtures/message-contract.json";
+import committedAuthorityFirewallFixture from "./fixtures/authority-firewall.json";
 
 const hashes = {
   a: `sha256:${"a".repeat(64)}`,
@@ -114,6 +115,10 @@ function configurationBoundary() {
     autoWakeState: "disabled",
     jobsState: "disabled",
     persistentRulesState: "disabled",
+    authorityMutationFirewall: {
+      ...structuredClone(committedAuthorityFirewallFixture),
+      classification: "pass",
+    },
   };
 }
 
@@ -551,6 +556,33 @@ describe("typed manifest aggregation and opaque extensions", () => {
       "x-actor-authority": "enabled",
     });
     expect(validateEvidenceManifest(failingExtended)).toEqual(validateEvidenceManifest(failing));
+  });
+
+  it("requires a passing authority firewall for a completed configuration boundary", () => {
+    const passing = validManifestV2();
+    expect(validateEvidenceManifest(passing).issues).toEqual([]);
+
+    const missing = validManifestV2();
+    const missingConfiguration = missing.evidence.find((record) => record.kind === "configuration_boundary");
+    if (missingConfiguration) Reflect.deleteProperty(missingConfiguration, "authorityMutationFirewall");
+    expectIssue(missing, "authority_mutation_firewall_missing", "unknown");
+
+    const unknown = validManifestV2();
+    const unknownConfiguration = unknown.evidence.find((record) => record.kind === "configuration_boundary");
+    if (unknownConfiguration) {
+      const firewall = Reflect.get(unknownConfiguration, "authorityMutationFirewall") as JsonRecord;
+      firewall.classification = "unknown";
+    }
+    expectIssue(unknown, "authority_mutation_firewall_unknown", "unknown");
+
+    const invoked = validManifestV2();
+    const invokedConfiguration = invoked.evidence.find((record) => record.kind === "configuration_boundary");
+    if (invokedConfiguration) {
+      const firewall = Reflect.get(invokedConfiguration, "authorityMutationFirewall") as JsonRecord;
+      const invocations = Reflect.get(firewall, "invocations") as JsonRecord[];
+      invocations[0] = { ...invocations[0], result: "invoked" };
+    }
+    expectIssue(invoked, "authority_mutation_firewall_failed", "fail");
   });
 });
 

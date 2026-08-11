@@ -16,6 +16,7 @@ import {
   type RuntimeObservation,
   type StructuralIssue,
 } from "./evidence-schema";
+import { evaluateAuthorityFirewall } from "./authority-firewall";
 
 export { APPROVED_UPSTREAM_PIN } from "./evidence-schema";
 
@@ -835,6 +836,26 @@ function validateMonitorAndTeardown(manifest: EvidenceManifestV2, issues: Contra
   }
 }
 
+function validateAuthorityMutationFirewall(manifest: EvidenceManifestV2, issues: ContractIssue[]) {
+  if (manifest.executionState !== "completed") return;
+
+  const configuration = recordsOf(manifest, "configuration_boundary")[0];
+  if (!configuration) return;
+  const path = `${evidencePath(manifest, configuration)}/authorityMutationFirewall`;
+  const firewall = configuration.authorityMutationFirewall;
+  if (!firewall) {
+    addIssue(issues, "authority_mutation_firewall_missing", "unknown", path);
+    return;
+  }
+
+  const evaluated = evaluateAuthorityFirewall(firewall);
+  if (evaluated.classification === "fail" || firewall.classification === "fail") {
+    addIssue(issues, "authority_mutation_firewall_failed", "fail", path);
+  } else if (evaluated.classification === "unknown" || firewall.classification === "unknown") {
+    addIssue(issues, "authority_mutation_firewall_unknown", "unknown", path);
+  }
+}
+
 function runtimeTargetSignature(target: RuntimeControlTarget | HerdrTarget) {
   switch (target.targetKind) {
     case "workspace":
@@ -1380,6 +1401,7 @@ function validateCrossRecordInvariants(manifest: EvidenceManifestV2): ContractIs
     issues,
   );
   validateDesktop(manifest, recordsOf(manifest, "desktop_capability"), issues);
+  validateAuthorityMutationFirewall(manifest, issues);
   validateMonitorAndTeardown(manifest, issues);
   validateRuntimeControl(manifest, recordsOf(manifest, "runtime_control_action"), promotions, issues);
   return issues;

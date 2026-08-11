@@ -38,6 +38,7 @@ import { z } from "zod";
 import committedManifest from "../../docs/superpowers/evidence/2026-08-09-scotty-agentchattr-compatibility-spike/manifest.json";
 import committedIdentityFixture from "./fixtures/identity-bindings.json";
 import committedMessageFixture from "./fixtures/message-contract.json";
+import committedAuthorityFirewallFixture from "./fixtures/authority-firewall.json";
 
 const digest = `sha256:${"a".repeat(64)}`;
 
@@ -781,6 +782,10 @@ function validConfigurationBoundary() {
     autoWakeState: "disabled",
     jobsState: "not_run",
     persistentRulesState: "disabled",
+    authorityMutationFirewall: {
+      ...committedAuthorityFirewallFixture,
+      classification: "pass",
+    },
   };
 }
 
@@ -1311,6 +1316,28 @@ describe("operational boundaries and Herdr observations", () => {
     expect(configurationBoundarySchema.safeParse({ ...valid, disposableRootLabel: "C:/temp/spike" }).success).toBe(false);
     expect(configurationBoundarySchema.safeParse({ ...valid, reviewedArgvTemplate: ["C:/tools/server.exe", "<data-dir>", "<port>", "<secret>"] }).success).toBe(false);
     expect(configurationBoundarySchema.safeParse({ ...valid, reviewedArgvTemplate: ["agentchattr-server", "--port", "<port>", "<secret>"] }).success).toBe(false);
+  });
+
+  it("accepts only hash/count/result authority evidence and rejects raw authority material", () => {
+    const valid = validConfigurationBoundary();
+    expect(configurationBoundarySchema.safeParse(valid).success).toBe(true);
+
+    for (const field of ["path", "command", "token", "ref", "content", "callbackBody"]) {
+      expect(configurationBoundarySchema.safeParse({
+        ...valid,
+        authorityMutationFirewall: { ...valid.authorityMutationFirewall, [field]: "raw" },
+      }).success).toBe(false);
+      expect(configurationBoundarySchema.safeParse({
+        ...valid,
+        authorityMutationFirewall: {
+          ...valid.authorityMutationFirewall,
+          invocations: [
+            { ...valid.authorityMutationFirewall.invocations[0], [field]: "raw" },
+            ...valid.authorityMutationFirewall.invocations.slice(1),
+          ],
+        },
+      }).success).toBe(false);
+    }
   });
 
   it("accepts every closed monitor kind and bounded hash-only interval evidence", () => {
