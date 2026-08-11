@@ -141,6 +141,8 @@ function validManifestV2(
   const foundation = options.includeDirectFoundation === false
     ? []
     : [runtimeSnapshot("direct_herdr", "manifest-foundation", {
+      startedAt: times.before,
+      observedAt: times.after,
       observation: {
         observationKind: "agent_snapshot",
         workspaceId: "foundation-workspace",
@@ -414,6 +416,28 @@ function runtimeSnapshot(adapter: "direct_herdr" | "herdr_telemetry_bridge", suf
   };
 }
 
+function runtimeControlResultObservation(
+  adapter: "direct_herdr" | "herdr_telemetry_bridge",
+  suffix: string,
+  disposition: "applied" | "not_applied",
+  overrides: JsonRecord = {},
+) {
+  return runtimeSnapshot(adapter, suffix, {
+    observation: {
+      observationKind: "control_result",
+      actionId: actionIds.action,
+      attemptId: actionIds.attemptOne,
+      action: "send_text",
+      target: paneTarget,
+      disposition,
+      resultArtifactHash: hashes.d,
+      eventAt: times.four,
+    },
+    controlProof: runtimeControlProof(disposition),
+    ...overrides,
+  });
+}
+
 describe("typed manifest aggregation and opaque extensions", () => {
   it("accepts the strict empty not-run envelope", () => {
     expect(validateEvidenceManifest(validNotRunManifestV2())).toEqual({ classification: "pass", issues: [] });
@@ -600,6 +624,74 @@ describe("typed message, identity, collaboration, and promotion invariants", () 
       classification: "fail",
       path: "/evidence/10/cursorId",
     });
+  });
+
+  it("orders message observations chronologically before opening restart epochs", () => {
+    const prior = messageObservation("chronology-prior", {
+      stableMessageUid: "chronology-prior-uid",
+      cursorId: 100,
+      observedAt: times.five,
+    });
+    const retroactiveRestart = messageObservation("chronology-restart", {
+      stableMessageUid: "chronology-restart-uid",
+      cursorId: 5,
+      observedAt: times.four,
+      observationContext: "post_restart",
+    });
+    expect(validateEvidenceManifest(validManifestV2([
+      identityBinding(), prior, retroactiveRestart,
+    ])).issues).toContainEqual({
+      code: "message_observation_chronology",
+      classification: "fail",
+      path: "/evidence/9/observedAt",
+    });
+  });
+
+  it("enforces cursor order for a known UID within an epoch and permits a later genuine restart", () => {
+    const original = messageObservation("known-uid-original", {
+      stableMessageUid: "known-restart-uid",
+      cursorId: 100,
+      observedAt: times.one,
+    });
+    const firstRestart = messageObservation("known-uid-restart", {
+      stableMessageUid: "known-restart-uid",
+      cursorId: 5,
+      observedAt: times.two,
+      observationContext: "post_restart",
+    });
+    const decreasingReplay = messageObservation("known-uid-decreasing", {
+      stableMessageUid: "known-restart-uid",
+      cursorId: 4,
+      observedAt: times.three,
+      observationContext: "post_restart",
+    });
+    expect(validateEvidenceManifest(validManifestV2([
+      identityBinding(), original, firstRestart, decreasingReplay,
+    ])).issues).toContainEqual({
+      code: "message_cursor_order",
+      classification: "fail",
+      path: "/evidence/10/cursorId",
+    });
+
+    const withinFirstEpoch = messageObservation("first-epoch-progress", {
+      stableMessageUid: "first-epoch-progress-uid",
+      cursorId: 6,
+      observedAt: times.three,
+    });
+    const laterRestart = messageObservation("later-genuine-restart", {
+      stableMessageUid: "later-genuine-restart-uid",
+      cursorId: 1,
+      observedAt: times.five,
+      observationContext: "post_restart",
+    });
+    const withinLaterEpoch = messageObservation("later-epoch-progress", {
+      stableMessageUid: "later-epoch-progress-uid",
+      cursorId: 2,
+      observedAt: times.six,
+    });
+    expect(validateEvidenceManifest(validManifestV2([
+      identityBinding(), original, firstRestart, withinFirstEpoch, laterRestart, withinLaterEpoch,
+    ]))).toEqual({ classification: "pass", issues: [] });
   });
 
   it("requires tombstone state deleted in addition to prior-present durable linkage", () => {
@@ -876,6 +968,17 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
       classification: "unknown",
       path: "/evidence",
     });
+
+    const beforeTrial = runtimeSnapshot("direct_herdr", "before-trial", {
+      startedAt: times.before,
+      observedAt: times.before,
+    });
+    const preConfigurationOnly = validManifestV2([beforeTrial], { includeDirectFoundation: false });
+    expect(validateEvidenceManifest(preConfigurationOnly).issues).toContainEqual({
+      code: "runtime_direct_foundation_missing",
+      classification: "unknown",
+      path: "/evidence",
+    });
   });
 
   it("enforces observation adapter, provenance source, and native contract compatibility", () => {
@@ -1081,11 +1184,31 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
       resultingStableMessageUid: null,
     });
     const base = [identityBinding(), ...transitions, ...loopProofRecords(transitions)];
+    expect(validateEvidenceManifest(validManifestV2(base)).issues).toEqual([]);
+    const repeatedSixthUidInvocation = mcpChatSend("loop-seven-repeated-sixth", "loop-message-six", {
+      startedAt: times.five,
+      observedAt: times.five,
+      requestArtifactHash: hashes.f,
+    });
+    const unseenProviderInvocation = mcpChatSend("loop-seven-unseen-provider", "loop-message-seven-upstream", {
+      caseId: "mcp-loop-seven-unseen-provider",
+      providerInstanceId: "agentchattr-unseen-instance",
+      startedAt: times.five,
+      observedAt: times.five,
+      operation: "tools/list",
+      expectedResult: "fail",
+      observedResult: "fail",
+      classification: "fail",
+      authenticationState: "failed",
+      resultingStableMessageUid: null,
+    });
     for (const upstreamEvidence of [
       [upstreamSeventh],
       [mcpChatSend("loop-seven-upstream", "loop-message-seven-upstream")],
       [upstreamSeventh, mcpChatSend("loop-seven-upstream", "loop-message-seven-upstream")],
       [failedNonChatInvocation],
+      [repeatedSixthUidInvocation],
+      [unseenProviderInvocation],
     ]) {
       expectIssue(
         validManifestV2([...base, ...upstreamEvidence]),
@@ -1181,7 +1304,15 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
     expect(deriveProof).toBeTypeOf("function");
     if (deriveProof) {
       const proof = deriveProof(proofManifest, "channel-one");
+      const duplicateProof = deriveProof(proofManifest, "channel-one");
+      const aliasedEvidenceManifest = structuredClone(proofManifest);
+      const aliasedReset = aliasedEvidenceManifest.evidence.find((record) => record.kind === "loop_guard_transition"
+        && Reflect.get(record, "origin") === "human");
+      if (aliasedReset) aliasedReset.caseId = "loop-reset-aliased-evidence";
+      const aliasedProof = deriveProof(aliasedEvidenceManifest, "channel-one");
       expect(proof).not.toBeNull();
+      expect(duplicateProof).not.toBeNull();
+      expect(aliasedProof).not.toBeNull();
       expect(Reflect.ownKeys(proof as object)).toEqual([]);
       expect(recordAuthenticatedHumanOrigin(state, { ...(proof as object) } as never).reset).toBe(false);
       expect(recordAuthenticatedHumanOrigin(
@@ -1190,6 +1321,8 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
       ).reset).toBe(false);
       expect(recordAuthenticatedHumanOrigin(state, proof as never).reset).toBe(true);
       expect(recordAuthenticatedHumanOrigin(state, proof as never).reset).toBe(false);
+      expect(recordAuthenticatedHumanOrigin(state, duplicateProof as never).reset).toBe(false);
+      expect(recordAuthenticatedHumanOrigin(state, aliasedProof as never).reset).toBe(false);
     }
   });
 
@@ -1268,6 +1401,22 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
 
   it("requires all six monitor starts before the configuration boundary for running and aborted execution without teardown", () => {
     for (const executionState of ["running", "aborted"] as const) {
+      const runtimeRecords = [
+        runtimeControlRecord(0, requestEvent()),
+        runtimeControlRecord(1, authorizationEvent(1)),
+        runtimeControlRecord(2, executionEvent(1, "succeeded"), { observedAt: times.six }),
+      ];
+      const fullyCovered = validManifestV2(runtimeRecords);
+      fullyCovered.executionState = executionState;
+      fullyCovered.endpoint.state = executionState === "running" ? "bound" : "stopped";
+      fullyCovered.evidence = fullyCovered.evidence.filter((record) => record.kind !== "teardown");
+      if (executionState === "aborted") {
+        fullyCovered.evidence[0].observedResult = "unknown";
+        fullyCovered.evidence[0].classification = "unknown";
+      }
+      expect(validateEvidenceManifest(fullyCovered).issues.filter((issue) => issue.code === "monitor_coverage_gap"))
+        .toEqual([]);
+
       const manifest = validManifestV2();
       manifest.executionState = executionState;
       manifest.endpoint.state = executionState === "running" ? "bound" : "stopped";
@@ -1302,6 +1451,25 @@ describe("runtime observation, loop, Desktop, monitor, and teardown invariants",
         endedProcessMonitor.observedAt = times.before;
       }
       expect(validateEvidenceManifest(endedBeforeStart).issues).toContainEqual({
+        code: "monitor_coverage_gap",
+        classification: "fail",
+        path: "/evidence",
+      });
+
+      const endedBeforeLatestEvidence = validManifestV2(runtimeRecords);
+      endedBeforeLatestEvidence.executionState = executionState;
+      endedBeforeLatestEvidence.endpoint.state = executionState === "running" ? "bound" : "stopped";
+      endedBeforeLatestEvidence.evidence = endedBeforeLatestEvidence.evidence
+        .filter((record) => record.kind !== "teardown");
+      if (executionState === "aborted") {
+        endedBeforeLatestEvidence.evidence[0].observedResult = "unknown";
+        endedBeforeLatestEvidence.evidence[0].classification = "unknown";
+      }
+      const shortProcessMonitor = endedBeforeLatestEvidence.evidence.find(
+        (record) => record.kind === "monitor_interval" && Reflect.get(record, "monitorKind") === "process",
+      );
+      if (shortProcessMonitor) shortProcessMonitor.observedAt = times.five;
+      expect(validateEvidenceManifest(endedBeforeLatestEvidence).issues).toContainEqual({
         code: "monitor_coverage_gap",
         classification: "fail",
         path: "/evidence",
@@ -1736,11 +1904,10 @@ describe("typed runtime-control state machine", () => {
   });
 
   it("binds runtime-observation verification to later current direct Herdr proof for the exact request target", () => {
-    const verified = runtimeSnapshot("direct_herdr", "verification", {
+    const verified = runtimeControlResultObservation("direct_herdr", "verification", "applied", {
       caseId: "runtime-verification-observation",
       startedAt: times.four,
       observedAt: times.four,
-      controlProof: runtimeControlProof("applied"),
     });
     const records = timeline([
       requestEvent(),
@@ -1754,19 +1921,30 @@ describe("typed runtime-control state machine", () => {
     expect(validateEvidenceManifest(validManifestV2([...records, verified])).issues).toEqual([]);
 
     const invalidProofs = [
-      runtimeSnapshot("herdr_telemetry_bridge", "verification-telemetry", {
+      runtimeControlResultObservation("herdr_telemetry_bridge", "verification-telemetry", "applied", {
         caseId: "runtime-verification-observation",
         startedAt: times.four,
         observedAt: times.four,
-        controlProof: runtimeControlProof("applied"),
       }),
-      runtimeSnapshot("direct_herdr", "verification-earlier", {
+      runtimeControlResultObservation("direct_herdr", "verification-earlier", "applied", {
         caseId: "runtime-verification-observation",
         startedAt: times.start,
         observedAt: times.two,
-        controlProof: runtimeControlProof("applied"),
       }),
-      runtimeSnapshot("direct_herdr", "verification-target", {
+      runtimeControlResultObservation("direct_herdr", "verification-event-predates-verification", "applied", {
+        caseId: "runtime-verification-observation",
+        startedAt: times.start,
+        observedAt: times.four,
+        observation: {
+          ...runtimeControlResultObservation(
+            "direct_herdr",
+            "verification-event-predates-verification",
+            "applied",
+          ).observation,
+          eventAt: times.two,
+        },
+      }),
+      runtimeControlResultObservation("direct_herdr", "verification-target", "applied", {
         caseId: "runtime-verification-observation",
         startedAt: times.four,
         observedAt: times.four,
@@ -1774,24 +1952,22 @@ describe("typed runtime-control state machine", () => {
           target: { ...paneTarget, paneId: "pane-other" },
         }),
         observation: {
-          ...runtimeSnapshot("direct_herdr", "verification-target").observation,
-          paneId: "pane-other",
+          ...runtimeControlResultObservation("direct_herdr", "verification-target", "applied").observation,
+          target: { ...paneTarget, paneId: "pane-other" },
         },
       }),
-      runtimeSnapshot("direct_herdr", "verification-provenance", {
+      runtimeControlResultObservation("direct_herdr", "verification-provenance", "applied", {
         caseId: "runtime-verification-observation",
         startedAt: times.four,
         observedAt: times.four,
         provenance: { sourceKind: "operator_observation", sourceRef: "wrong-source", digest: hashes.a },
-        controlProof: runtimeControlProof("applied"),
       }),
-      runtimeSnapshot("direct_herdr", "verification-unknown", {
+      runtimeControlResultObservation("direct_herdr", "verification-unknown", "applied", {
         caseId: "runtime-verification-observation",
         startedAt: times.four,
         observedAt: times.four,
         observedResult: "unknown",
         classification: "unknown",
-        controlProof: runtimeControlProof("applied"),
       }),
     ];
     for (const proof of invalidProofs) {
@@ -1814,11 +1990,10 @@ describe("typed runtime-control state machine", () => {
       executionEvent(1, "succeeded"),
       verifiedApplied,
     ]);
-    const passing = runtimeSnapshot("direct_herdr", "verification-binding", {
+    const passing = runtimeControlResultObservation("direct_herdr", "verification-binding", "applied", {
       caseId: "runtime-verification-observation",
       startedAt: times.four,
       observedAt: times.four,
-      controlProof: runtimeControlProof("applied"),
     });
     expect(validateEvidenceManifest(validManifestV2([...base, passing])).issues).toEqual([]);
 
@@ -1857,6 +2032,17 @@ describe("typed runtime-control state machine", () => {
       "runtime_verification_evidence_invalid",
       "fail",
     );
+    const workingSnapshot = runtimeSnapshot("direct_herdr", "verification-working", {
+      caseId: "runtime-verification-observation",
+      startedAt: times.four,
+      observedAt: times.four,
+      controlProof: runtimeControlProof("applied"),
+    });
+    expectIssue(
+      validManifestV2([...base, workingSnapshot]),
+      "runtime_verification_evidence_invalid",
+      "fail",
+    );
 
     const verifiedNotApplied = timeline([
       requestEvent(),
@@ -1885,6 +2071,31 @@ describe("typed runtime-control state machine", () => {
       "runtime_verification_evidence_invalid",
       "fail",
     );
+    const genericNotApplied = runtimeSnapshot("direct_herdr", "verification-generic-not-applied", {
+      caseId: "runtime-verification-observation",
+      startedAt: times.four,
+      observedAt: times.four,
+      controlProof: runtimeControlProof("not_applied"),
+    });
+    expectIssue(
+      validManifestV2([...verifiedNotApplied, genericNotApplied]),
+      "runtime_verification_evidence_invalid",
+      "fail",
+    );
+
+    const exactNotApplied = runtimeControlResultObservation(
+      "direct_herdr",
+      "verification-exact-not-applied",
+      "not_applied",
+      {
+        caseId: "runtime-verification-observation",
+        startedAt: times.four,
+        observedAt: times.four,
+      },
+    );
+    expect(validateEvidenceManifest(validManifestV2([
+      ...verifiedNotApplied, exactNotApplied,
+    ])).issues).toEqual([]);
   });
 
   it("rejects request, authorized, succeeded, retry as a duplicate", () => {
@@ -2023,6 +2234,37 @@ describe("typed runtime-control state machine", () => {
         path: "/evidence/7/event/reviewedProviderIdempotencyArtifactHash",
       });
       expectIssue(validManifestV2(records), "runtime_reconciliation_required", "fail");
+    }
+  });
+
+  it("requires exactly one canonical provider-idempotency review tuple", () => {
+    const canonicalReview = {
+      kind: "provider_idempotency_review",
+      digest: hashes.f,
+      reviewedRequestArtifactHash: hashes.e,
+      reviewedIdempotencyKey: hashes.a,
+    };
+    for (const reviews of [
+      [canonicalReview, { ...canonicalReview }],
+      [canonicalReview, { ...canonicalReview, reviewedIdempotencyKey: hashes.b }],
+      [canonicalReview, { ...canonicalReview, reviewedRequestArtifactHash: hashes.d }],
+    ]) {
+      const records = timeline([
+        requestEvent({ reviewedProviderIdempotencyArtifactHash: hashes.f }),
+        authorizationEvent(1),
+        executionEvent(1, "timed_out", { providerIdempotencyState: "supported" }),
+        authorizationEvent(2),
+        executionEvent(2, "succeeded", { providerIdempotencyState: "supported" }),
+      ]);
+      records[0].artifacts = [
+        { kind: "request", digest: hashes.e },
+        ...reviews,
+      ];
+      expect(validateEvidenceManifest(validManifestV2(records)).issues).toContainEqual({
+        code: "runtime_provider_idempotency_evidence_ambiguous",
+        classification: "fail",
+        path: "/evidence/7/event/reviewedProviderIdempotencyArtifactHash",
+      });
     }
   });
 

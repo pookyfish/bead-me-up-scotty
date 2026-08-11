@@ -551,7 +551,7 @@ const modelMetadataSchema = z.discriminatedUnion("reportingState", [
   z.strictObject({ reportingState: z.literal("unknown") }),
 ]);
 
-export const runtimeObservationPayloadSchema = z.discriminatedUnion("observationKind", [
+const runtimeObservationPayloadSchemas = [
   z.strictObject({
     observationKind: z.literal("agent_snapshot"),
     workspaceId: safeRefSchema,
@@ -598,7 +598,7 @@ export const runtimeObservationPayloadSchema = z.discriminatedUnion("observation
       });
     }
   }),
-]);
+] as const;
 
 export const runtimeActionSchema = z.enum([
   "list_agents", "get_agent", "read_pane", "wait_for_agent", "wait_for_output",
@@ -648,6 +648,16 @@ export const runtimeControlProofSchema = z.strictObject({
   disposition: z.enum(["applied", "not_applied"]),
   resultArtifactHash: sha256Schema,
 });
+
+const runtimeControlResultPayloadSchema = runtimeControlProofSchema.extend({
+  observationKind: z.literal("control_result"),
+  eventAt: utcTimestampSchema,
+});
+
+export const runtimeObservationPayloadSchema = z.discriminatedUnion("observationKind", [
+  ...runtimeObservationPayloadSchemas,
+  runtimeControlResultPayloadSchema,
+]);
 
 export const runtimeObservationSchema = withEvidenceBase("runtime_observation", {
   runtimeProvider: z.literal("herdr"),

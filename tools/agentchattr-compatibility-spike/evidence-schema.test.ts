@@ -759,6 +759,28 @@ function validTraceSummary() {
   };
 }
 
+function validControlResultObservation(disposition: "applied" | "not_applied" = "applied") {
+  const target = { targetKind: "pane", workspaceId: "workspace-1", tabId: "tab-1", paneId: "pane-1" };
+  const controlProof = {
+    actionId,
+    attemptId,
+    action: "send_text",
+    target,
+    disposition,
+    resultArtifactHash: digest,
+  };
+  return {
+    ...validAgentSnapshot(),
+    caseId: "runtime-control-result",
+    observation: {
+      observationKind: "control_result",
+      ...controlProof,
+      eventAt: "2026-08-10T08:00:03.000Z",
+    },
+    controlProof,
+  };
+}
+
 const eventId = "11111111-1111-4111-8111-111111111111";
 const actionId = "22222222-2222-4222-8222-222222222222";
 const correlationId = "33333333-3333-4333-8333-333333333333";
@@ -1254,6 +1276,17 @@ describe("operational boundaries and Herdr observations", () => {
       ...snapshot,
       controlProof: { ...controlProof, unexpected: true },
     }).success).toBe(false);
+
+    const result = validControlResultObservation();
+    expect(runtimeObservationSchema.safeParse(result).success).toBe(true);
+    expect(runtimeObservationSchema.safeParse({
+      ...result,
+      observation: { ...result.observation, disposition: "succeeded" },
+    }).success).toBe(false);
+    expect(runtimeObservationSchema.safeParse({
+      ...result,
+      observation: { ...result.observation, unexpected: true },
+    }).success).toBe(false);
   });
 
   it("keeps every Herdr target shape, native contract, and token quality closed", () => {
@@ -1627,6 +1660,7 @@ describe("strict version-2 evidence manifest", () => {
         .map((kind) => validMonitorInterval(kind)),
       validAgentSnapshot(),
       controlProofSnapshot,
+      validControlResultObservation(),
       snapshotUnknownMetadata,
       ...lifecycleVariants,
       validTraceSummary(),
